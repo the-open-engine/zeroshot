@@ -49,7 +49,7 @@ impl LocalFixture {
         .await
     }
     async fn own_inbox(&self, run: &str) -> Value {
-        self.json(&["inbox", "show", run], "finish").await
+        self.json(&["inbox", "show", run, "--part", run], "finish").await
     }
 }
 fn approve() -> Value {
@@ -58,7 +58,7 @@ fn approve() -> Value {
 fn successor(output: &Output) -> String {
     assert_success(output, "answer accepted");
     let value: Value = serde_json::from_slice(&output.stdout).assert_value();
-    value["runId"].as_str().assert_value().to_owned()
+    value["currentPartId"].as_str().assert_value().to_owned()
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -122,8 +122,19 @@ async fn request_answer_preserves_live_workspace_and_does_not_replay_worker() {
     assert_eq!(fixture.invocation_count(), 1);
     let old = fixture.own_inbox(run).await;
     assert_eq!(old["state"], "answered");
+    assert_eq!(old["successorPartId"], next);
     assert_eq!(old["successorRunId"], next);
     let next_status = fixture.json(&["status", &next], "finish").await;
+    assert_eq!(next_status["runId"], run);
+    assert_eq!(next_status["currentPartId"], next);
+    assert_eq!(fixture.json(&["list"], "finish").await["runs"].as_array().assert_value().len(), 1);
+    assert_eq!(fixture.json(&["status", run], "finish").await, next_status);
+    let replay = fixture.output(&["watch", run], "finish").await;
+    assert_success(&replay, "foreground watch replays through the previous pause");
+    let events = json_lines(&replay.stdout);
+    assert!(events.iter().all(|event| event["runId"] == run));
+    assert_eq!(events.last().assert_value()["partId"], next);
+    assert_eq!(events.last().assert_value()["status"]["phase"], "finished");
     assert_eq!(next_status["workspaceRecovery"]["resumedFrom"], run);
     let vectors = fixture.json(&["vectors", &next], "finish").await;
     assert_eq!(vectors["vectors"][0]["kind"], "request");
@@ -136,12 +147,12 @@ async fn request_answer_preserves_live_workspace_and_does_not_replay_worker() {
     );
     assert!(
         !fixture
-            .output(&["inbox", "show", &next], "finish")
+            .output(&["inbox", "show", &next, "--part", &next], "finish")
             .await
             .status
             .success()
     );
-    let refused = fixture.answer(run, &approve()).await;
+    let refused = fixture.output(&["answer", run, "--part", run, "--input", fixture.answer_file(&approve()).to_str().assert_value()], "finish").await;
     assert!(!refused.status.success());
     assert!(String::from_utf8_lossy(&refused.stderr).contains(&next));
 }
@@ -176,8 +187,8 @@ async fn interrupted_answer_launch_reconciles_before_accepting_a_retry() {
             "later work"
         );
         assert!(!fixture.run_storage(interrupted).exists());
-        assert_eq!(fixture.own_inbox(&run).await["successorRunId"], next);
-        let refused = fixture.answer(&run, &approve()).await;
+        assert_eq!(fixture.own_inbox(&run).await["successorPartId"], next);
+        let refused = fixture.output(&["answer", &run, "--part", &run, "--input", fixture.answer_file(&approve()).to_str().assert_value()], "finish").await;
         assert!(!refused.status.success());
         assert!(String::from_utf8_lossy(&refused.stderr).contains(&next));
         assert_eq!(
@@ -185,7 +196,7 @@ async fn interrupted_answer_launch_reconciles_before_accepting_a_retry() {
                 .as_array()
                 .assert_value()
                 .len(),
-            2
+            1
         );
     }
 }
@@ -237,7 +248,12 @@ async fn invalid_answers_do_not_consume_and_rejection_creates_a_fresh_request() 
     assert_eq!(fixture.invocation_count(), 2);
     let page = fixture.json(&["inbox", "list"], "finish").await;
     assert_eq!(page["requests"].as_array().assert_value().len(), 1);
-    assert_eq!(page["requests"][0]["runId"], next);
+    assert_eq!(page["requests"][0]["runId"], run);
+    assert_eq!(page["requests"][0]["partId"], next);
+    let stale = fixture.output(&["answer", &run, "--part", &run, "--input", fixture.answer_file(&approve()).to_str().assert_value()], "finish").await;
+    assert!(!stale.status.success());
+    assert!(String::from_utf8_lossy(&stale.stderr).contains(&next));
+    assert_eq!(fixture.json(&["inbox", "show", &run], "finish").await["state"], "pending");
     fixture.json(&["force-stop", &next], "finish").await;
     assert_eq!(fixture.own_inbox(&next).await["state"], "stopped");
 }
@@ -259,7 +275,7 @@ async fn expiry_is_lazy_and_answers_create_exactly_one_timeout_successor() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("expired"));
     let old = fixture.own_inbox(&run).await;
-    let next = old["successorRunId"].as_str().assert_value();
+    let next = old["successorPartId"].as_str().assert_value();
     fixture.wait_succeeded(next, "finish").await;
     assert_eq!(fixture.invocation_count(), 1);
     let logs = fixture.output(&["logs", next], "finish").await;
@@ -279,7 +295,7 @@ async fn expiry_is_lazy_and_answers_create_exactly_one_timeout_successor() {
             .iter()
             .any(|entry| entry["kind"] == "expiry")
     );
-    let out = fixture.answer(&run, &approve()).await;
+    let out = fixture.output(&["answer", &run, "--part", &run, "--input", fixture.answer_file(&approve()).to_str().assert_value()], "finish").await;
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains(next));
     assert_eq!(
@@ -287,7 +303,7 @@ async fn expiry_is_lazy_and_answers_create_exactly_one_timeout_successor() {
             .as_array()
             .assert_value()
             .len(),
-        2
+        1
     );
 }
 fn with_slow_checkpoint(mut fixture: LocalFixture) -> (LocalFixture, PathBuf) {
@@ -495,7 +511,7 @@ async fn request_answers_continue_the_checkpoint_conversation_without_replaying_
             "finish",
         )
         .await;
-    let successor = rejected["runId"].as_str().assert_value();
+    let successor = rejected["currentPartId"].as_str().assert_value();
     fixture.wait_suspended(successor).await;
     wait_for_exit(fixture.ready_pid(successor)).await;
     assert_eq!(
@@ -503,9 +519,9 @@ async fn request_answers_continue_the_checkpoint_conversation_without_replaying_
         ["fresh local-thread", "resume local-thread"],
         "a rejected answer must continue the captured worker conversation"
     );
-    let request = fixture.json(&["inbox", "show", &run], "finish").await;
+    let request = fixture.own_inbox(&run).await;
     assert_eq!(request["state"], "answered");
-    assert_eq!(request["successorRunId"], successor);
+    assert_eq!(request["successorPartId"], successor);
     conversations::new_provider_home(&mut fixture);
 
     write_json(&answer, &json!({"signals":{"done":"yes"},"output":{}}));
@@ -520,7 +536,7 @@ async fn request_answers_continue_the_checkpoint_conversation_without_replaying_
             "finish",
         )
         .await;
-    let final_run = approved["runId"].as_str().assert_value();
+    let final_run = approved["currentPartId"].as_str().assert_value();
     fixture.wait_succeeded(final_run, "finish").await;
     wait_for_exit(fixture.ready_pid(final_run)).await;
     assert_eq!(
@@ -612,7 +628,7 @@ async fn resume_lost(fixture: &LocalFixture, run: &str, mode: &str) -> String {
         let output = fixture.output(&["resume", run], mode).await;
         if output.status.success() {
             let receipt: Value = serde_json::from_slice(&output.stdout).assert_value();
-            return receipt["runId"].as_str().assert_value().to_owned();
+            return receipt["currentPartId"].as_str().assert_value().to_owned();
         }
         assert!(
             Instant::now() < deadline,
@@ -678,7 +694,7 @@ async fn lost_and_failed_answer_successors_restart_after_the_answer() {
 
     // The restart of that failed restart begins after the answer as well.
     let restarted = fixture.json(&["resume", &failed], "finish").await;
-    let restarted = restarted["runId"].as_str().assert_value();
+    let restarted = restarted["currentPartId"].as_str().assert_value();
     let status = fixture.wait_suspended(restarted).await;
     assert_eq!(status["status"]["node"], "rating");
     assert_eq!(
@@ -692,7 +708,8 @@ async fn lost_and_failed_answer_successors_restart_after_the_answer() {
     assert_eq!(kinds(&vectors, "continuation"), 3, "{vectors}");
     let page = fixture.json(&["inbox", "list"], "finish").await;
     assert_eq!(page["requests"].as_array().assert_value().len(), 1);
-    assert_eq!(page["requests"][0]["runId"], restarted);
+    assert_eq!(page["requests"][0]["runId"], run);
+    assert_eq!(page["requests"][0]["partId"], restarted);
 
     // Each request accepts only its own shape.
     let refused = fixture.answer(restarted, &approve()).await;
@@ -700,6 +717,11 @@ async fn lost_and_failed_answer_successors_restart_after_the_answer() {
     assert!(String::from_utf8_lossy(&refused.stderr).contains("invalid_request"));
     let last = successor(&fixture.answer(restarted, &rating).await);
     fixture.wait_succeeded(&last, "finish").await;
+    let replay = fixture.output(&["logs", &run], "finish").await;
+    assert_success(&replay, "replay across a lost controller and later restart");
+    let events = json_lines(&replay.stdout);
+    assert!(events.iter().any(|row| row["partId"] == lost));
+    assert!(events.iter().any(|row| row["partId"] == last));
     assert_eq!(worker_calls("finish"), 1);
 }
 
@@ -719,7 +741,7 @@ async fn a_lost_answer_successor_restarts_with_the_conversation_it_started_with(
             "suspend",
         )
         .await;
-    let lost = answered["runId"].as_str().assert_value();
+    let lost = answered["currentPartId"].as_str().assert_value();
     let deadline = Instant::now() + SUSPENSION_TIMEOUT;
     while !fixture.repository.join("held-2").exists() {
         assert!(

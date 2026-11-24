@@ -38,12 +38,7 @@ where
         [run] if matches!(run.status, CliRunStatus::Queued(_))
     ));
     let status = backend
-        .run_status(
-            Some("prod"),
-            RunStatusParams {
-                run_id: run_id.clone(),
-            },
-        )
+        .run_status(Some("prod"), RunStatusParams::new(run_id.clone()))
         .await
         .assert_value();
     assert!(matches!(status.status, CliRunStatus::Queued(_)));
@@ -56,9 +51,11 @@ where
     let mut output = Vec::new();
     let outcome = execute_native_v2_cli(
         NativeV2CliCommand::Watch(RunWatchCommand {
+            follow: false,
             run: RunSelector {
                 controller: Default::default(),
                 target: Some("prod".to_owned()),
+                part_id: None,
                 run_id: run_id.clone(),
             },
             after: None,
@@ -84,6 +81,7 @@ where
         .run_logs(
             Some("prod"),
             RunLogsParams {
+                part_id: None,
                 run_id: run_id.clone(),
                 from_cursor: Some(Cursor::new("v2:2")),
                 execution: Some(execution.clone()),
@@ -105,12 +103,7 @@ where
     B: NativeV2CliBackend,
 {
     let forced = backend
-        .run_force(
-            Some("prod"),
-            RunForceParams {
-                run_id: run_id.clone(),
-            },
-        )
+        .run_force(Some("prod"), RunForceParams::new(run_id.clone()))
         .await
         .assert_value();
     assert!(matches!(forced.status, CliRunStatus::Queued(_)));

@@ -11,6 +11,7 @@ fn params(from: Option<RunResumeFrom>) -> openengine_cluster_protocol::RunResume
         commit_identity: None,
         commit_co_author: None,
 
+        part_id: RunId::new("0199f33f-3b44-7d21-9000-000000000001"),
         run_id: RunId::new("0199f33f-3b44-7d21-9000-000000000001"),
         successor_run_id: RunId::new("0199f33f-3b44-7d21-9000-000000000002"),
         from,
@@ -124,6 +125,7 @@ async fn resume_runtime_requirements_include_shared_delivery_credentials() {
                     &RunSelector {
                         controller: Default::default(),
                         target: None,
+                        part_id: None,
                         run_id: request.run_id.clone(),
                     },
                     &replacement,
@@ -237,6 +239,7 @@ async fn resume_runtime_bounds_effective_delivery_defaults_and_preserves_native_
                 backend
                     .replacement_resume_requirements(
                         &RunSelector {
+                            part_id: None,
                             controller: Default::default(),
                             target: None,
                             run_id

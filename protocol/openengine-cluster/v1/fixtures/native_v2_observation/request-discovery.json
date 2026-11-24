@@ -8,6 +8,9 @@
     "request_wait": {
       "kind": "openengine.request-wait/v1"
     },
+    "run_parts": {
+      "kind": "openengine.run-parts/v1"
+    },
     "run_suspension": {
       "kind": "openengine.run-suspension/v1"
     },

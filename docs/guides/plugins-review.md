@@ -52,7 +52,7 @@ Capture these nonsecret values from the fixture:
 | `EVIDENCE`                                           | Current source files, repository guidance, and the existing test command from that revision. Use a small HTTP app where adding `GET /health` returning HTTP 200 and `{"status":"ok"}` is a meaningful change. |
 | `RUN_PROFILE`                                        | An organization profile accepting `task`, using configured provider connections and PR delivery to the disposable repository. Record its name and existing input/runtime/delivery.                            |
 | `GRAPH_PROFILE`, `RUNTIME`                           | An unused organization profile name and caller-selected runtime identifiers compatible with the server's catalog.                                                                                             |
-| `FAILED_RUN`, `CHECKPOINT`, `SUCCESSOR_ID`           | A failed run with readable failure history and a resumable checkpoint, whose transient failure has been resolved; a fresh UUIDv7 for the explicitly requested successor.                                      |
+| `FAILED_RUN`, `CHECKPOINT`, `SUCCESSOR_PART_ID`      | A failed run with readable failure history and a resumable checkpoint, whose transient failure has been resolved; a fresh UUIDv7 for the explicitly requested part.                                           |
 | `SETUP_PROFILE`                                      | A profile referencing a named provider connection that is absent, so missing setup can be tested without removing the working fixture's credentials.                                                          |
 | `MEMBER_ACCOUNT`, `MEMORY_LESSON`, `LESSON_REVISION` | A nonadmin organization member and an existing lesson that the member can read but cannot edit; record the current recommendation and revision.                                                               |
 
@@ -109,13 +109,15 @@ logical run. No different-key retry, unsolicited merge, or early success claim m
 
 **Prompt:** “Use zeroshot to inspect FAILED_RUN and explain its recorded failure without changing
 anything.” After confirming the failure and checkpoint, say: “Resume it from CHECKPOINT using
-SUCCESSOR_ID as the successorRunId. Follow the recovered run and report its observed result.”
+SUCCESSOR_PART_ID for the next part. Follow the recovered run and report its observed result.”
 
-Expect `get_run`, `read_run_logs`, and `list_run_checkpoints`, followed only after the recovery
-request by `resume_run` with the supplied successor and checkpoint selector. Verify that the new
-run belongs to the recorded recovery lineage. Retries must preserve the same successor/selector;
-no stop/discard or extra successor may occur, and the original failure must not be reported as a
-successful run.
+Expect `get_run`, `read_run_logs`, and `list_run_checkpoints`, followed after the recovery
+request by `resume_run`. On a server exposing `partId` and `successorPartId`, verify the call
+pins the inspected part, requests the supplied new part and keeps the stable run ID. Inspect
+the failed part and its recovered successor separately. After a lost response, check whether the
+requested part was admitted. Any retry uses the same IDs and checkpoint. A stale request must
+report the conflict and leave a single accepted successor. On a server exposing `successorRunId`,
+verify the client uses the advertised schema and observes the returned successor run.
 
 ## Negative cases
 

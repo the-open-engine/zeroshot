@@ -22,6 +22,7 @@ fn backend(root: &TestDirectory) -> LocalCliBackend {
 fn params() -> RunSteerParams {
     RunSteerParams {
         node: None,
+        part_id: None,
         run_id: RunId::new("0199f33f-3b44-7d21-9000-000000000071"),
         text: "  Keep\t方向\r\nexactly.  ".into(),
         mode: openengine_cluster_protocol::SteeringMode::Standing,
@@ -75,12 +76,7 @@ async fn steer_local_list_omits_direction_while_status_keeps_bounded_summaries()
                 .assert_value();
         }
         let status = backend
-            .run_status(
-                None,
-                RunStatusParams {
-                    run_id: params.run_id.clone(),
-                },
-            )
+            .run_status(None, RunStatusParams::new(params.run_id.clone()))
             .await
             .assert_value();
         assert_eq!(status.steering.steers.len(), 64);
@@ -133,6 +129,7 @@ async fn steer_suspended_local_command_records_full_text_without_resuming_and_re
             run: RunSelector {
                 controller: Default::default(),
                 target: None,
+                part_id: None,
                 run_id: params.run_id.clone(),
             },
             text: SteerText::File(path),
@@ -151,12 +148,7 @@ async fn steer_suspended_local_command_records_full_text_without_resuming_and_re
     assert_eq!(recorded.steer.text_bytes, params.text.len());
     assert_eq!(recorded.steer.received_executions, 0);
     let status = backend
-        .run_status(
-            None,
-            RunStatusParams {
-                run_id: params.run_id.clone(),
-            },
-        )
+        .run_status(None, RunStatusParams::new(params.run_id.clone()))
         .await
         .assert_value();
     assert!(matches!(

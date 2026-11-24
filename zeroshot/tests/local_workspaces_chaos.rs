@@ -518,7 +518,10 @@ fn folder_resume_uses_stored_workspace_from_a_different_launcher() {
         .output()
         .unwrap();
     success(&resumed);
-    let resumed_id = receipt(&resumed)["runId"].as_str().unwrap().to_owned();
+    let resumed_id = receipt(&resumed)["currentPartId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     let guard = StopRun {
         fixture: &fixture,
         run_id: resumed_id.clone(),
@@ -751,7 +754,10 @@ fn selected_plain_folder_checkpoint_restores_bytes_and_a_fresh_worker_session() 
         .output()
         .unwrap();
     success(&resumed);
-    let run_id = receipt(&resumed)["runId"].as_str().unwrap().to_owned();
+    let run_id = receipt(&resumed)["currentPartId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     let active = StopRun {
         fixture: &fixture,
         run_id: run_id.clone(),

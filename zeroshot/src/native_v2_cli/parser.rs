@@ -865,6 +865,9 @@ struct TargetRouteArgs {
 
 #[derive(Debug, Args)]
 struct RunSelectorArgs {
+    /// Select the exact run part for inspection, or the expected current part for a control.
+    #[arg(long, value_name = "PART_ID")]
+    part: Option<String>,
     /// Public run ID.
     #[arg(value_name = "RUN_ID")]
     run_id: String,
@@ -974,6 +977,9 @@ struct RunSteerArgs {
     subcommand_precedence_over_arg = true
 )]
 struct RunVectorsArgs {
+    /// Select the exact run part for inspection, or the expected current part for a control.
+    #[arg(long, value_name = "PART_ID")]
+    part: Option<String>,
     /// Public run ID.
     #[arg(value_name = "RUN_ID")]
     run_id: Option<String>,
@@ -1022,6 +1028,10 @@ struct RunCheckpointsArgs {
      An unavailable local controller replays recorded events, then names `zeroshot resume RUN_ID`
      and `zeroshot force-stop RUN_ID`. Inspection leaves durable state unchanged."#)]
 struct RunWatchArgs {
+    /// Keep watching the same run across suspensions and answers.
+    #[arg(long)]
+    follow: bool,
+
     #[command(flatten)]
     run: RunSelectorArgs,
 
@@ -1052,6 +1062,9 @@ struct RunLogsArgs {
 
 #[derive(Debug, Args)]
 struct AttachArgs {
+    /// Select the exact run part for inspection, or the expected current part for a control.
+    #[arg(long, value_name = "PART_ID")]
+    part: Option<String>,
     /// Public run ID.
     #[arg(value_name = "RUN_ID")]
     run_id: String,

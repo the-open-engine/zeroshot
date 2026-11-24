@@ -10,7 +10,19 @@ use zeroshot_engine::full_v1_reducer::StructuralOccurrence;
 use zeroshot_engine::native_v2_contract::{ExecutionId, ExecutionRef, NodeInstanceId};
 use zeroshot_engine::v2_run_ledger::{CreateRun, RunEvent, RunLedger, fake::FakeRunLedger};
 
-fn rejects_timing<T: DeserializeOwned>(value: Value, field: &str) {
+fn rejects_timing<T: DeserializeOwned>(mut value: Value, field: &str) {
+    // The released reader also predates logical IDs. Isolate timing in this control.
+    fn remove_parts(row: &mut Value) {
+        if let Some(fields) = row.as_object_mut() {
+            fields.remove("partId");
+            fields.remove("currentPartId");
+        }
+    }
+    if let Some(rows) = value.get_mut("runs").and_then(Value::as_array_mut) {
+        rows.iter_mut().for_each(remove_parts);
+    } else {
+        remove_parts(&mut value);
+    }
     let error = serde_json::from_value::<T>(value.clone())
         .err()
         .expect("old reader rejects timing");
@@ -92,9 +104,7 @@ async fn exact_released_readers_reject_actual_producer_timing_without_the_contra
     let service =
         zeroshot_engine::native_v2_observability::NativeV2Observability::new(ledger.clone());
     let active = service
-        .status(RunStatusParams {
-            run_id: run_id.clone(),
-        })
+        .status(RunStatusParams::new(run_id.clone()))
         .await
         .expect("active status");
     rejects_timing::<released_protocol::RunStatusResult>(
@@ -107,6 +117,7 @@ async fn exact_released_readers_reject_actual_producer_timing_without_the_contra
     );
     let (_, mut watch) = service
         .watch(RunWatchParams {
+            part_id: None,
             run_id: run_id.clone(),
             from_cursor: None,
         })
@@ -147,7 +158,7 @@ async fn exact_released_readers_reject_actual_producer_timing_without_the_contra
         .await
         .expect("finish");
     let finished = service
-        .status(RunStatusParams { run_id })
+        .status(RunStatusParams::new(run_id))
         .await
         .expect("finished status");
     rejects_timing::<released_protocol::RunListResult>(

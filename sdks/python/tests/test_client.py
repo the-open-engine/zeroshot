@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import aclosing
 from pathlib import Path
 
 import pytest
@@ -1035,13 +1036,22 @@ def test_suspension_continuation_and_vector_target_arguments(
         async with Client(target=target, forward_github_token=forward) as client:
             run = client.get_run("original")
             assert (await run.suspend()).suspend_requested
-            assert (await run.resume()).id == "successor"
+            resumed = await run.resume()
+            assert resumed.id == run.id
+            assert resumed.current_part_id == "successor"
             page = await run.vectors(after="cursor", limit=2)
             assert page.next_after == "vector-1"
             assert (await run.vector(page.vectors[0].id)).run_id == "original"
         args = [entry["args"] for entry in read_invocations(fake_native)]
         assert ["suspend", "original", *route] in args
-        assert ["resume", "original", *route, *(["--forward-gh-token"] if forward else [])] in args
+        assert [
+            "resume",
+            "original",
+            "--part",
+            "original",
+            *route,
+            *(["--forward-gh-token"] if forward else []),
+        ] in args
         assert [
             "vectors",
             "original",
@@ -1088,7 +1098,8 @@ def test_request_inbox_and_answer_keep_client_target_arguments(fake_native: Path
             pending = await run.request()
             assert pending.request.text == "Approve?"
             successor = await run.answer({"signals": {"decision": "approved"}, "output": {}})
-            assert successor.id == "successor"
+            assert successor.id == run.id
+            assert successor.current_part_id == "successor"
 
     asyncio.run(exercise())
     calls = read_invocations(fake_native)
@@ -1153,7 +1164,7 @@ def test_watch_and_wait_preserve_large_request_suspensions(
 
     asyncio.run(exercise())
     calls = read_invocations(fake_native)
-    assert [call["args"][0] for call in calls] == ["status", "watch", "status", "watch"]
+    assert [call["args"][0] for call in calls] == ["status", "watch", "status", "watch", "status"]
     assert all("prod" in call["args"] for call in calls)
 
 
@@ -1282,7 +1293,8 @@ def test_resume_replaces_runtime_files(fake_native: Path, target_kind: str, unif
             else RuntimePlan({"harness": "codex", "provider": "openai", "nodes": {}})
         )
         async with Client(target=target) as client:
-            assert (await client.get_run("original").resume(runtime=selected)).id == "successor"
+            resumed = await client.get_run("original").resume(runtime=selected)
+            assert resumed.id == "original" and resumed.current_part_id == "successor"
         record = next(
             entry for entry in read_invocations(fake_native) if entry["args"][0] == "resume"
         )
@@ -1326,3 +1338,111 @@ def test_local_controller_policy_reaches_every_launch_path(
         for call in calls
         if call["args"][0] in ("status", "force-stop")
     )
+
+
+def test_logical_history_crosses_suspension_and_wait_ignores_a_superseded_question(
+    fake_native: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_HEAD_PART", "part-2")
+    monkeypatch.setenv("FAKE_HISTORY_PART", "part-1")
+
+    async def exercise() -> None:
+        async with Client() as client:
+            run = client.get_run("logical")
+            status = await run.status()
+            assert status.run_id == run.id
+            assert status.part_id == status.current_part_id == "part-2"
+            events = [event async for event in run.watch(follow=True)]
+            assert all(event.run_id == run.id and event.current_part_id is None for event in events)
+            assert [(e.phase, e.part_id) for e in events] == [
+                ("suspended", "part-1"),
+                ("running", "part-2"),
+                ("finished", "part-2"),
+            ]
+            result = await run.wait()
+            assert result.succeeded and result.part_id == "part-2"
+            old = client.get_run(run.id, part_id="part-1")
+            old_status = await old.status()
+            assert old_status.part_id == "part-1" and old_status.current_part_id == "part-2"
+            assert {event.part_id async for event in old.watch()} == {"part-1"}
+            assert {log.part_id async for log in old.logs()} == {"part-1"}
+            page = await old.vectors()
+            assert page.part_id == old.part_id
+            assert (await old.vector(page.vectors[0].id)).part_id == "original"
+            assert (await old.request()).part_id == old.part_id
+
+    asyncio.run(exercise())
+    watches = [row["args"] for row in read_invocations(fake_native) if row["args"][0] == "watch"]
+    assert ["--follow" in args for args in watches] == [True, False, False]
+    pinned = [row["args"] for row in read_invocations(fake_native) if "--part" in row["args"]]
+    assert {args[0] for args in pinned} == {"status", "watch", "logs", "vectors", "inbox"}
+    assert all(args[args.index("--part") + 1] == "part-1" for args in pinned)
+
+
+def test_sending_a_stale_answer_or_resume_never_advances_a_later_part(
+    fake_native: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_HEAD_PART", "question-a")
+
+    async def exercise() -> None:
+        async with Client() as client:
+            run = client.get_run("logical")
+            old = await run.request()
+            monkeypatch.setenv("FAKE_HEAD_PART", "question-b")
+            with pytest.raises(InvalidRequestError, match="no longer current"):
+                await run.answer({"signals": {}, "output": {}})
+            new = await run.request()
+            assert new.part_id != old.part_id
+            with pytest.raises(InvalidRequestError, match="no longer current"):
+                await run.answer({"signals": {}, "output": {}}, part_id=old.part_id)
+            with pytest.raises(InvalidRequestError, match="no longer current"):
+                await run.resume(part_id=old.part_id)
+            resumed = await run.answer({"signals": {}, "output": {}}, part_id=new.part_id)
+            assert resumed.id == run.id and resumed.current_part_id == "successor"
+
+    asyncio.run(exercise())
+
+
+def test_answers_guard_the_last_suspension_yielded_by_watch(
+    fake_native: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_HISTORY_PART", "question-a")
+    monkeypatch.setenv("FAKE_HEAD_PART", "question-b")
+    monkeypatch.setenv("FAKE_REQUEST_STREAM_BYTES", "32")
+
+    async def exercise() -> None:
+        async with Client() as client:
+            run = client.get_run("logical")
+            stream = run.watch(follow=True)
+            async with aclosing(stream):
+                assert (await anext(stream)).part_id == "question-a"
+                with pytest.raises(InvalidRequestError, match="no longer current"):
+                    await run.answer({"signals": {}, "output": {}})
+                assert (await anext(stream)).phase == "running"
+                assert run.current_part_id == "question-a"
+                assert (await anext(stream)).part_id == "question-b"
+                answered = await run.answer({"signals": {}, "output": {}})
+                assert answered.current_part_id == "successor"
+
+    asyncio.run(exercise())
+
+
+def test_saved_part_alias_resolves_the_root_for_status_watch_steer_and_discard(
+    fake_native: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_ALIAS", "old-part")
+    monkeypatch.setenv("FAKE_HEAD_PART", "tip")
+    monkeypatch.setenv("FAKE_WATCH_FAILURE", "terminal")
+
+    async def exercise() -> None:
+        async with Client() as client:
+            handle = client.get_run("old-part")
+            assert (await handle.status()).run_id == handle.id == "logical-root"
+            assert handle.current_part_id == "tip"
+            events = [event async for event in client.get_run("old-part").watch()]
+            assert events[-1].result and events[-1].result.failure == "worker_failed"
+            assert events[-1].run_id == "logical-root"
+            assert (await client.get_run("old-part").steer("direction")).id == "steer-1"
+            assert await client.get_run("old-part").discard_workspace()
+
+    asyncio.run(exercise())

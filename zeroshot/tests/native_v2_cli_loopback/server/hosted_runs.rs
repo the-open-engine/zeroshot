@@ -96,9 +96,7 @@ async fn serve_list(
     let mut runs = Vec::new();
     for summary in controller.list().await.assert_value() {
         let status = controller
-            .status(RunStatusParams {
-                run_id: summary.run_id,
-            })
+            .status(RunStatusParams::new(summary.run_id))
             .await
             .assert_value();
         runs.push(if queued {
@@ -119,9 +117,7 @@ async fn serve_run_operation(
     match (route.request.method.as_str(), route.operation) {
         ("GET", None) => {
             let status = controller
-                .status(RunStatusParams {
-                    run_id: route.run_id,
-                })
+                .status(RunStatusParams::new(route.run_id))
                 .await
                 .assert_value();
             let status = if state.observe_queue() {
@@ -135,9 +131,7 @@ async fn serve_run_operation(
         ("POST", Some("force")) => {
             assert_eq!(route.request.body, "{}");
             let forced = controller
-                .force(RunForceParams {
-                    run_id: route.run_id,
-                })
+                .force(RunForceParams::new(route.run_id))
                 .await
                 .assert_value();
             write_json_response(stream, &serde_json::to_value(forced).assert_value()).await
@@ -177,9 +171,7 @@ async fn serve_hosted_watch(
     write_ndjson_head(stream).await?;
     if route.state.activate() {
         let current = controller
-            .status(RunStatusParams {
-                run_id: route.run_id.clone(),
-            })
+            .status(RunStatusParams::new(route.run_id.clone()))
             .await
             .assert_value();
         write_ndjson_frame(
@@ -203,6 +195,7 @@ async fn serve_hosted_watch(
     let controller_cursor = from_cursor.filter(|cursor| cursor.as_str() != "cloud:queued");
     let (_, mut subscription) = controller
         .watch(RunWatchParams {
+            part_id: None,
             run_id: route.run_id,
             from_cursor: controller_cursor,
         })
@@ -237,6 +230,7 @@ async fn serve_hosted_logs(
         query_value(query, "execution").map(|value| ExecutionRef::new(value).assert_value());
     let (_, mut subscription) = controller
         .logs(RunLogsParams {
+            part_id: None,
             run_id,
             from_cursor,
             execution,

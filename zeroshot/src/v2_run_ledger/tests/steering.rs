@@ -16,6 +16,7 @@ async fn assert_large_status(ledger: &dyn RunLedger, run: &RunId) {
             RunSteerParams {
                 node: None,
                 mode: Default::default(),
+                part_id: None,
                 run_id: run.clone(),
                 text: format!(
                     "{index:03}{}",
@@ -135,9 +136,7 @@ async fn steer_status_preserves_pre_vector_read_only_runs_without_replaying_hist
         .append(&run, vec![safe_log(None); 20_000])
         .await
         .assert_value();
-    let params = RunStatusParams {
-        run_id: run.clone(),
-    };
+    let params = RunStatusParams::new(run.clone());
     let expected = NativeV2Observability::new(Arc::new(ledger.clone()))
         .status(params.clone())
         .await

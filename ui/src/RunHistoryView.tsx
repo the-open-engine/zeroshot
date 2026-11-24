@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useReplayDefinition } from './use-replay-definition';
+import { useHistoryFeed } from './use-history-feed';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
 import { ChevronRight, Loader2 } from 'lucide-react';
 import { InspectorPanel } from './InspectorPanel';
@@ -10,14 +12,12 @@ import {
   useRunView,
   historyViewCursor,
   restoredRunNode,
-  restoredHistoryPosition,
   useRunViewPersistence,
   type RunLayout,
   type RunViewState,
 } from './run-view-state';
 import { ExecutionTimeline } from './ExecutionTimeline';
 import { ControlTimeline } from './ControlTimeline';
-import { appendControlHistory, type ControlRecord } from './control-history';
 import { Transcript } from './Transcript';
 import { InvocationView, ValueSection } from './InvocationDetail';
 import { WorkflowCanvas } from './WorkflowCanvas';
@@ -27,11 +27,11 @@ import { findNode, labels, type Document, type GraphNode, type Positions } from 
 import type { WorkerOption } from './workers';
 import { nodeTitle } from './workflow-projection';
 import type { WorkflowObservation } from './workflow-observation';
-import { appendHistory, type RunHistoryReader } from './run-history-source';
+import { scopedExecutionId } from './history-contract';
+import type { RunHistoryReader } from './run-history-source';
 import {
   currentInvocation,
   descendantNames,
-  finishRunHistory,
   historyMoments,
   nextReplayPosition,
   nodeReplayPositions,
@@ -40,17 +40,13 @@ import {
   projectHistory,
   suspensionStatus,
   type HistoryEvent,
-  type HistoryPage,
   type Invocation,
   type RunDetail,
   type RunTerminal,
 } from './run-history';
-import { canFollowHistory, observationEnded } from './history-contract';
 import { useProjection } from './use-run-projection';
-import { readHistoryWhenReady } from './history-readiness';
 import './run-history.css';
 
-const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const dateLabel = (time?: number | null) =>
   time
     ? new Date(time).toLocaleString(undefined, {
@@ -63,6 +59,8 @@ const dateLabel = (time?: number | null) =>
 type RunHistoryViewProps = {
   runId?: string;
   source: RunHistoryReader;
+  listedPartId?: string;
+  onOpenRun?: (run: RunDetail) => void;
   workers: WorkerOption[];
   emptyAction?: ReactNode;
   viewKey?: string;
@@ -103,6 +101,29 @@ function replayPosition(history: HistoryFeed, moments: ReturnType<typeof history
   return { safePosition, moment, current: loadedHead && moment.index === events.length - 1 };
 }
 
+function useHistoryProjection(
+  history: HistoryFeed,
+  source: RunHistoryReader,
+  listedSuccessor?: string
+) {
+  const { run, events, cursorIndex, control } = history;
+  const moments = useMemo(() => historyMoments(events, cursorIndex), [events, cursorIndex]);
+  const { safePosition, moment, current } = replayPosition(history, moments);
+  const replayPart = events[moment.index]?.partId ?? events[0]?.partId;
+  const definition = useReplayDefinition(run, replayPart, source);
+  const { document } = definition;
+  const projection = useProjection(
+    document,
+    events,
+    moment.index,
+    control,
+    run,
+    listedSuccessor,
+    current
+  );
+  return { moments, safePosition, moment, current, definition, document, projection };
+}
+
 export function RunHistoryView({
   runId,
   source,
@@ -112,6 +133,8 @@ export function RunHistoryView({
   runHref,
   embedded = false,
   successorRunId: listedSuccessor,
+  onOpenRun,
+  listedPartId,
 }: RunHistoryViewProps) {
   const { saved: savedView, canvas, setCanvas, layout, setLayout } = useRunView(viewKey);
   const [playing, setPlaying] = useState(false);
@@ -125,28 +148,34 @@ export function RunHistoryView({
   const [readingExecution, setReadingExecution] = useState('');
   const [positions, setPositions] = useState<Positions>({}),
     [focus, setFocus] = useState<{ name: string; tick: number }>();
-  const history = useHistoryFeed(runId, source, {
-    restore: savedView,
-    onLoad: () => {
-      setPlaying(false);
-      setPlaybackNode(undefined);
+  const history = useHistoryFeed(
+    runId,
+    source,
+    {
+      restore: savedView,
+      onLoad: () => {
+        setPlaying(false);
+        setPlaybackNode(undefined);
+      },
+      onReset: () => {
+        failureView.reset();
+        setCanvas(savedView.canvas);
+        setInspector(Boolean(savedView.inspector));
+        setExecution(savedView.execution ?? '');
+        setReadingExecution('');
+        setFocus(undefined);
+        setPositions({});
+      },
+      onOpen: (detail) => {
+        onOpenRun?.(detail);
+        setSelected(restoredRunNode(detail.graph.root, savedView));
+        setInspector(failureView.open(detail));
+      },
+      onMissing: () => setPlaying(false),
     },
-    onReset: () => {
-      failureView.reset();
-      setCanvas(savedView.canvas);
-      setInspector(Boolean(savedView.inspector));
-      setExecution(savedView.execution ?? '');
-      setReadingExecution('');
-      setFocus(undefined);
-      setPositions({});
-    },
-    onOpen: (detail) => {
-      setSelected(restoredRunNode(detail.graph.root, savedView));
-      setInspector(failureView.open(detail));
-    },
-    onMissing: () => setPlaying(false),
-  });
-  const { run, events, control, cursorIndex, setCursorIndex, following, loading, follow } = history;
+    listedPartId
+  );
+  const { run, events, cursorIndex, setCursorIndex, following, loading, follow } = history;
   useRunViewPersistence(viewKey, run, loading, {
     selected,
     inspector,
@@ -156,21 +185,8 @@ export function RunHistoryView({
     layout,
     cursor: historyViewCursor(history.restoreCursor.current, events, cursorIndex),
   });
-  const document: Document | undefined = useMemo(
-    () => run && { name: run.runId, graph: run.graph, runtime: run.runtime },
-    [run]
-  );
-  const moments = useMemo(() => historyMoments(events, cursorIndex), [events, cursorIndex]);
-  const { safePosition, moment, current } = replayPosition(history, moments);
-  const projection = useProjection(
-    document,
-    events,
-    moment.index,
-    control,
-    run,
-    listedSuccessor,
-    current
-  );
+  const { moments, safePosition, moment, current, definition, document, projection } =
+    useHistoryProjection(history, source, listedSuccessor);
   useEffect(() => {
     window.document.title = `${run?.title ?? 'Runs'} · Zeroshot`;
   }, [run?.title]);
@@ -192,7 +208,6 @@ export function RunHistoryView({
     setPlaybackNode,
     clearExecution,
   });
-  /** Select a node, stopping any node replay; the empty canvas selects without opening the panel. */
   function inspect(name: string, open = true) {
     setPlaying(false);
     setPlaybackNode(undefined);
@@ -221,13 +236,11 @@ export function RunHistoryView({
     inspect(name);
     setFocus({ name, tick: Date.now() });
   }
-  /** Steps opens work in place: following and playback carry on, since only seeking pauses them. */
   function selectStep(target: { node: string; invocation?: string }) {
     setSelected(target.node);
     setExecution(target.invocation ?? '');
     setReadingExecution('');
   }
-  /** The timeline's Show node, in Steps: the node's latest execution, opened where it is listed. */
   function showStep(name: string) {
     const target = document && findNode(document.graph.root, name);
     const names = target && descendantNames(target);
@@ -258,8 +271,9 @@ export function RunHistoryView({
     setLayout(view);
     const shown = selection.activeInvocation;
     if (view !== 'story' || !shown || !selected || selected === document?.graph.root.name) return;
-    setExecution(shown.id);
-    setRevealStep({ invocation: shown.id, tick: Date.now() });
+    const id = shown.originalId ?? shown.id;
+    setExecution(id);
+    setRevealStep({ invocation: id, tick: Date.now() });
   }
   const toggle = <RunViewToggle layout={layout} setLayout={switchLayout} />;
   return (
@@ -299,6 +313,8 @@ export function RunHistoryView({
                 execution={execution}
                 select={selectStep}
                 showInGraph={(target) => {
+                  const work = projection.invocations.find((item) => item.id === target.invocation);
+                  replay.inspectStep(work, moment.index);
                   selectStep(target);
                   setInspector(true);
                   setLayout('graph');
@@ -392,11 +408,15 @@ export function RunHistoryView({
       ) : (
         <HistoryEmpty
           historyPending={history.historyPending}
-          loading={loading}
-          error={history.error}
+          loading={loading || (definition.loading && !definition.error)}
+          error={definition.error ?? history.error}
           runId={runId}
           emptyAction={emptyAction}
-          retry={() => runId && void history.loadHistory(runId, source, true)}
+          retry={() =>
+            definition.error
+              ? definition.retry()
+              : runId && void history.loadHistory(runId, source, true)
+          }
         />
       )}
     </main>
@@ -445,7 +465,7 @@ function runContext(
     input: run.initialInput,
     invocations: projection.invocations,
     handoffs: projection.handoffs,
-    controls: projection.controls,
+    controls: projection.allControls,
     systemLogs: projection.systemLogs,
     clock: projection.clock,
     suspension: projection.suspension,
@@ -485,7 +505,7 @@ function useSelectedNode({
   const node = document && findNode(document.graph.root, selected);
   const names = node && descendantNames(node);
   const nodeInvocations =
-    projection?.invocations.filter((invocation) => names?.has(invocation.node)) ?? [];
+    projection?.partInvocations.filter((invocation) => names?.has(invocation.node)) ?? [];
   const activeInvocation =
     nodeInvocations.find((invocation) => invocation.id === execution) ??
     nodeInvocations.find((invocation) => invocation.id === readingExecution) ??
@@ -507,6 +527,21 @@ function useSelectedNode({
       !!node &&
       (['step', 'verifier'].includes(node.kind) || node.name === document?.graph.root.name),
   };
+}
+
+/** Earlier Steps remain inspectable even if the head rewound past their executions. */
+function graphPositionForStep(
+  work: Invocation | undefined,
+  events: readonly HistoryEvent[],
+  through: number
+) {
+  if (!work?.partId || work.partId === events[through]?.partId) return;
+  const last = Math.max(work.start, work.end ?? -1, work.logs.at(-1)?.index ?? -1);
+  if (events[last]?.partId === work.partId) return last;
+  // An imported wait or request can settle in a successor. Inspect its original part
+  // through its own last record, including its suspension and transcript.
+  for (let index = through; index >= work.start; index--)
+    if (events[index].partId === work.partId) return index;
 }
 
 /** Seeking, playback and Go live: the timeline's controls, which pause or resume following. */
@@ -561,6 +596,14 @@ function useReplayActions({
   });
   return {
     selectedReplay,
+    inspectStep(work: Invocation | undefined, through: number) {
+      const position = graphPositionForStep(work, events, through);
+      if (position === undefined) return;
+      setPlaying(false);
+      setPlaybackNode(undefined);
+      follow(false);
+      setCursorIndex(position);
+    },
     scrub(next: number) {
       failureView.replay();
       setPlaying(false);
@@ -653,7 +696,10 @@ function useFailurePresentation(saved: Partial<RunViewState>) {
       const event = events[index].event;
       const reference = event.reference ?? event.completion?.reference;
       const execution = event.execution ?? reference?.execution;
-      const invocation = projection?.invocations.find((item) => item.id === String(execution));
+      const invocation = projection?.invocations.find(
+        (item) =>
+          execution != null && item.id === scopedExecutionId(events[index].partId, execution)
+      );
       return { index, invocation };
     },
   };
@@ -742,7 +788,7 @@ function RunHistoryHeader({
         <div className="workspace-header history-header">
           <div className="profile-title">
             <h1 title={run.title}>{run.title}</h1>
-            {successorRunId && runHref && (
+            {!run.parts && successorRunId && runHref && (
               <a href={runHref(successorRunId)}>Continue to successor</a>
             )}
             <span
@@ -841,19 +887,21 @@ function RunHistoryAlerts({
   return (
     <>
       <EnvironmentNotice run={run} preparing={preparing} openLog={openLog} />
-      {run.observation && !['active', 'complete'].includes(run.observation.state) && (
-        <div className="history-error" role="status" data-problem-code={run.observation.code}>
-          <span>
-            {run.observation.state === 'collecting'
-              ? 'Collecting archived history. Playback will continue as records arrive.'
-              : run.observation.state === 'expired'
-                ? 'This archive has expired.'
-                : run.observation.state === 'unavailable'
-                  ? 'This run has no retained workspace history.'
-                  : 'This archive is incomplete. The retained history remains available.'}
-          </span>
-        </div>
-      )}
+      {run.observation &&
+        !(run.parts && run.observation.state === 'collecting') &&
+        !['active', 'complete'].includes(run.observation.state) && (
+          <div className="history-error" role="status" data-problem-code={run.observation.code}>
+            <span>
+              {run.observation.state === 'collecting'
+                ? 'Collecting archived history. Playback will continue as records arrive.'
+                : run.observation.state === 'expired'
+                  ? 'This archive has expired.'
+                  : run.observation.state === 'unavailable'
+                    ? 'This run has no retained workspace history.'
+                    : 'This archive is incomplete. The retained history remains available.'}
+            </span>
+          </div>
+        )}
       {run.runtimeFailure && (
         <div className="history-error" role="alert">
           <span>History is incomplete: the runtime failed before its final state was saved.</span>
@@ -921,283 +969,6 @@ function HistoryEmpty({
       )}
     </div>
   );
-}
-
-type HistoryFeedCallbacks = {
-  restore?: Partial<RunViewState>;
-  onLoad: () => void;
-  onReset: () => void;
-  onOpen: (detail: RunDetail) => void;
-  onMissing: () => void;
-};
-function useHistoryFeed(
-  runId: string | undefined,
-  source: RunHistoryReader,
-  callbacks: HistoryFeedCallbacks
-) {
-  const [run, setRun] = useState<RunDetail>();
-  const [events, setEvents] = useState<HistoryEvent[]>([]),
-    [loadedHead, setLoadedHead] = useState(false);
-  const [control, setControl] = useState<ControlRecord[]>([]),
-    [controlError, setControlError] = useState('');
-  const [cursorIndex, setCursorIndex] = useState(-1);
-  const [following, setFollowing] = useState(false);
-  const [connection, setConnection] = useState<
-    'idle' | 'connecting' | 'connected' | 'reconnecting' | 'limited' | 'error'
-  >('idle');
-  const [loading, setLoading] = useState(false),
-    [historyPending, setHistoryPending] = useState(false),
-    [error, setError] = useState('');
-  const loadGeneration = useRef(0),
-    loadAbort = useRef<AbortController | undefined>(undefined);
-  const liveAbort = useRef<AbortController | undefined>(undefined);
-  const retained = useRef<HistoryEvent[]>([]),
-    followLatest = useRef(false);
-  const retainedControl = useRef<ControlRecord[]>([]);
-  const cursorIntent = useRef(0);
-  const pageCursor = useRef('v2:0');
-  const restoreCursor = useRef<string | undefined>(undefined);
-  const [restorePending, setRestorePending] = useState(false);
-  const isLiveRun = !!run && canFollowHistory(run);
-  async function loadHistory(id: string, dataSource: RunHistoryReader, reset: boolean) {
-    const generation = ++loadGeneration.current;
-    loadAbort.current?.abort();
-    liveAbort.current?.abort();
-    const controller = new AbortController();
-    loadAbort.current = controller;
-    setLoading(true);
-    setHistoryPending(false);
-    callbacks.onLoad();
-    setError('');
-    setConnection('idle');
-    if (reset) {
-      setRun(undefined);
-      retainEvents([]);
-      retainControl([]);
-      setControlError('');
-      setCursorIndex(-1);
-      follow(false);
-      restoreCursor.current = callbacks.restore?.cursor;
-      setLoadedHead(false);
-      callbacks.onReset();
-      pageCursor.current = 'v2:0';
-    }
-    try {
-      const pending = () => {
-        if (!controller.signal.aborted && generation === loadGeneration.current)
-          setHistoryPending(true);
-      };
-      const detail = await readHistoryWhenReady(
-        () => dataSource.detail(id, controller.signal),
-        controller.signal,
-        dataSource.retryDelay,
-        pending
-      );
-      if (controller.signal.aborted || generation !== loadGeneration.current) return;
-      setHistoryPending(false);
-      setRun(detail);
-      if (reset) {
-        callbacks.onOpen(detail);
-        follow(
-          (callbacks.restore?.following ?? true) && !!dataSource.watch && canFollowHistory(detail),
-          true
-        );
-      }
-      // A saved position owns its seek; later pages must not replace an already restored cursor.
-      const initialIntent = restoreCursor.current ? undefined : cursorIntent.current;
-      let collected = retained.current;
-      let count = 0,
-        bytes = 0,
-        complete = false;
-      while (!complete && count < 5000 && bytes < 8 * 1024 * 1024) {
-        const page = await readHistoryWhenReady(
-          () => dataSource.page(id, pageCursor.current, controller.signal),
-          controller.signal,
-          dataSource.retryDelay,
-          pending
-        );
-        if (controller.signal.aborted || generation !== loadGeneration.current) return;
-        setHistoryPending(false);
-        if (!page.complete && (!page.events.length || page.nextCursor === pageCursor.current))
-          throw new Error('History stopped advancing. Reload to try again.');
-        collected = appendHistory(collected, page);
-        acceptControl(page);
-        count += page.events.length;
-        bytes += JSON.stringify(page).length;
-        pageCursor.current = page.nextCursor;
-        complete = page.complete;
-        retainEvents(collected);
-        setLoadedHead(complete);
-        if (
-          (reset && cursorIntent.current === initialIntent) ||
-          followLatest.current ||
-          restoreCursor.current
-        ) {
-          const position = restoredHistoryPosition(
-            followLatest.current ? undefined : restoreCursor.current,
-            collected,
-            complete
-          );
-          if (position === undefined) setRestorePending(true);
-          else {
-            setCursorIndex(position);
-            restoreCursor.current = undefined;
-            setRestorePending(false);
-          }
-        }
-        acceptObservation(id, page);
-        if (page.complete && page.finished) finishRun(id, collected, page);
-      }
-    } catch (error) {
-      if (!controller.signal.aborted && generation === loadGeneration.current) {
-        setHistoryPending(false);
-        setError(message(error));
-      }
-    } finally {
-      if (!controller.signal.aborted && generation === loadGeneration.current) setLoading(false);
-    }
-  }
-  useEffect(() => {
-    if (runId) void loadHistory(runId, source, true);
-    else {
-      loadAbort.current?.abort();
-      liveAbort.current?.abort();
-      setRun(undefined);
-      retainEvents([]);
-      retainControl([]);
-      setControlError('');
-      callbacks.onMissing();
-      setLoading(false);
-      setHistoryPending(false);
-      setError('');
-    }
-    return () => {
-      loadAbort.current?.abort();
-      liveAbort.current?.abort();
-    };
-  }, [runId, source]);
-  function retainEvents(next: HistoryEvent[]) {
-    retained.current = next;
-    setEvents(next);
-    if (next.some(({ event }) => event.kind === 'suspend_requested'))
-      setRun((previous) => (previous ? { ...previous, suspendRequested: true } : previous));
-  }
-  function retainControl(next: ControlRecord[]) {
-    retainedControl.current = next;
-    setControl(next);
-  }
-  function acceptControl(page: import('./run-history').HistoryPage) {
-    try {
-      retainControl(appendControlHistory(retainedControl.current, page, retained.current));
-      if (page.controlError)
-        setControlError(
-          page.controlError === 'control_projection_limit'
-            ? 'Control history reached its replay limit. Worker history remains available.'
-            : 'Control history could not be reconstructed. Worker history remains available.'
-        );
-    } catch (error) {
-      setControlError(message(error));
-    }
-  }
-  function follow(value: boolean, restoring = false) {
-    if (!restoring) {
-      restoreCursor.current = undefined;
-      setRestorePending(false);
-    }
-    cursorIntent.current++;
-    followLatest.current = value;
-    setFollowing(value);
-  }
-  function acceptObservation(id: string, page: HistoryPage) {
-    if (page.observation)
-      setRun((previous) =>
-        previous?.runId === id ? { ...previous, observation: page.observation } : previous
-      );
-  }
-  function finishRun(id: string, collected: HistoryEvent[], page: HistoryPage) {
-    setRun((previous) =>
-      previous?.runId === id ? finishRunHistory(previous, collected, page) : previous
-    );
-  }
-  useEffect(() => {
-    if (
-      !source.watch ||
-      !isLiveRun ||
-      !run ||
-      run.runId !== runId ||
-      loading ||
-      !loadedHead ||
-      error ||
-      connection === 'limited'
-    )
-      return;
-    const controller = new AbortController();
-    liveAbort.current = controller;
-    const id = run.runId;
-    let count = 0,
-      bytes = 0;
-    const dispose = source.watch(
-      id,
-      pageCursor.current,
-      {
-        page(page) {
-          if (controller.signal.aborted) return;
-          const collected = appendHistory(retained.current, page);
-          acceptControl(page);
-          const added = collected.length - retained.current.length;
-          pageCursor.current = page.nextCursor;
-          if (added) {
-            count += added;
-            bytes += JSON.stringify(page).length;
-            retainEvents(collected);
-            if (followLatest.current) setCursorIndex(collected.length - 1);
-          }
-          acceptObservation(id, page);
-          if (page.complete && page.finished) finishRun(id, collected, page);
-          if (page.complete && observationEnded(page.observation, page.finished === true)) {
-            setConnection('idle');
-          } else if (count >= 5000 || bytes >= 8 * 1024 * 1024) {
-            controller.abort();
-            setConnection('limited');
-          }
-        },
-        status(status) {
-          if (!controller.signal.aborted) setConnection(status);
-        },
-        error(error) {
-          if (!controller.signal.aborted) {
-            setError(message(error));
-            setConnection('error');
-          }
-        },
-      },
-      controller.signal
-    );
-    return () => {
-      controller.abort();
-      dispose();
-    };
-  }, [source, isLiveRun, run?.runId, runId, loading, loadedHead, error, connection === 'limited']);
-  return {
-    run,
-    events,
-    loadedHead,
-    control,
-    controlError,
-    cursorIndex,
-    setCursorIndex,
-    following,
-    connection,
-    loading,
-    historyPending,
-    error,
-    retained,
-    restoreCursor,
-    restorePending,
-    isLiveRun,
-    follow,
-    loadHistory,
-  };
 }
 
 type RunInspectorProps = {
@@ -1279,7 +1050,7 @@ function RunInspector({
               )}
               <dt>Runtime</dt>
               <dd>
-                {run.runtime.harness} / {run.runtime.provider}
+                {document.runtime.harness} / {document.runtime.provider}
               </dd>
               <dt>At cursor</dt>
               <dd className="mono">{moment.cursor}</dd>
@@ -1331,10 +1102,10 @@ function RunInspector({
             <dd className="mono">{node.profile}</dd>
           </dl>
         )}
-        {!nodeControls.length && observedRoutes(node, projection.invocations).length > 0 && (
+        {!nodeControls.length && observedRoutes(node, projection.partInvocations).length > 0 && (
           <section className="run-inspector-section">
             <h3>Observed paths</h3>
-            {observedRoutes(node, projection.invocations).map((route) => (
+            {observedRoutes(node, projection.partInvocations).map((route) => (
               <button
                 className="observed-route"
                 key={route.name}
@@ -1416,7 +1187,9 @@ function RunInspector({
         <ValueSection
           title="Runtime configuration"
           value={
-            node.name === document.graph.root.name ? run.runtime : run.runtime.nodes[node.name]
+            node.name === document.graph.root.name
+              ? document.runtime
+              : document.runtime.nodes[node.name]
           }
           raw
         />

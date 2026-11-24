@@ -57,12 +57,13 @@ async fn exercise(ledger: &dyn RunLedger) {
         .create_or_get(create(successor.as_str(), "successor", 'b'))
         .await
         .assert_value();
-    super::super::vectors::inherit(ledger, ledger, &source, &successor)
+    super::super::vectors::inherit(ledger, ledger, (&source, &successor), None)
         .await
         .assert_value();
     let original = super::super::vectors::list_full(
         ledger,
         RunVectorsParams {
+            part_id: None,
             run_id: source.clone(),
             after: None,
             limit: None,
@@ -73,6 +74,7 @@ async fn exercise(ledger: &dyn RunLedger) {
     let page = super::super::vectors::list_full(
         ledger,
         RunVectorsParams {
+            part_id: None,
             run_id: successor.clone(),
             after: None,
             limit: Some(2),
@@ -84,6 +86,7 @@ async fn exercise(ledger: &dyn RunLedger) {
     let tail = super::super::vectors::list_full(
         ledger,
         RunVectorsParams {
+            part_id: None,
             run_id: successor.clone(),
             after: page.next_after,
             limit: Some(2),
@@ -93,7 +96,7 @@ async fn exercise(ledger: &dyn RunLedger) {
     .assert_value();
     assert_eq!(tail.vectors.len(), 1);
     assert!(
-        matches!(&tail.vectors[0].content,RunVectorContent::Continuation{resumed_from} if resumed_from==&source)
+        matches!(&tail.vectors[0].content,RunVectorContent::Continuation{resumed_from, ..} if resumed_from==&source)
     );
     assert!(tail.next_after.is_none());
     let entry = page.vectors[0].clone();
@@ -101,6 +104,7 @@ async fn exercise(ledger: &dyn RunLedger) {
         super::super::vectors::show(
             ledger,
             RunVectorParams {
+                part_id: None,
                 run_id: successor,
                 id: entry.id.clone()
             }
@@ -153,7 +157,7 @@ async fn exercise_long_record(ledger: &dyn RunLedger) {
         });
     }
     ledger.append(&source, events).await.assert_value();
-    super::super::vectors::inherit(ledger, ledger, &source, &successor)
+    super::super::vectors::inherit(ledger, ledger, (&source, &successor), None)
         .await
         .assert_value();
     let mut inherited = Vec::new();
@@ -162,6 +166,7 @@ async fn exercise_long_record(ledger: &dyn RunLedger) {
         let page = super::super::vectors::list_full(
             ledger,
             RunVectorsParams {
+                part_id: None,
                 run_id: successor.clone(),
                 after,
                 limit: Some(100),
@@ -178,7 +183,7 @@ async fn exercise_long_record(ledger: &dyn RunLedger) {
     assert_eq!(&inherited[..305], expected);
     assert_eq!(inherited.len(), 306);
     assert!(
-        matches!(&inherited[305].content, RunVectorContent::Continuation { resumed_from } if resumed_from == &source)
+        matches!(&inherited[305].content, RunVectorContent::Continuation { resumed_from, .. } if resumed_from == &source)
     );
     for (run_id, error) in [
         (source, RunLedgerError::VectorNotFound),
@@ -188,6 +193,7 @@ async fn exercise_long_record(ledger: &dyn RunLedger) {
             super::super::vectors::list_full(
                 ledger,
                 RunVectorsParams {
+                    part_id: None,
                     run_id,
                     after: Some(inherited[305].id.clone()),
                     limit: None,
@@ -254,6 +260,7 @@ async fn sqlite_read_only_pagination_seeks_past_earlier_events() {
     let page = super::super::vectors::list_full(
         &ledger,
         RunVectorsParams {
+            part_id: None,
             run_id: run,
             after: Some(first_id),
             limit: None,
@@ -352,6 +359,7 @@ async fn exercise_large_request(ledger: &dyn RunLedger) {
         super::super::vectors::show(
             ledger,
             RunVectorParams {
+                part_id: None,
                 run_id: run,
                 id: expected_vector.id.clone()
             }
@@ -386,6 +394,7 @@ async fn exercise_steer(ledger: &dyn RunLedger) {
         RunSteerParams {
             node: None,
             mode: Default::default(),
+            part_id: None,
             run_id: run.clone(),
             text: text.clone(),
         },
@@ -398,6 +407,7 @@ async fn exercise_steer(ledger: &dyn RunLedger) {
     let vector = super::super::vectors::show(
         ledger,
         RunVectorParams {
+            part_id: None,
             run_id: run.clone(),
             id: receipt.steer.id.clone(),
         },
@@ -431,7 +441,7 @@ async fn exercise_steer(ledger: &dyn RunLedger) {
         .create_or_get(create(next.as_str(), "steer-next", 'b'))
         .await
         .assert_value();
-    super::super::vectors::inherit(ledger, ledger, &run, &next)
+    super::super::vectors::inherit(ledger, ledger, (&run, &next), None)
         .await
         .assert_value();
     let status = steering::status(ledger, &next).await.assert_value();
@@ -446,6 +456,7 @@ async fn exercise_steer(ledger: &dyn RunLedger) {
         steering::record(
             ledger,
             RunSteerParams {
+                part_id: None,
                 node: None,
                 mode: Default::default(),
                 run_id: run.clone(),
@@ -460,6 +471,7 @@ async fn exercise_steer(ledger: &dyn RunLedger) {
             steering::record(
                 ledger,
                 RunSteerParams {
+                    part_id: None,
                     node: None,
                     mode: Default::default(),
                     run_id: next.clone(),
@@ -498,6 +510,7 @@ async fn steer_status_bounds_listing_and_receipts_without_limiting_publication()
             RunSteerParams {
                 node: None,
                 mode: Default::default(),
+                part_id: None,
                 run_id: run.clone(),
                 text: "a".repeat(1023) + "é",
             },

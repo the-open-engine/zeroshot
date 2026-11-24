@@ -37,6 +37,7 @@ async fn hosted_recovery_uses_authenticated_http_without_the_deleted_capsules_tr
                 Some("prod"),
                 RunResumeParams {
                     runtime: None,
+                    part_id: run_id.clone(),
                     run_id: run_id.clone(),
                     successor_run_id: RunId::new("successor"),
                     from,
@@ -58,6 +59,7 @@ async fn hosted_recovery_uses_authenticated_http_without_the_deleted_capsules_tr
         .run_checkpoints(
             Some("prod"),
             RunCheckpointsParams {
+                part_id: None,
                 run_id: run_id.clone(),
                 after: Some(CheckpointId::new("page/after").assert_value()),
                 limit: Some(5),
@@ -70,6 +72,7 @@ async fn hosted_recovery_uses_authenticated_http_without_the_deleted_capsules_tr
         .run_discard_workspace(
             Some("prod"),
             RunDiscardWorkspaceParams {
+                part_id: None,
                 run_id: run_id.clone(),
             },
         )
@@ -81,6 +84,7 @@ async fn hosted_recovery_uses_authenticated_http_without_the_deleted_capsules_tr
         .run_vectors(
             Some("prod"),
             openengine_cluster_protocol::RunVectorsParams {
+                part_id: None,
                 run_id: run_id.clone(),
                 after: Some(openengine_cluster_protocol::VectorId::new("before").assert_value()),
                 limit: Some(2),
@@ -94,6 +98,7 @@ async fn hosted_recovery_uses_authenticated_http_without_the_deleted_capsules_tr
         .run_vector(
             Some("prod"),
             openengine_cluster_protocol::RunVectorParams {
+                part_id: None,
                 run_id: run_id.clone(),
                 id: vectors.vectors[0].id.clone(),
             },
@@ -185,6 +190,7 @@ async fn resume_runtime_refuses_an_older_target_before_credentials_or_resume() {
             &zeroshot_engine::native_v2_cli::RunSelector {
                 controller: Default::default(),
                 target: Some("prod".to_owned()),
+                part_id: None,
                 run_id: RunId::new("prior"),
             },
             &runtime,

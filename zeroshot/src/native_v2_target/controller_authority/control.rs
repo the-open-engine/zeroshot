@@ -17,7 +17,7 @@ use openengine_cluster_protocol::{
     RunProfileListRequest, RunProfileListResult, RunProfileSelector, RunProfileSetRequest,
 };
 use reqwest::header::ACCEPT;
-use zeroshot_engine::native_v2_cli::oecp::BoxedSubscription;
+use zeroshot_engine::native_v2_cli::oecp::{BoxedSubscription, HostedRunRoute};
 use zeroshot_engine::native_v2_cli::{
     CliRunForceResult, CliRunListResult, CliRunStatusResult, CliRunWatchEventNotification,
 };
@@ -44,7 +44,10 @@ impl TargetHttpControlAuthority {
         let (controller, access) = controller_access;
         let response = self
             .with_access(
-                self.client.post(controller.session_url.clone()),
+                super::hosted_runs::part_identity::negotiate(
+                    self.client.post(controller.session_url.clone()),
+                    controller.run_parts,
+                ),
                 access.as_deref(),
             )?
             .header(ACCEPT, "application/json")
@@ -205,7 +208,10 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
             .await?;
         let response = self
             .with_access(
-                self.client.post(controller.run_url.clone()),
+                super::hosted_runs::part_identity::negotiate(
+                    self.client.post(controller.run_url.clone()),
+                    controller.run_parts,
+                ),
                 access.as_deref(),
             )?
             .header(ACCEPT, "application/json")
@@ -218,11 +224,22 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
         require_response_route(&response, &controller.run_url)?;
         self.invalidate_rejected_access(&response, access.as_ref())
             .await;
-        let receipt: TargetRunReceipt =
-            read_success_json(response, &controller.run_url, "target run")
+        let receipt: TargetRunReceipt = if controller.run_parts {
+            read_success_json(response, &controller.run_url, "target run").await
+        } else {
+            let mut value = read_success_json(response, &controller.run_url, "target run")
                 .await
                 .map_err(TargetAuthorityError::submission)?;
+            openengine_cluster_protocol::physical_runs::read_response(
+                openengine_cluster_protocol::RUN_SUBMIT_METHOD,
+                &mut value,
+            );
+            serde_json::from_value(value)
+                .map_err(|_| authority_error("target run receipt is malformed"))
+        }
+        .map_err(TargetAuthorityError::submission)?;
         Ok(RunSubmitResult {
+            current_part_id: receipt.current_part_id,
             run_id: receipt.run_id,
         })
     }
@@ -568,8 +585,9 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
         &self,
         target: &TargetRecord,
         params: RunStatusParams,
-    ) -> Result<CliRunStatusResult, TargetAuthorityError> {
-        TargetHttpControlAuthority::hosted_run_status(self, target, params).await
+        grouped_only: bool,
+    ) -> Result<Option<HostedRunRoute>, TargetAuthorityError> {
+        TargetHttpControlAuthority::hosted_run_status(self, target, params, grouped_only).await
     }
 
     async fn hosted_run_watch(

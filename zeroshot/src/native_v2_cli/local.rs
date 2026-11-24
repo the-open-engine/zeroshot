@@ -58,6 +58,10 @@ use connections::LocalConnectionStore;
 
 #[path = "local/backend.rs"]
 mod backend;
+#[path = "local/lineage.rs"]
+mod lineage;
+#[path = "local/streams.rs"]
+mod streams;
 
 #[path = "local/inspection.rs"]
 mod inspection;
@@ -882,9 +886,7 @@ impl LocalCliBackend {
     ) -> Result<RunListResult, NativeV2CliError> {
         let mut result = self
             .inspect_status(
-                RunStatusParams {
-                    run_id: run_id.clone(),
-                },
+                RunStatusParams::new(run_id.clone()),
                 deadline.saturating_duration_since(Instant::now()),
             )
             .await?;
@@ -893,7 +895,7 @@ impl LocalCliBackend {
         Ok(RunListResult { runs: vec![result] })
     }
 
-    async fn status_local(
+    pub(crate) async fn status_local(
         &self,
         params: RunStatusParams,
     ) -> Result<RunStatusResult, NativeV2CliError> {
@@ -1036,22 +1038,6 @@ impl LocalCliBackend {
         Ok(None)
     }
 
-    async fn local_successor_was_admitted(
-        &self,
-        ledger_path: &Path,
-        successor_run_id: &RunId,
-    ) -> Result<bool, NativeV2CliError> {
-        if !require_existing_ledger(ledger_path).map_err(local_io)? {
-            return Ok(false);
-        }
-        let ledger = SqliteRunLedger::open_read_only(ledger_path).map_err(local_error)?;
-        Ok(ledger
-            .get(successor_run_id)
-            .await
-            .map_err(local_error)?
-            .is_some())
-    }
-
     fn read_recovery_document(
         &self,
         run_id: &RunId,
@@ -1175,10 +1161,12 @@ impl LocalCliBackend {
                 self.force_once(retry).await?;
             }
         };
-        let status = self.status_local(RunStatusParams { run_id }).await?;
+        let status = self.status_local(RunStatusParams::new(run_id)).await?;
         Ok(RunForceResult {
             steering: Default::default(),
             context_sources: status.context_sources,
+            part_id: status.run_id.clone(),
+            current_part_id: status.run_id.clone(),
             run_id: status.run_id,
             title: status.title,
             source: status.source,
@@ -1206,9 +1194,7 @@ impl LocalCliBackend {
             None
         };
         let recorded = self
-            .read_recorded_status(RunStatusParams {
-                run_id: params.run_id.clone(),
-            })
+            .read_recorded_status(RunStatusParams::new(params.run_id.clone()))
             .await;
         if let Ok(recorded) = recorded
             && (matches!(
@@ -1224,6 +1210,8 @@ impl LocalCliBackend {
             return Ok(RunForceResult {
                 steering: Default::default(),
                 context_sources: recorded.context_sources,
+                part_id: recorded.run_id.clone(),
+                current_part_id: recorded.run_id.clone(),
                 run_id: recorded.run_id,
                 title: recorded.title,
                 source: recorded.source,

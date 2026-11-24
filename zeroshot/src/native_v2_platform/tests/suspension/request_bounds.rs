@@ -139,7 +139,7 @@ async fn successor_event_bounds_are_checked_before_admission() {
                 ..Default::default()
             },
             store: Arc::new(SuspensionStore::default()),
-            successor: StdMutex::new(None),
+            successors: StdMutex::default(),
             preparation_gate: None,
         });
         let controller = NativeV2PlatformController::new_with_delivery_policy(
@@ -201,7 +201,7 @@ async fn successor_event_bounds_are_checked_before_admission() {
                 .snapshot,
             before
         );
-        assert!(allocator.successor.lock().assert_value().is_none());
+        assert!(allocator.successors.lock().assert_value().is_empty());
         assert_eq!(driver.starts.load(Ordering::SeqCst), 0);
 
         // Removing one byte puts the successor event exactly on the accepted ceiling.

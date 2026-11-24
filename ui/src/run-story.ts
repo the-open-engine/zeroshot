@@ -44,7 +44,7 @@ type RoundEntry = { kind: 'round'; id: string; round: number; loop: string };
 export type StoryEntry =
   | RoundEntry
   /** This run picked up where an earlier one paused. */
-  | { kind: 'continued'; id: string; from: string }
+  | { kind: 'continued'; id: string; from: string; label?: string }
   | {
       kind: 'work';
       id: string;
@@ -147,6 +147,7 @@ function placeContinuation(entries: StoryEntry[], placed: Placed, handoff: RunHa
     kind: 'continued',
     id: `continued:${handoff.index}`,
     from: handoff.from,
+    ...(handoff.label ? { label: handoff.label } : {}),
   };
   const asked = entries.findIndex(
     (candidate) =>
@@ -214,7 +215,7 @@ function recordedRound(
   const fallback = {
     loop: loop.name,
     number: invocation.visit,
-    scope: JSON.stringify(mapPrefix(ancestors, loop, invocation)),
+    scope: JSON.stringify([invocation.partId, mapPrefix(ancestors, loop, invocation)]),
   };
   const nearest = ancestors.at(-1);
   if (!nearest || ancestors.indexOf(nearest) <= ancestors.indexOf(loop)) return fallback;
@@ -239,6 +240,7 @@ function latestVisit(
   return controls
     .filter(
       (control) =>
+        control.partId === invocation.partId &&
         control.node === group.name &&
         JSON.stringify(control.mapIndices) === prefix &&
         control.start <= invocation.start
@@ -279,7 +281,12 @@ function collectAttempts(
 ): Execution[] {
   const executions = new Map<string, Invocation[]>();
   for (const invocation of invocations) {
-    const key = JSON.stringify([invocation.node, invocation.visit, invocation.mapIndices]);
+    const key = JSON.stringify([
+      invocation.partId,
+      invocation.node,
+      invocation.visit,
+      invocation.mapIndices,
+    ]);
     executions.set(key, [...(executions.get(key) ?? []), invocation]);
   }
   return [...executions.values()]
@@ -308,6 +315,7 @@ function collectAttempts(
         together: concurrent && {
           // One pass over the group, as recorded; a member's own visit count stands in without one.
           key: JSON.stringify([
+            latest.partId,
             concurrent.name,
             mapPrefix(ancestors, concurrent, latest),
             recordedPass(ancestors, concurrent, latest, controls) ?? latest.visit,

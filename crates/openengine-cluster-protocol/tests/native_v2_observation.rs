@@ -92,6 +92,8 @@ fn status_exposes_every_parallel_execution_without_private_identity() {
     let mut result = RunStatusResult {
         steering: Default::default(),
         context_sources: Vec::new(),
+        part_id: RunId::new("run-1"),
+        current_part_id: RunId::new("run-1"),
         run_id: RunId::new("run-1"),
         title: title(),
         source: Some(source()),
@@ -106,7 +108,7 @@ fn status_exposes_every_parallel_execution_without_private_identity() {
     assert_eq!(
         value,
         json!({
-            "runId": "run-1",
+            "runId": "run-1", "partId":"run-1", "currentPartId":"run-1",
             "title": "Repair checkout flow",
             "source": {
                 "repository": "open-engine/zeroshot",
@@ -144,7 +146,7 @@ fn status_exposes_every_parallel_execution_without_private_identity() {
     );
     assert!(
         serde_json::from_value::<RunStatusResult>(json!({
-            "runId": "run-1",
+            "runId": "run-1", "partId":"run-1", "currentPartId":"run-1",
             "title": "Repair checkout flow",
             "source": {
                 "repository": "open-engine/zeroshot",
@@ -166,6 +168,7 @@ fn status_exposes_every_parallel_execution_without_private_identity() {
 #[test]
 fn watch_and_logs_use_required_run_id_and_exclusive_resume_cursor() {
     let watch = RunWatchParams {
+        part_id: None,
         run_id: RunId::new("run-1"),
         from_cursor: Some(Cursor::new("v2:7")),
     };
@@ -175,6 +178,7 @@ fn watch_and_logs_use_required_run_id_and_exclusive_resume_cursor() {
     );
 
     let logs = RunLogsParams {
+        part_id: None,
         run_id: RunId::new("run-1"),
         from_cursor: Some(Cursor::new("v2:7")),
         execution: Some(execution("opaque-verifier-b")),
@@ -227,6 +231,7 @@ fn durable_events_carry_run_and_stable_cursor() {
         recorded_at: None,
         context_sources: Vec::new(),
         subscription_id: SubscriptionId::new("watch-1"),
+        part_id: RunId::new("run-1"),
         run_id: RunId::new("run-1"),
         title: title(),
         source: Some(source()),
@@ -269,7 +274,7 @@ fn durable_events_carry_run_and_stable_cursor() {
     );
 
     let value = json!({
-        "subscriptionId": "logs-1",
+        "subscriptionId": "logs-1", "partId":"run-1",
         "runId": "run-1",
         "cursor": "v2:9",
         "timestamp": 1725000000123_u64,
@@ -297,6 +302,7 @@ fn durable_events_carry_run_and_stable_cursor() {
 #[test]
 fn attach_is_live_read_only_and_explicitly_selects_one_execution() {
     let params = RunAttachParams {
+        part_id: None,
         run_id: RunId::new("run-1"),
         execution: execution("opaque-verifier-b"),
     };
@@ -314,7 +320,7 @@ fn attach_is_live_read_only_and_explicitly_selects_one_execution() {
     );
 
     let value = json!({
-        "subscriptionId": "attach-1",
+        "subscriptionId": "attach-1", "partId":"run-1",
         "runId": "run-1",
         "execution": "opaque-verifier-b",
         "event": { "type": "output", "text": "live output" }
@@ -331,9 +337,7 @@ fn attach_is_live_read_only_and_explicitly_selects_one_execution() {
 
 #[test]
 fn force_is_the_only_stop_shape_and_returns_durable_status() {
-    let params = RunForceParams {
-        run_id: RunId::new("run-1"),
-    };
+    let params = RunForceParams::new(RunId::new("run-1"));
     assert_eq!(
         serde_json::to_value(&params).assert_value(),
         json!({ "runId": "run-1" })
@@ -349,6 +353,8 @@ fn force_is_the_only_stop_shape_and_returns_durable_status() {
     let result = RunForceResult {
         steering: Default::default(),
         context_sources: Vec::new(),
+        part_id: RunId::new("run-1"),
+        current_part_id: RunId::new("run-1"),
         run_id: RunId::new("run-1"),
         title: title(),
         source: Some(source()),
@@ -388,6 +394,8 @@ fn controller_availability_is_optional_observation_metadata() {
         let result = RunStatusResult {
             steering: Default::default(),
             context_sources: Vec::new(),
+            part_id: RunId::new("run-1"),
+            current_part_id: RunId::new("run-1"),
             run_id: RunId::new("run-1"),
             title: title(),
             source: None,
@@ -444,7 +452,7 @@ fn observation_recording_times_are_optional_exact_and_shared_with_hosted() {
     for time in [None, Some(1), Some(MAX_SAFE_GENERATION)] {
         let mut active = json!({"execution":"opaque:1", "node":"worker", "mapIndices":[3]});
         let mut watch = json!({
-            "subscriptionId":"watch-1", "runId":"run-1", "title":"Timing", "size":"small",
+            "subscriptionId":"watch-1", "runId":"run-1", "partId":"run-1", "title":"Timing", "size":"small",
             "cursor":"v2:2", "status":{"phase":"running", "activeExecutions":[]}
         });
         if let Some(time) = time {
@@ -475,7 +483,7 @@ fn observation_recording_times_are_optional_exact_and_shared_with_hosted() {
         );
         assert!(
             serde_json::from_value::<RunWatchEventNotification>(json!({
-                "subscriptionId":"watch-1", "runId":"run-1", "title":"Timing", "size":"small",
+                "subscriptionId":"watch-1", "runId":"run-1", "partId":"run-1", "title":"Timing", "size":"small",
                 "cursor":"v2:2", "status":{"phase":"admitted"}, "recordedAt": invalid
             }))
             .is_err()
@@ -505,7 +513,7 @@ fn empty_context_lists_preserve_direct_and_hosted_observation_shapes() {
         assert_eq!(serde_json::to_value(decoded).assert_value(), pinned);
     }
     let status = json!({
-        "runId":"run-compat", "title":"Compatibility", "source":source(),
+        "runId":"run-compat", "partId":"run-compat", "currentPartId":"run-compat", "title":"Compatibility", "source":source(),
         "size":"host", "atCursor":"v2:7", "status":{
             "phase":"running", "activeExecutions":[{
                 "execution":"work-1", "node":"worker", "startedAt":1725000000123_u64
@@ -528,6 +536,7 @@ fn empty_context_lists_preserve_direct_and_hosted_observation_shapes() {
         assert_eq!(serde_json::to_value(hosted).assert_value(), list);
     }
     let mut watch = status;
+    watch.as_object_mut().assert_value().remove("currentPartId");
     watch.as_object_mut().assert_value().remove("atCursor");
     watch["cursor"] = json!("v2:7");
     watch["subscriptionId"] = json!("watch-compat");

@@ -56,6 +56,8 @@ fn status(phase: RunStatus, at: u64) -> RunStatusResult {
     RunStatusResult {
         steering: Default::default(),
         context_sources: Vec::new(),
+        part_id: run_id(),
+        current_part_id: run_id(),
         run_id: run_id(),
         title: title(),
         source: Some(native_v2_source_fixture()),
@@ -99,7 +101,10 @@ impl ClusterBackend for FakeBackend {
     ) -> Result<RunSubmitResult, BackendError> {
         assert_eq!(params.run_id, run_id());
         assert_eq!(params.submission.initial_input, Value::Null);
-        Ok(RunSubmitResult { run_id: run_id() })
+        Ok(RunSubmitResult {
+            current_part_id: run_id(),
+            run_id: run_id(),
+        })
     }
 
     async fn run_list(
@@ -141,6 +146,7 @@ impl ClusterBackend for FakeBackend {
             },
             stream(vec![
                 RunSubscriptionItem::Event(RunWatchEventNotification {
+                    part_id: run_id(),
                     recorded_at: None,
                     context_sources: Vec::new(),
                     subscription_id,
@@ -159,6 +165,7 @@ impl ClusterBackend for FakeBackend {
                     reason: SubscriptionCloseReason::Done,
                 },
                 RunSubscriptionItem::Event(RunWatchEventNotification {
+                    part_id: run_id(),
                     recorded_at: None,
                     context_sources: Vec::new(),
                     subscription_id: SubscriptionId::new("watch-1"),
@@ -190,6 +197,7 @@ impl ClusterBackend for FakeBackend {
                 at_cursor: cursor(3),
             },
             stream(vec![RunSubscriptionItem::Event(RunLogEventNotification {
+                part_id: run_id(),
                 subscription_id,
                 run_id: run_id(),
                 cursor: cursor(4),
@@ -214,11 +222,13 @@ impl ClusterBackend for FakeBackend {
         Ok((
             RunAttachResult {
                 subscription_id: subscription_id.clone(),
+                part_id: run_id(),
                 run_id: run_id(),
                 execution: execution(),
             },
             stream(vec![
                 RunSubscriptionItem::Event(RunAttachEventNotification {
+                    part_id: run_id(),
                     subscription_id,
                     run_id: run_id(),
                     execution: execution(),
@@ -248,6 +258,8 @@ impl ClusterBackend for FakeBackend {
         Ok(RunForceResult {
             steering: Default::default(),
             context_sources: Vec::new(),
+            part_id: result.run_id.clone(),
+            current_part_id: result.run_id.clone(),
             run_id: result.run_id,
             title: result.title,
             source: result.source,
@@ -323,6 +335,7 @@ async fn typed_direct_subscription_surface_reuses_run_observation_values() {
     let dispatcher = Dispatcher::new(FakeBackend, ConnectionContext::default());
     let (_, mut watch) = dispatcher
         .run_watch(RunWatchParams {
+            part_id: None,
             run_id: run_id(),
             from_cursor: None,
         })
@@ -340,6 +353,7 @@ async fn typed_direct_subscription_surface_reuses_run_observation_values() {
 
     let (_, mut logs) = dispatcher
         .run_logs(RunLogsParams {
+            part_id: None,
             run_id: run_id(),
             from_cursor: None,
             execution: None,
@@ -353,6 +367,7 @@ async fn typed_direct_subscription_surface_reuses_run_observation_values() {
 
     let (_, mut attach) = dispatcher
         .run_attach(RunAttachParams {
+            part_id: None,
             run_id: run_id(),
             execution: execution(),
         })
@@ -459,3 +474,40 @@ use assert_value::AssertValue;
 #[path = "support/assert_at.rs"]
 mod assert_at;
 use assert_at::AssertAt;
+
+#[tokio::test]
+async fn uninitialized_and_v2_clients_keep_physical_run_shapes() {
+    use openengine_cluster_protocol::{physical_runs, PROTOCOL_VERSION};
+    let dispatcher = Dispatcher::new(FakeBackend, ConnectionContext::default());
+    let rpc = |method: &str, params: Value| {
+        let dispatcher = dispatcher.clone();
+        let frame = json!({"jsonrpc":"2.0","id":1,"method":method,"params":params});
+        async move {
+            serde_json::from_str::<Value>(&dispatcher.dispatch(&frame.to_string()).await).unwrap()
+        }
+    };
+    let status = || json!({"runId":"run-1"});
+    let old = rpc("run/status", status()).await["result"].clone();
+    assert_eq!(old["runId"], "run-1");
+    assert!(old.get("partId").is_none());
+    assert!(old.get("currentPartId").is_none());
+    for version in [PROTOCOL_VERSION, physical_runs::VERSION] {
+        assert_eq!(
+            rpc("initialize", json!({"protocolVersion":version})).await["result"]["protocolVersion"],
+            version,
+        );
+        let value = rpc("run/status", status()).await;
+        if version == PROTOCOL_VERSION {
+            assert_eq!(value["result"]["partId"], "run-1");
+        } else {
+            assert_eq!(value["result"], old);
+        }
+    }
+    let opted_in = rpc(
+        "run/status",
+        json!({"runId":"run-1","protocolVersion":PROTOCOL_VERSION}),
+    )
+    .await;
+    assert_eq!(opted_in["result"]["currentPartId"], "run-1");
+    assert_eq!(rpc("run/status", status()).await["result"], old);
+}

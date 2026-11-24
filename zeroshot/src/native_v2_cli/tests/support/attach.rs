@@ -25,7 +25,7 @@ pub(super) fn attach_event(
     CliSubscriptionItem::Event(
         serde_json::from_value(json!({
             "subscriptionId":format!("attach-{attempt}"),
-            "runId":params.run_id.as_str(),
+            "partId":params.run_id.as_str(),"runId":params.run_id.as_str(),
             "execution":params.execution.as_str(),
             "event":{"type":"output","text":text}
         }))

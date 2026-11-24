@@ -96,9 +96,8 @@ async fn hosted_request_status_list_and_watch_accept_large_requests_with_bounded
         let observed = authority
             .hosted_run_status(
                 &record,
-                RunStatusParams {
-                    run_id: RunId::new("question-run"),
-                },
+                RunStatusParams::new(RunId::new("question-run")),
+                false,
             )
             .await;
         let listed = authority.hosted_run_list(&record, RunListParams {}).await;
@@ -106,6 +105,7 @@ async fn hosted_request_status_list_and_watch_accept_large_requests_with_bounded
             .hosted_run_watch(
                 &record,
                 RunWatchParams {
+                    part_id: None,
                     run_id: RunId::new("question-run"),
                     from_cursor: None,
                 },
@@ -119,7 +119,8 @@ async fn hosted_request_status_list_and_watch_accept_large_requests_with_bounded
             assert!(event.is_err());
         } else {
             assert_eq!(
-                serde_json::to_value(observed.assert_value().status).assert_value(),
+                serde_json::to_value(observed.assert_value().assert_value().status.status)
+                    .assert_value(),
                 status
             );
             assert_eq!(
@@ -141,6 +142,7 @@ async fn hosted_request_status_list_and_watch_accept_large_requests_with_bounded
                 .hosted_run_logs(
                     &record,
                     RunLogsParams {
+                        part_id: None,
                         run_id: RunId::new("question-run"),
                         from_cursor: None,
                         execution: None,
@@ -173,8 +175,12 @@ async fn hosted_request_list_bounds_each_status_in_a_collection_of_large_request
                 "signals":{"decision":["approved","rejected"]},
                 "output":{"kind":"record","fields":{}},"expiresAt":2000},"metadata":{}}
     })).collect::<Vec<_>>();
-    let expected = json!({"runs":runs});
-    let returned = expected.clone();
+    let returned = json!({"runs":runs});
+    let mut expected = returned.clone();
+    for row in expected["runs"].as_array_mut().assert_value() {
+        row["partId"] = row["runId"].clone();
+        row["currentPartId"] = row["runId"].clone();
+    }
     assert!(
         returned.to_string().len() > 2 * openengine_cluster_protocol::MAX_REQUEST_RESPONSE_BYTES
     );
@@ -231,7 +237,7 @@ async fn hosted_request_answer_requires_the_marker_and_uses_the_resume_route() {
         let (record, authority) = authenticated_authority(&root, &target.origin).await;
         let from = json!({"kind":"answer","signals":{"decision":"approved"},"output":{"feedback":"Ready."}});
         let params = serde_json::from_value(
-            json!({"runId":"run-recoverable","successorRunId":"successor","from":from}),
+            json!({"runId":"run-recoverable","partId":"run-recoverable","successorPartId":"successor","from":from}),
         )
         .assert_value();
         let result = authority.hosted_run_resume(&record, params).await;
@@ -279,9 +285,7 @@ async fn hosted_suspend_uses_the_advertised_authenticated_http_route() {
     let result = authority
         .hosted_run_suspend(
             &record,
-            RunSuspendParams {
-                run_id: RunId::new("run-recoverable"),
-            },
+            RunSuspendParams::new(RunId::new("run-recoverable")),
         )
         .await
         .assert_value()
@@ -335,7 +339,7 @@ async fn absent_hosted_control_routes_fall_back_without_resolving_access_tokens(
         let run_id = RunId::new("run-recoverable");
         let missing = match operation {
             0 => authority
-                .hosted_run_suspend(&record, RunSuspendParams { run_id })
+                .hosted_run_suspend(&record, RunSuspendParams::new(run_id))
                 .await
                 .assert_value()
                 .is_none(),
@@ -343,6 +347,7 @@ async fn absent_hosted_control_routes_fall_back_without_resolving_access_tokens(
                 .hosted_run_vectors(
                     &record,
                     RunVectorsParams {
+                        part_id: None,
                         run_id,
                         after: None,
                         limit: None,
@@ -355,6 +360,7 @@ async fn absent_hosted_control_routes_fall_back_without_resolving_access_tokens(
                 .hosted_run_vector(
                     &record,
                     RunVectorParams {
+                        part_id: None,
                         run_id,
                         id: VectorId::new("entry").assert_value(),
                     },
@@ -438,12 +444,7 @@ async fn hosted_inbox_reads_advertised_routes_with_an_explicit_large_show_bound(
         .assert_value();
     assert_eq!(page.next_after, Some(RunId::new("question-run")));
     let show = authority
-        .hosted_inbox_show(
-            &record,
-            RunStatusParams {
-                run_id: RunId::new("question-run"),
-            },
-        )
+        .hosted_inbox_show(&record, RunStatusParams::new(RunId::new("question-run")))
         .await
         .assert_value()
         .assert_value();

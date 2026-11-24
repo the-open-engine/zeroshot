@@ -72,9 +72,7 @@ async fn local_observer_preserves_durable_primary_result_after_postmortem_proces
             .assert_value();
         let status = observer
             .inner
-            .status(RunStatusParams {
-                run_id: run_id.clone(),
-            })
+            .status(RunStatusParams::new(run_id.clone()))
             .await
             .assert_value();
         let RunStatus::Finished {
@@ -95,7 +93,7 @@ async fn local_observer_preserves_durable_primary_result_after_postmortem_proces
             .assert_value();
         let replay = again
             .inner
-            .status(RunStatusParams { run_id })
+            .status(RunStatusParams::new(run_id))
             .await
             .assert_value();
         assert_eq!(replay.at_cursor, status.at_cursor);

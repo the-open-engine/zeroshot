@@ -37,7 +37,10 @@
           "name": "protocolVersion",
           "required": true,
           "schema": {
-            "const": "openengine.cluster/v2",
+            "enum": [
+              "openengine.cluster/v3",
+              "openengine.cluster/v2"
+            ],
             "type": "string"
           }
         }
@@ -565,6 +568,14 @@
           "schema": {
             "$ref": "schema.json#/$defs/RunSubmission"
           }
+        },
+        {
+          "description": "Select logical run IDs without initializing the connection.",
+          "name": "protocolVersion",
+          "required": false,
+          "schema": {
+            "const": "openengine.cluster/v3"
+          }
         }
       ],
       "result": {
@@ -582,7 +593,16 @@
     {
       "name": "run/list",
       "paramStructure": "by-name",
-      "params": [],
+      "params": [
+        {
+          "description": "Select logical run IDs without initializing the connection.",
+          "name": "protocolVersion",
+          "required": false,
+          "schema": {
+            "const": "openengine.cluster/v3"
+          }
+        }
+      ],
       "result": {
         "name": "runListResult",
         "schema": {
@@ -604,6 +624,25 @@
           "required": true,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "Select one physical part of this run. Omission addresses the logical run.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        {
+          "description": "Select logical run IDs without initializing the connection.",
+          "name": "protocolVersion",
+          "required": false,
+          "schema": {
+            "const": "openengine.cluster/v3"
           }
         }
       ],
@@ -631,6 +670,17 @@
           }
         },
         {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "Select one physical part of this run. Omission addresses the logical run.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        {
           "name": "fromCursor",
           "required": false,
           "schema": {
@@ -638,6 +688,14 @@
               "string",
               "null"
             ]
+          }
+        },
+        {
+          "description": "Select logical run IDs without initializing the connection.",
+          "name": "protocolVersion",
+          "required": false,
+          "schema": {
+            "const": "openengine.cluster/v3"
           }
         }
       ],
@@ -665,6 +723,17 @@
           }
         },
         {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "Select one physical part of this run. Omission addresses the logical run.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        {
           "name": "fromCursor",
           "required": false,
           "schema": {
@@ -685,6 +754,14 @@
               "string",
               "null"
             ]
+          }
+        },
+        {
+          "description": "Select logical run IDs without initializing the connection.",
+          "name": "protocolVersion",
+          "required": false,
+          "schema": {
+            "const": "openengine.cluster/v3"
           }
         }
       ],
@@ -712,6 +789,17 @@
           }
         },
         {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "Select one physical part of this run. Omission addresses the logical run.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        {
           "name": "execution",
           "required": true,
           "schema": {
@@ -719,6 +807,14 @@
             "minLength": 1,
             "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
             "type": "string"
+          }
+        },
+        {
+          "description": "Select logical run IDs without initializing the connection.",
+          "name": "protocolVersion",
+          "required": false,
+          "schema": {
+            "const": "openengine.cluster/v3"
           }
         }
       ],
@@ -743,6 +839,25 @@
           "required": true,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "When supplied, the observed part must still be current.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        {
+          "description": "Select logical run IDs without initializing the connection.",
+          "name": "protocolVersion",
+          "required": false,
+          "schema": {
+            "const": "openengine.cluster/v3"
           }
         }
       ],
@@ -770,6 +885,17 @@
           }
         },
         {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "When supplied, the observed part must still be current.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        {
           "name": "text",
           "required": true,
           "schema": {
@@ -789,6 +915,14 @@
           "required": false,
           "schema": {
             "$ref": "schema.json#/$defs/RunSteerParams/properties/node"
+          }
+        },
+        {
+          "description": "Select logical run IDs without initializing the connection.",
+          "name": "protocolVersion",
+          "required": false,
+          "schema": {
+            "const": "openengine.cluster/v3"
           }
         }
       ],
@@ -813,6 +947,25 @@
           "required": true,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "Select one physical part of this run. Omission addresses the logical run.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        {
+          "description": "Select logical run IDs without initializing the connection.",
+          "name": "protocolVersion",
+          "required": false,
+          "schema": {
+            "const": "openengine.cluster/v3"
           }
         }
       ],
@@ -840,6 +993,17 @@
           }
         },
         {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "Select one physical part of this run. Omission addresses the logical run.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        {
           "name": "after",
           "required": false,
           "schema": {
@@ -857,6 +1021,14 @@
               "integer",
               "null"
             ]
+          }
+        },
+        {
+          "description": "Select logical run IDs without initializing the connection.",
+          "name": "protocolVersion",
+          "required": false,
+          "schema": {
+            "const": "openengine.cluster/v3"
           }
         }
       ],
@@ -900,6 +1072,14 @@
               "null"
             ]
           }
+        },
+        {
+          "description": "Select logical run IDs without initializing the connection.",
+          "name": "protocolVersion",
+          "required": false,
+          "schema": {
+            "const": "openengine.cluster/v3"
+          }
         }
       ],
       "result": {
@@ -925,6 +1105,25 @@
           "required": true,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "Select one physical part of this run. Omission addresses the logical run.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        {
+          "description": "Select logical run IDs without initializing the connection.",
+          "name": "protocolVersion",
+          "required": false,
+          "schema": {
+            "const": "openengine.cluster/v3"
           }
         }
       ],
@@ -952,17 +1151,36 @@
           }
         },
         {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "Select one physical part of this run. Omission addresses the logical run.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        {
           "name": "id",
           "required": true,
           "schema": {
             "$ref": "schema.json#/$defs/VectorId"
+          }
+        },
+        {
+          "description": "Select logical run IDs without initializing the connection.",
+          "name": "protocolVersion",
+          "required": false,
+          "schema": {
+            "const": "openengine.cluster/v3"
           }
         }
       ],
       "result": {
         "name": "runVectorResult",
         "schema": {
-          "$ref": "schema.json#/$defs/RunVector"
+          "$ref": "schema.json#/$defs/RunVectorResult"
         }
       },
       "summary": "Read one vector entry in full",
@@ -982,6 +1200,17 @@
           "required": true,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "Select one physical part of this run. Omission addresses the logical run.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         {
@@ -1010,6 +1239,14 @@
               "null"
             ]
           }
+        },
+        {
+          "description": "Select logical run IDs without initializing the connection.",
+          "name": "protocolVersion",
+          "required": false,
+          "schema": {
+            "const": "openengine.cluster/v3"
+          }
         }
       ],
       "result": {
@@ -1037,10 +1274,29 @@
           }
         },
         {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "When supplied, the observed part must still be current.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        {
           "name": "runtime",
           "required": true,
           "schema": {
             "$ref": "schema.json#/$defs/RunResumeRequirementsParams/properties/runtime"
+          }
+        },
+        {
+          "description": "Select logical run IDs without initializing the connection.",
+          "name": "protocolVersion",
+          "required": false,
+          "schema": {
+            "const": "openengine.cluster/v3"
           }
         }
       ],
@@ -1058,7 +1314,7 @@
       }
     },
     {
-      "description": "Omitting from or selecting restart restarts a failed run where it started, on the latest retained workspace: a submitted run at its graph root, a successor at the boundary it began at, so an accepted answer stays accepted. Selecting checkpoint restores the matching workspace and predecessor outputs and reruns the named node or atomic concurrent group. Graph, input, source and delivery metadata remain fixed. Optional runtime completely replaces the saved runtime after ordinary admission; omission keeps it. Runtime replacement requires resume_runtime (openengine.resume-runtime/v1). Credentials are resolved again for the successor. Checkpoint continuations and suspended successors restore captured node-instance provider conversations, and so does a restart of such a successor; the restart of a submitted run starts new ones. Suspended command/wait runs continue without restoring files. Request suspensions require from.kind answer with signals and output, or explicit expiry. Requests require request_ask (openengine.request-ask/v1); deadline expiry settles the held verifier with timeout.",
+      "description": "RunId identifies the original submission. PartId must identify its current part. A successful resume returns the same runId and the new currentPartId. Omitting from or selecting restart restarts a failed run where it started, on the latest retained workspace: a submitted run at its graph root, a successor at the boundary it began at, so an accepted answer stays accepted. Selecting checkpoint restores the matching workspace and predecessor outputs and reruns the named node or atomic concurrent group. Graph, input, source and delivery metadata remain fixed. Optional runtime completely replaces the saved runtime after ordinary admission; omission keeps it. Runtime replacement requires resume_runtime (openengine.resume-runtime/v1). Credentials are resolved again for the successor. Checkpoint continuations and suspended successors restore captured node-instance provider conversations, and so does a restart of such a successor; the restart of a submitted run starts new ones. Suspended command/wait runs continue without restoring files. Request suspensions require from.kind answer with signals and output, or explicit expiry. Requests require request_ask (openengine.request-ask/v1); deadline expiry settles the held verifier with timeout.",
       "name": "run/resume",
       "paramStructure": "by-name",
       "params": [
@@ -1070,7 +1326,15 @@
           }
         },
         {
-          "name": "successorRunId",
+          "name": "partId",
+          "required": true,
+          "schema": {
+            "description": "Part observed by the caller. This must still be the current part when resume claims it.",
+            "type": "string"
+          }
+        },
+        {
+          "name": "successorPartId",
           "required": true,
           "schema": {
             "type": "string"
@@ -1182,6 +1446,14 @@
             ],
             "description": "Person credited by a `Co-authored-by` trailer on every commit carrying the successor's\nchanges. Author and committer stay as `commitIdentity` selects."
           }
+        },
+        {
+          "description": "Select logical run IDs without initializing the connection.",
+          "name": "protocolVersion",
+          "required": false,
+          "schema": {
+            "const": "openengine.cluster/v3"
+          }
         }
       ],
       "result": {
@@ -1206,6 +1478,25 @@
           "required": true,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "When supplied, the observed part must still be current.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        {
+          "description": "Select logical run IDs without initializing the connection.",
+          "name": "protocolVersion",
+          "required": false,
+          "schema": {
+            "const": "openengine.cluster/v3"
           }
         }
       ],

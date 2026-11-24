@@ -19,6 +19,7 @@ use openengine_cluster_protocol::{
 use openengine_cluster_testkit::assertions::AssertValue;
 
 mod control;
+mod lineage;
 mod live;
 mod remote;
 mod status;

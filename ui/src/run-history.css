@@ -847,6 +847,7 @@
   }
   .history-header .profile-title {
     gap: 7px;
+    flex-wrap: wrap;
   }
   .history-header h1 {
     font-size: 20px;

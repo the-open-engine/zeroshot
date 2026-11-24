@@ -241,6 +241,7 @@ async fn sse_route_emits_named_pages_and_validates_resume_before_headers() {
     );
     let response = client
         .get(&url)
+        .header(openengine_cluster_protocol::RUN_PARTS_HEADER, "1")
         .header("last-event-id", "v2:3")
         .send()
         .await
@@ -250,7 +251,7 @@ async fn sse_route_emits_named_pages_and_validates_resume_before_headers() {
     assert_eq!(response.headers()["cache-control"], "no-store");
     let body = response.text().await.assert_value();
     assert!(body.contains("event: history\n"));
-    assert!(body.contains("id: v2:4\n"));
+    assert!(body.contains(&format!("id: {}@v2:4\n", fixture.id.as_str())));
     let page: Value = serde_json::from_str(
         body.lines()
             .find_map(|line| line.strip_prefix("data: "))
@@ -263,6 +264,7 @@ async fn sse_route_emits_named_pages_and_validates_resume_before_headers() {
     for cursor in ["bad", "v2:999"] {
         let response = client
             .get(&url)
+            .header(openengine_cluster_protocol::RUN_PARTS_HEADER, "1")
             .header("last-event-id", cursor)
             .send()
             .await

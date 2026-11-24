@@ -20,6 +20,7 @@ pub fn entry(
         return None;
     };
     Some(InboxEntry {
+        part_id: run_id.clone(),
         run_id,
         node: node.clone(),
         created_at: *created_at,
@@ -47,6 +48,7 @@ pub async fn show(
         let page = super::vectors::list_full(
             ledger,
             RunVectorsParams {
+                part_id: None,
                 run_id: run_id.clone(),
                 after,
                 limit: Some(100),
@@ -64,6 +66,7 @@ pub async fn show(
                 } = vector.content
             {
                 own = Some(InboxShowResult {
+                    part_id: run_id.clone(),
                     run_id: run_id.clone(),
                     node,
                     created_at: vector.created_at,
@@ -108,6 +111,7 @@ pub async fn with_successor(
         let page = super::vectors::list_full(
             ledger,
             RunVectorsParams {
+                part_id: None,
                 run_id: successor.clone(),
                 after,
                 limit: Some(100),

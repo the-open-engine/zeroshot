@@ -111,6 +111,13 @@ pub enum RunVectorContent {
         node: NodeName,
     },
     Continuation {
+        /// Present when the operator explicitly rewound to a named checkpoint.
+        #[serde(
+            default,
+            rename = "checkpointId",
+            skip_serializing_if = "Option::is_none"
+        )]
+        checkpoint_id: Option<super::CheckpointId>,
         #[serde(rename = "resumedFrom", deserialize_with = "deserialize_record_run_id")]
         #[schemars(with = "VectorId")]
         resumed_from: RunId,
@@ -126,6 +133,9 @@ pub enum RunVectorContent {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunVectorsParams {
     pub run_id: RunId,
+    /// Select one physical part of this run. Omission addresses the logical run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part_id: Option<RunId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub after: Option<VectorId>,
     #[serde(
@@ -146,6 +156,8 @@ impl RunVectorsParams {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunVectorsResult {
     pub run_id: RunId,
+    /// Part that owns this record.
+    pub part_id: RunId,
     #[schemars(length(max = 100))]
     pub vectors: Vec<RunVectorSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -156,11 +168,40 @@ pub struct RunVectorsResult {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunVectorParams {
     pub run_id: RunId,
+    /// Select one physical part of this run. Omission addresses the logical run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part_id: Option<RunId>,
     pub id: VectorId,
 }
 
 /// Full vector content. Kept separate from page response bounds.
-pub type RunVectorResult = RunVector;
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunVectorResult {
+    pub id: VectorId,
+    #[serde(deserialize_with = "deserialize_record_run_id")]
+    #[schemars(with = "VectorId")]
+    pub run_id: RunId,
+    /// Physical part that originally recorded this vector, including inherited entries.
+    #[serde(deserialize_with = "deserialize_record_run_id")]
+    #[schemars(with = "VectorId")]
+    pub part_id: RunId,
+    pub created_at: UnixTimestampMillis,
+    #[serde(flatten)]
+    pub content: RunVectorContent,
+}
+
+impl From<RunVector> for RunVectorResult {
+    fn from(vector: RunVector) -> Self {
+        Self {
+            id: vector.id,
+            run_id: vector.run_id.clone(),
+            part_id: vector.run_id,
+            created_at: vector.created_at,
+            content: vector.content,
+        }
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -183,30 +224,44 @@ pub(super) fn deserialize_record_run_id<'de, D: serde::Deserializer<'de>>(
 
 impl RunVector {
     pub fn validate(&self) -> Result<(), super::NativeV2RunValueError> {
-        VectorId::new(self.run_id.as_str())?;
-        if let RunVectorContent::Steer {
-            text,
-            node,
-            network,
-            ..
-        } = &self.content
-        {
-            if node.is_some() && network.is_some() {
-                return Err(super::NativeV2RunValueError(
-                    "node and network steering cannot be combined",
-                ));
-            }
-            super::validate_steer(text)
-                .map_err(|_| super::NativeV2RunValueError("invalid steer text"))?;
-            if let Some(network) = network {
-                network.validate()?;
-            }
-        }
-        if let RunVectorContent::Continuation { resumed_from } = &self.content {
-            VectorId::new(resumed_from.as_str())?;
-        }
-        Ok(())
+        validate_vector(&self.run_id, &self.content)
     }
+}
+
+impl RunVectorResult {
+    pub fn validate(&self) -> Result<(), super::NativeV2RunValueError> {
+        VectorId::new(self.part_id.as_str())?;
+        validate_vector(&self.run_id, &self.content)
+    }
+}
+
+fn validate_vector(
+    run_id: &RunId,
+    content: &RunVectorContent,
+) -> Result<(), super::NativeV2RunValueError> {
+    VectorId::new(run_id.as_str())?;
+    if let RunVectorContent::Steer {
+        text,
+        node,
+        network,
+        ..
+    } = content
+    {
+        if node.is_some() && network.is_some() {
+            return Err(super::NativeV2RunValueError(
+                "node and network steering cannot be combined",
+            ));
+        }
+        super::validate_steer(text)
+            .map_err(|_| super::NativeV2RunValueError("invalid steer text"))?;
+        if let Some(network) = network {
+            network.validate()?;
+        }
+    }
+    if let RunVectorContent::Continuation { resumed_from, .. } = content {
+        VectorId::new(resumed_from.as_str())?;
+    }
+    Ok(())
 }
 
 /// Bounded list projection. Full text, schemas and answers require run/vector.
@@ -217,6 +272,9 @@ pub struct RunVectorSummary {
     #[serde(deserialize_with = "deserialize_record_run_id")]
     #[schemars(with = "VectorId")]
     pub run_id: RunId,
+    #[serde(deserialize_with = "deserialize_record_run_id")]
+    #[schemars(with = "VectorId")]
+    pub part_id: RunId,
     pub created_at: UnixTimestampMillis,
     #[serde(flatten)]
     pub content: RunVectorSummaryContent,
@@ -245,6 +303,13 @@ pub enum RunVectorSummaryContent {
         node: NodeName,
     },
     Continuation {
+        /// Present when the operator explicitly rewound to a named checkpoint.
+        #[serde(
+            default,
+            rename = "checkpointId",
+            skip_serializing_if = "Option::is_none"
+        )]
+        checkpoint_id: Option<super::CheckpointId>,
         #[serde(rename = "resumedFrom", deserialize_with = "deserialize_record_run_id")]
         #[schemars(with = "VectorId")]
         resumed_from: RunId,
@@ -270,6 +335,11 @@ pub enum RunVectorSummaryContent {
 }
 impl From<RunVector> for RunVectorSummary {
     fn from(vector: RunVector) -> Self {
+        RunVectorResult::from(vector).into()
+    }
+}
+impl From<RunVectorResult> for RunVectorSummary {
+    fn from(vector: RunVectorResult) -> Self {
         let content = match vector.content {
             RunVectorContent::Steer {
                 node,
@@ -294,9 +364,13 @@ impl From<RunVector> for RunVectorSummary {
             RunVectorContent::Suspension { reason, node } => {
                 RunVectorSummaryContent::Suspension { reason, node }
             }
-            RunVectorContent::Continuation { resumed_from } => {
-                RunVectorSummaryContent::Continuation { resumed_from }
-            }
+            RunVectorContent::Continuation {
+                resumed_from,
+                checkpoint_id,
+            } => RunVectorSummaryContent::Continuation {
+                resumed_from,
+                checkpoint_id,
+            },
             RunVectorContent::Wait { node, due_at } => {
                 RunVectorSummaryContent::Wait { node, due_at }
             }
@@ -313,6 +387,7 @@ impl From<RunVector> for RunVectorSummary {
         Self {
             id: vector.id,
             run_id: vector.run_id,
+            part_id: vector.part_id,
             created_at: vector.created_at,
             content,
         }

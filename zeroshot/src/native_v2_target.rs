@@ -11,7 +11,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use zeroshot_engine::native_v2_cli::oecp::{BoxedSubscription, TargetConnector};
+use zeroshot_engine::native_v2_cli::oecp::{BoxedSubscription, HostedRunRoute, TargetConnector};
 use zeroshot_engine::native_v2_cli::{
     CliRunForceResult, CliRunListResult, CliRunStatusResult, CliRunWatchEventNotification,
     NativeV2CliError, PreparedStackRequest, PreparedRunRequest, TargetAdd,
@@ -675,6 +675,7 @@ where
             .await?;
         let fixed = openengine_cluster_client::ClusterClient::new(transport.as_ref())
             .run_resume_requirements(openengine_cluster_protocol::RunResumeRequirementsParams {
+                part_id: Some(run_id.clone()),
                 run_id: run_id.clone(),
                 runtime: runtime.clone(),
             })
@@ -739,11 +740,11 @@ where
         let target = self.direct_recovery_target(name)?;
         let mut trusted = self
             .registry
-            .recovery_authorization_with_source(&target.id, &params.run_id)
+            .recovery_authorization_with_source(&target.id, &params.part_id)
             .map_err(cli_target_error)?;
         if let Some(runtime) = &params.runtime {
             trusted.connections = self
-                .replacement_workspace_recovery_requirements(name, &params.run_id, runtime)
+                .replacement_workspace_recovery_requirements(name, &params.part_id, runtime)
                 .await?;
         }
         if params.connection_resolver.is_some()
@@ -938,15 +939,26 @@ where
         name: &str,
         params: RunStatusParams,
     ) -> Result<Option<CliRunStatusResult>, NativeV2CliError> {
+        Ok(self
+            .hosted_run_route(name, params, false)
+            .await?
+            .map(|route| route.status))
+    }
+
+    async fn hosted_run_route(
+        &self,
+        name: &str,
+        params: RunStatusParams,
+        grouped_only: bool,
+    ) -> Result<Option<HostedRunRoute>, NativeV2CliError> {
         let target = self.target(name)?;
         if matches!(target.access, TargetAccess::Direct) {
             return Ok(None);
         }
         self.authority
-            .hosted_run_status(&target, params)
+            .hosted_run_status(&target, params, grouped_only)
             .await
             .map_err(|error| self.authority.redact_error(error).into_cli(&target))
-            .map(Some)
     }
 
     async fn hosted_run_watch(

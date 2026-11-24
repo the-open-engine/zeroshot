@@ -671,7 +671,8 @@ async fn old_hosted_target_refuses_profile_git_source_and_resume_credentials_bef
         .assert_error();
     let resume: openengine_cluster_protocol::RunResumeParams = serde_json::from_value(json!({
         "runId":"018f5e78-7f95-7c22-8d98-3f15af20c991",
-        "successorRunId":"018f5e78-7f95-7c22-8d98-3f15af20c992",
+        "partId":"018f5e78-7f95-7c22-8d98-3f15af20c991",
+        "successorPartId":"018f5e78-7f95-7c22-8d98-3f15af20c992",
         "gitCredentials":{"kind":"ssh","privateKey":"private-key-secret","knownHosts":"known-host-secret"}
     })).assert_value();
     authority
@@ -1012,6 +1013,7 @@ async fn wait_suspend_and_vector_capabilities_refuse_before_tokens_or_request_bo
                 .hosted_run_vectors(
                     &record,
                     RunVectorsParams {
+                        part_id: None,
                         run_id,
                         after: None,
                         limit: None,
@@ -1023,6 +1025,7 @@ async fn wait_suspend_and_vector_capabilities_refuse_before_tokens_or_request_bo
                 .hosted_run_vector(
                     &record,
                     RunVectorParams {
+                        part_id: None,
                         run_id,
                         id: VectorId::new("entry").assert_value(),
                     },

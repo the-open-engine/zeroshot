@@ -201,11 +201,18 @@ string-submission overrides.
 
 ## Durable observation
 
+`Run.watch(after=..., follow=True)` keeps watching across suspensions.
 `Run.watch(after=...)` and `Run.logs(after=..., execution=...)` resume strictly after opaque native
 cursors. A `wait_timeout` expiry raises `RunWaitTimeout` carrying the still-active `Run`; cancelling
-the Python await also detaches without stopping it. `Run.force_stop()` is the only operation that
-changes run lifetime. Each `LogEvent.timestamp` is the positive, JavaScript-safe Unix epoch
+the Python await also detaches without stopping it. Use `Run.force_stop()` to terminate it. Each `LogEvent.timestamp` is the positive, JavaScript-safe Unix epoch
 millisecond captured at the producer and preserved unchanged by durable replay.
+
+Keep `Run.id` through answers, resumes, and retries. `await run.status()` reports `part_id` and
+`current_part_id`. Select one part with `client.get_run(run.id, part_id=part_id)`. Log and status
+events report the part that produced them. A logical watch follows part changes. Waiting raises
+`RunSuspendedError` when the current part suspends. To answer the exact question you displayed,
+use `question = await run.request()` and `await run.answer(answer, part_id=question.part_id)`.
+The returned handle keeps the logical ID and records the new current part.
 
 `await run.discard_workspace()` uses the client's target and returns whether retained data was
 deleted. For a finished local run it frees the recovery lineage's checkpoints while preserving

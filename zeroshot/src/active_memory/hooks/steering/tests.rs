@@ -418,7 +418,7 @@ async fn successor(ledger: &dyn RunLedger, source: &RunId, next: &RunId) {
         })
         .await
         .assert_value();
-    crate::v2_run_ledger::vectors::inherit(ledger, ledger, source, next)
+    crate::v2_run_ledger::vectors::inherit(ledger, ledger, (source, next), None)
         .await
         .assert_value();
 }
@@ -442,6 +442,7 @@ async fn steer_snapshot_receipts_exclude_later_receipts_across_repeated_successo
         RunSteerParams {
             node: None,
             mode: Default::default(),
+            part_id: None,
             run_id: run.clone(),
             text: "before-snapshot".into(),
         },
@@ -456,6 +457,7 @@ async fn steer_snapshot_receipts_exclude_later_receipts_across_repeated_successo
         RunSteerParams {
             node: None,
             mode: Default::default(),
+            part_id: None,
             run_id: run.clone(),
             text: "after-snapshot".into(),
         },
@@ -606,6 +608,7 @@ async fn steer_sent_as_a_message_is_received_when_shown_and_delivered_once() {
         ledger.as_ref(),
         openengine_cluster_protocol::RunSteerParams {
             node: None,
+            part_id: None,
             run_id: run.clone(),
             text: "Standing direction".into(),
             mode: openengine_cluster_protocol::SteeringMode::Standing,
@@ -680,6 +683,7 @@ async fn steer_message_that_was_never_shown_is_due_again_at_the_next_prompt() {
         openengine_cluster_protocol::RunSteerParams {
             node: None,
             mode: Default::default(),
+            part_id: None,
             run_id: run.clone(),
             text: "Standing direction".into(),
         },

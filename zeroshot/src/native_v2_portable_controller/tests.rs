@@ -209,9 +209,7 @@ async fn wait_terminal(
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
             let status = client
-                .run_status(RunStatusParams {
-                    run_id: run_id.clone(),
-                })
+                .run_status(RunStatusParams::new(run_id.clone()))
                 .await
                 .assert_value_with("portable status");
             if let RunStatus::Finished {
@@ -434,9 +432,7 @@ async fn observer_reconciles_process_loss_without_constructing_or_dispatching_a_
     ));
     let status = controller
         .inner
-        .status(RunStatusParams {
-            run_id: run_id.clone(),
-        })
+        .status(RunStatusParams::new(run_id.clone()))
         .await
         .assert_value_with("durable lost status");
     assert_eq!(
@@ -626,9 +622,7 @@ async fn local_portable_controller_admits_contributed_runtime_without_native_pro
         loop {
             let status = controller
                 .inner
-                .status(RunStatusParams {
-                    run_id: run_id.clone(),
-                })
+                .status(RunStatusParams::new(run_id.clone()))
                 .await
                 .assert_value();
             if let RunStatus::Finished {

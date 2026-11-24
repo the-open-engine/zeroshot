@@ -119,11 +119,24 @@ class FailureContext:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class RunResult:
+class _RunPart:
+    """Preserve the original constructor for observations of a single execution."""
+
+    run_id: str
+    part_id: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.part_id:
+            object.__setattr__(self, "part_id", self.run_id)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RunResult(_RunPart):
     """Terminal outcome from Client.run(), Run.wait(), or Run.force_stop().
 
     Args:
         run_id: Public durable run identity.
+        part_id: Physical part that owns this projection or event.
         succeeded: Whether the graph completed successfully.
         output: Successful graph-authored output, which may be JSON null.
         delivery_receipt: Native delivery evidence, independent of output; None when unavailable.
@@ -131,7 +144,6 @@ class RunResult:
         context: Structured safe failure evidence, or None for older run data.
     """
 
-    run_id: str
     succeeded: bool
     output: JsonValue = None
     delivery_receipt: JsonValue = None
@@ -160,11 +172,13 @@ class ControllerObservation:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class RunStatus:
+class RunStatus(_RunPart):
     """Current durable projection for one run.
 
     Args:
         run_id: Public durable run identity.
+        part_id: Part represented by this status.
+        current_part_id: Latest admitted part at lookup time. None for watch events.
         title: Immutable persisted title.
         source: Immutable Git source snapshot, or None when unavailable for a local run.
         size: Opaque size identifier accepted by the target.
@@ -187,7 +201,7 @@ class RunStatus:
             history carries its import time, not the original execution time. Cursor defines order.
     """
 
-    run_id: str
+    current_part_id: str | None = None
     title: str
     source: ResolvedSource | None
     size: str
@@ -209,11 +223,13 @@ class RunStatus:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class RunSummary:
+class RunSummary(_RunPart):
     """Inventory projection returned by Client.list_runs().
 
     Args:
         run_id: Public durable run identity.
+        part_id: Part represented by this status.
+        current_part_id: Latest admitted part at lookup time.
         title: Immutable persisted title.
         source: Immutable Git source snapshot, or None when unavailable for a local run.
         size: Opaque size identifier accepted by the target.
@@ -230,7 +246,7 @@ class RunSummary:
         request: Human request contract when suspended for a request.
     """
 
-    run_id: str
+    current_part_id: str = ""
     title: str
     source: ResolvedSource | None
     size: str
@@ -246,13 +262,19 @@ class RunSummary:
     due_at: int | None = None
     request: HumanRequest | None = None
 
+    def __post_init__(self) -> None:
+        _RunPart.__post_init__(self)
+        if not self.current_part_id:
+            object.__setattr__(self, "current_part_id", self.part_id)
+
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class LogEvent:
+class LogEvent(_RunPart):
     """One safe durable native log record.
 
     Args:
         run_id: Public durable run identity.
+        part_id: Physical part that owns this projection or event.
         cursor: Opaque durable log cursor.
         timestamp: Producer-captured Unix epoch milliseconds, preserved by replay.
         execution: Opaque execution selector, or None for run-wide records.
@@ -262,7 +284,6 @@ class LogEvent:
         message: Bounded secret-safe message.
     """
 
-    run_id: str
     cursor: str
     timestamp: int
     execution: str | None
@@ -301,35 +322,35 @@ class RunSteer:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class RunVector:
+class RunVector(_RunPart):
     """One immutable entry in the run's ordered vector record.
 
     Args:
         id: Opaque ordered entry identity, preserved by continuation.
-        run_id: Attempt that wrote the entry.
+        run_id: Stable public run identity.
+        part_id: Physical part that owns this projection or event.
         created_at: Entry time in Unix epoch milliseconds.
         kind: Entry kind.
         content: Complete kind-specific JSON fields.
     """
 
     id: str
-    run_id: str
     created_at: int
     kind: str
     content: JsonValue
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class RunVectorsPage:
+class RunVectorsPage(_RunPart):
     """A bounded page of the vector record.
 
     Args:
         run_id: Run whose record was read.
+        part_id: Physical part that owns this projection or event.
         vectors: Ordered bounded summaries; use Run.vector() for complete content.
         next_after: Cursor for the next page, or None at the end.
     """
 
-    run_id: str
     vectors: tuple[RunVector, ...]
     next_after: str | None
 
@@ -354,18 +375,18 @@ class HumanRequest:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class InboxEntry:
+class InboxEntry(_RunPart):
     """One bounded request summary.
 
     Args:
         run_id: Run held suspended by this request.
+        part_id: Physical part that owns this projection or event.
         node: Request verifier name.
         created_at: Creation time in Unix epoch milliseconds.
         expires_at: Exclusive answer deadline in Unix epoch milliseconds.
         state: Pending or expired; reading never applies expiry.
     """
 
-    run_id: str
     node: str
     created_at: int
     expires_at: int
@@ -386,21 +407,26 @@ class InboxPage:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class InboxRequest:
+class InboxRequest(_RunPart):
     """The request made by a run, including its disposition.
 
     Args:
         run_id: Run that asked the question.
+        part_id: Physical part that owns this projection or event.
         node: Request verifier name.
         created_at: Creation time in Unix epoch milliseconds.
         request: Complete question and answer contract.
         state: Pending, answered, expired, or stopped.
-        successor_run_id: Accepted continuation, if any.
+        successor_run_id: Part created by the accepted continuation, if any.
     """
 
-    run_id: str
     node: str
     created_at: int
     request: HumanRequest
     state: Literal["pending", "answered", "expired", "stopped"]
     successor_run_id: str | None
+
+    @property
+    def successor_part_id(self) -> str | None:
+        """Return the part created by an accepted continuation."""
+        return self.successor_run_id

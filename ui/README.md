@@ -123,7 +123,18 @@ The history endpoints are `GET /ui/api/runs`, `GET /ui/api/runs/{id}`,
 These are the local browser BFF routes. A selected target is read server-side through its discovered
 `zeroshot.run-history/v1` list/detail/page templates; target URLs and authorization are not browser
 contracts.
-Omit `after` to begin. SSE resumes from `Last-Event-ID` and closes after the terminal cursor drains.
+The list shows each confirmed run once, ordered by its original submission. Detail accepts any
+member ID and returns the original `runId`, the live `currentPartId`, and `parts` in execution order.
+History pages read one part at a time. Pass their opaque `nextCursor` to continue, including after
+an empty page. An event's `runCursor` bookmarks its exact position across parts. The browser
+shows work once, records pauses and resumptions in Steps, and reconstructs each part's graph from
+its own checkpoint. The timeline position selects the runtime shown in the graph inspector.
+
+Omit `after` to begin. SSE resumes from `Last-Event-ID`, stays open through suspension, and closes
+once the current part's terminal history drains. Add `?partId=ID` to detail, history, or events for
+one part's native cursors, events, and status. These responses include the selected `partId` and
+the logical run and current-part IDs. The standalone viewer uses the root URL throughout live
+follow. A paused replay keeps its recorded position as new parts arrive.
 
 ## Platform integration
 

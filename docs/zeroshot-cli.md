@@ -1564,6 +1564,9 @@ Arguments:
           Public run ID
 
 Options:
+      --part <PART_ID>
+          Select the exact run part for inspection, or the expected current part for a control
+
       --target <NAME>
           Use this named target. If omitted, use the local controller
 
@@ -1583,6 +1586,12 @@ Arguments:
           Public run ID
 
 Options:
+      --follow
+          Keep watching the same run across suspensions and answers
+
+      --part <PART_ID>
+          Select the exact run part for inspection, or the expected current part for a control
+
       --target <NAME>
           Use this named target. If omitted, use the local controller
 
@@ -1612,6 +1621,9 @@ Arguments:
           Public run ID
 
 Options:
+      --part <PART_ID>
+          Select the exact run part for inspection, or the expected current part for a control
+
       --target <NAME>
           Use this named target. If omitted, use the local controller
 
@@ -1649,6 +1661,9 @@ Arguments:
           Execution reference emitted by the run
 
 Options:
+      --part <PART_ID>
+          Select the exact run part for inspection, or the expected current part for a control
+
       --target <NAME>
           Use this named target. If omitted, use the local controller
 
@@ -1668,6 +1683,9 @@ Arguments:
           Public run ID
 
 Options:
+      --part <PART_ID>
+          Select the exact run part for inspection, or the expected current part for a control
+
       --target <NAME>
           Use this named target. If omitted, use the local controller
 
@@ -1689,6 +1707,9 @@ Arguments:
           Public run ID
 
 Options:
+      --part <PART_ID>
+          Select the exact run part for inspection, or the expected current part for a control
+
       --target <NAME>
           Use this named target. If omitted, use the local controller
 
@@ -1711,6 +1732,9 @@ Arguments:
           Direction, as given. Do not put secrets in a steer
 
 Options:
+      --part <PART_ID>
+          Select the exact run part for inspection, or the expected current part for a control
+
       --target <NAME>
           Use this named target. If omitted, use the local controller
 
@@ -1749,6 +1773,9 @@ Arguments:
           Public run ID
 
 Options:
+      --part <PART_ID>
+          Select the exact run part for inspection, or the expected current part for a control
+
       --target <NAME>
           Use this named target. If omitted, use the local controller
 
@@ -1817,6 +1844,9 @@ Arguments:
           Public run ID
 
 Options:
+      --part <PART_ID>
+          Select the exact run part for inspection, or the expected current part for a control
+
       --target <NAME>
           Use this named target. If omitted, use the local controller
 
@@ -1854,6 +1884,9 @@ Arguments:
           Public run ID
 
 Options:
+      --part <PART_ID>
+          Select the exact run part for inspection, or the expected current part for a control
+
       --target <NAME>
           Use this named target. If omitted, use the local controller
 
@@ -1882,6 +1915,9 @@ Arguments:
           Opaque vector ID returned by vectors
 
 Options:
+      --part <PART_ID>
+          Select the exact run part for inspection, or the expected current part for a control
+
       --target <NAME>
           Use this named target. If omitted, use the local controller
 
@@ -1923,6 +1959,9 @@ Options:
       --uniform-runtime-config <FILE>
           Apply this runtime configuration to the unchanged graph
 
+      --part <PART_ID>
+          Select the exact run part for inspection, or the expected current part for a control
+
       --target <NAME>
           Use this named target. If omitted, use the local controller
 
@@ -1962,6 +2001,9 @@ Arguments:
           Public run ID
 
 Options:
+      --part <PART_ID>
+          Select the exact run part for inspection, or the expected current part for a control
+
       --target <NAME>
           Use this named target. If omitted, use the local controller
 
@@ -2016,6 +2058,9 @@ Arguments:
           Public run ID
 
 Options:
+      --part <PART_ID>
+          Select the exact run part for inspection, or the expected current part for a control
+
       --target <NAME>
           Use this named target. If omitted, use the local controller
 

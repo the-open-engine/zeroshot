@@ -82,6 +82,7 @@ pub(super) async fn execute<B: super::NativeV2CliBackend>(
                 run.target.as_deref(),
                 openengine_cluster_protocol::RunSteerParams {
                     node,
+                    part_id: run.part_id,
                     run_id: run.run_id,
                     text: read_steer_text(text)?,
                     mode,

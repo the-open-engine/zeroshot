@@ -487,7 +487,10 @@ impl ProductionCapsuleAllocator {
             if let crate::v2_run_ledger::RunEvent::Vector { vector } =
                 crate::v2_run_ledger::vector_event(
                     run_id,
-                    openengine_cluster_protocol::RunVectorContent::Continuation { resumed_from },
+                    openengine_cluster_protocol::RunVectorContent::Continuation {
+                        resumed_from,
+                        checkpoint_id: None,
+                    },
                 )
                 .map_err(|_| CapsuleAllocationUnavailable::Runtime)?
             {
@@ -913,6 +916,24 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
             },
             None => Default::default(),
         }
+    }
+
+    async fn committed_recovery(
+        &self,
+        id: &RunId,
+    ) -> openengine_cluster_protocol::WorkspaceRecovery {
+        let mut recovery = self.workspace_recovery(id).await;
+        // Both sidecars precede the atomic rename. Until the source root has
+        // moved the claim fences controls but has not transferred ownership.
+        if recovery.successor_run_id.is_some()
+            && !matches!(
+                run_directory(&self.config.storage_root, id).try_exists(),
+                Ok(false)
+            )
+        {
+            recovery.successor_run_id = None;
+        }
+        recovery
     }
 
     async fn discard_workspace(&self, run_id: &RunId) -> Result<bool, CapsuleCleanupUnavailable> {

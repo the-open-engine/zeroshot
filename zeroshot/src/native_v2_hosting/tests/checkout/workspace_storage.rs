@@ -448,7 +448,7 @@ async fn owned_storage_is_opt_in_and_returns_the_successors_exact_vector_record(
     let capsule = fixture.allocate().await.assert_value();
     assert_eq!(capsule.vector_seed[0], vector);
     assert!(
-        matches!(&capsule.vector_seed[1].content, RunVectorContent::Continuation {resumed_from} if resumed_from == &predecessor)
+        matches!(&capsule.vector_seed[1].content, RunVectorContent::Continuation {resumed_from, ..} if resumed_from == &predecessor)
     );
     capsule
         .cleanup

@@ -4,7 +4,7 @@ use serde_json::json;
 use super::*;
 
 fn status() -> serde_json::Value {
-    json!({"runId":"request-run","title":"Approval","size":"medium","atCursor":"v2:1",
+    json!({"runId":"request-run","currentPartId":"request-run","partId":"request-run","title":"Approval","size":"medium","atCursor":"v2:1",
         "status":{"phase":"suspended","reason":"request","node":"approval","createdAt":1000,
         "request":{"id":"question","text":"Escaped \\\" } ], [ é","signals":{"decision":["approved","rejected"]},
             "output":{"kind":"record","fields":{}},"expiresAt":2000},"metadata":{}}})
@@ -110,8 +110,11 @@ async fn hosted_inventory_stream_rejects_a_total_response_over_the_receive_ceili
         let _ = held.await;
     });
     let response = reqwest::get(url).await.assert_value();
-    let result =
-        tokio::time::timeout(std::time::Duration::from_secs(60), read_run_list(response)).await;
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        read_run_list(response, true),
+    )
+    .await;
     let _ = release.send(());
     server.await.assert_value();
     let error = result.assert_value().unwrap_err();

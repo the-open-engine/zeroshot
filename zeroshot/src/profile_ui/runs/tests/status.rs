@@ -98,9 +98,7 @@ async fn durable_terminal_wins_over_stale_runtime_failure() {
     // The source still has its old fallback; the UI must prefer the durable terminal regardless.
     assert!(matches!(
         observations
-            .status(RunStatusParams {
-                run_id: fixture.id.clone()
-            })
+            .status(RunStatusParams::new(fixture.id.clone()))
             .await
             .assert_value()
             .status,
@@ -358,9 +356,7 @@ async fn failure_observation_requires_exact_run_canonical_cursor_and_reserved_re
         .assert_value()
         .snapshot;
     let valid = observations
-        .status(RunStatusParams {
-            run_id: fixture.id.clone(),
-        })
+        .status(RunStatusParams::new(fixture.id.clone()))
         .await
         .assert_value();
     assert!(confirmed_failure(&snapshot, valid.clone()).is_some());
@@ -480,9 +476,7 @@ mod local {
             .assert_value()
             .snapshot;
         let status = observations
-            .status(RunStatusParams {
-                run_id: fixture.id.clone(),
-            })
+            .status(RunStatusParams::new(fixture.id.clone()))
             .await
             .assert_value();
         let directory = SocketDirectory::new();

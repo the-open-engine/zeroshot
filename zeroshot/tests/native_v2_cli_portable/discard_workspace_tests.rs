@@ -10,7 +10,7 @@ use super::{Fixture, success};
 fn receipt(output: &std::process::Output) -> String {
     let value: Value =
         serde_json::from_slice(output.stdout.split(|b| *b == b'\n').next().unwrap()).unwrap();
-    value["runId"].as_str().unwrap().to_owned()
+    value["currentPartId"].as_str().unwrap().to_owned()
 }
 
 fn finished(fixture: &Fixture, id: &str) {

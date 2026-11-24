@@ -402,7 +402,17 @@ impl NativeV2TargetServer {
             return invalid_request_response("target run ID must be a canonical UUIDv7");
         }
         match self.target.submit(submission).await {
-            Ok(receipt) => HttpResponse::private_json(200, &receipt),
+            Ok(receipt)
+                if request
+                    .head
+                    .header_exact(openengine_cluster_protocol::RUN_PARTS_HEADER)
+                    == Some("1") =>
+            {
+                HttpResponse::private_json(200, &receipt)
+            }
+            Ok(receipt) => {
+                HttpResponse::private_json(200, &serde_json::json!({"runId": receipt.run_id}))
+            }
             Err(error) => run_error_response(error),
         }
     }
@@ -493,6 +503,7 @@ impl NativeV2TargetServer {
 
     fn discovery_document(&self) -> TargetDiscoveryDocument {
         let mut document = TargetDiscoveryDocument::direct(self.access.authentication())
+            .with_run_parts()
             .with_node_runtime_lanes()
             .with_decision_models()
             .with_steering();
@@ -841,7 +852,9 @@ impl ClusterBackend for TargetOecpBackend {
         {
             return Err(workspace_checkpoints_unavailable());
         }
-        if !is_canonical_uuid_v7(&params.run_id) || !is_canonical_uuid_v7(&params.successor_run_id)
+        if ![&params.run_id, &params.part_id, &params.successor_run_id]
+            .into_iter()
+            .all(is_canonical_uuid_v7)
         {
             return Err(workspace_recovery_invalid_run_id());
         }

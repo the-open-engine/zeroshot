@@ -17,7 +17,7 @@ use openengine_cluster_protocol::{
     Cursor, ExecutionRef as PublicExecutionRef, LogLevel, LogRecord, RunAttachEventNotification,
     RunAttachParams, RunAttachResult, RunId, RunLogEventNotification, RunLogsParams, RunLogsResult,
     RunMetadata, RunStatus, RunStatusParams, RunStatusResult, RunWatchEventNotification,
-    RunWatchParams, RunWatchResult, SubscriptionId,
+    RunWatchParams, RunWatchResult, SubscriptionId, TokenUsage,
 };
 use thiserror::Error;
 
@@ -33,7 +33,10 @@ use crate::v2_run_ledger::{
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
 const LOG_TARGET: &str = "agent";
 
+mod follow;
 pub mod history;
+pub(crate) mod lineage;
+use follow::RunFollow;
 
 mod runtime;
 use runtime::RuntimeObservation;
@@ -121,9 +124,10 @@ impl NativeV2Observability {
         Ok(result)
     }
 
-    pub async fn watch(
+    async fn watch_part(
         &self,
         params: RunWatchParams,
+        previous_usage: Option<TokenUsage>,
     ) -> Result<(RunWatchResult, RunWatchSubscription), NativeV2ObservationError> {
         let start = params.from_cursor.unwrap_or_else(initial_cursor);
         let subscription_id = self.subscription_id("watch");
@@ -133,15 +137,6 @@ impl NativeV2Observability {
         if start_sequence > cursor_sequence(&complete.snapshot.cursor)? {
             return Err(RunLedgerError::CursorAhead.into());
         }
-        let mut projection = complete.snapshot.replay_seed();
-        let mut pending = VecDeque::new();
-        WatchFold {
-            subscription_id: &subscription_id,
-            after: start_sequence,
-            projection: &mut projection,
-            pending: &mut pending,
-        }
-        .apply(&complete.events)?;
         let scanned_through = complete
             .events
             .last()
@@ -151,20 +146,23 @@ impl NativeV2Observability {
             run_id: params.run_id.clone(),
             at_cursor: start.clone(),
         };
-        let subscription = RunWatchSubscription {
+        let mut subscription = RunWatchSubscription {
+            follow: None,
             ledger: self.ledger.clone(),
             runtime: self.runtime.clone(),
             subscription_id,
             run_id: params.run_id,
             scanned_through,
             after: start_sequence,
-            projection,
-            pending,
+            projection: complete.snapshot.replay_seed(),
+            previous_usage,
+            pending: VecDeque::new(),
         };
+        subscription.enqueue(&complete.events)?;
         Ok((result, subscription))
     }
 
-    pub async fn logs(
+    async fn logs_part(
         &self,
         params: RunLogsParams,
     ) -> Result<(RunLogsResult, RunLogsSubscription), NativeV2ObservationError> {
@@ -197,6 +195,7 @@ impl NativeV2Observability {
             .last()
             .map_or_else(|| start.clone(), |event| event.cursor.clone());
         let subscription = RunLogsSubscription {
+            follow: None,
             ledger: self.ledger.clone(),
             runtime: self.runtime.clone(),
             subscription_id,
@@ -262,6 +261,7 @@ impl NativeV2Observability {
         let subscription_id = self.subscription_id("attach");
         let result = RunAttachResult {
             subscription_id: subscription_id.clone(),
+            part_id: params.run_id.clone(),
             run_id: params.run_id.clone(),
             execution: params.execution.clone(),
         };
@@ -431,29 +431,32 @@ impl LiveRegistry {
     }
 }
 
-struct WatchFold<'a> {
-    subscription_id: &'a SubscriptionId,
-    after: u64,
-    projection: &'a mut RunSnapshot,
-    pending: &'a mut VecDeque<RunWatchEventNotification>,
-}
-
-impl WatchFold<'_> {
-    fn apply(&mut self, events: &[StoredRunEvent]) -> Result<(), NativeV2ObservationError> {
+impl RunWatchSubscription {
+    fn enqueue(&mut self, events: &[StoredRunEvent]) -> Result<(), NativeV2ObservationError> {
         for stored in events {
             let sequence = cursor_sequence(&stored.cursor)?;
-            apply_stored_event(self.projection, stored)?;
+            apply_stored_event(&mut self.projection, stored)?;
             if sequence > self.after && changes_public_status(&stored.event) {
+                let mut status = status_from_snapshot(&self.projection)?;
+                if let RunStatus::Finished { metadata, .. }
+                | RunStatus::Suspended { metadata, .. } = &mut status
+                {
+                    crate::v2_run_ledger::merge_usage(
+                        &mut metadata.token_usage,
+                        self.previous_usage.as_ref(),
+                    )?;
+                }
                 self.pending.push_back(RunWatchEventNotification {
                     recorded_at: stored.recorded_at,
                     subscription_id: self.subscription_id.clone(),
+                    part_id: self.projection.run_id.clone(),
                     run_id: self.projection.run_id.clone(),
                     title: self.projection.title.clone(),
                     source: self.projection.source.clone(),
                     context_sources: self.projection.context_sources.clone(),
                     size: self.projection.size.clone(),
                     cursor: stored.cursor.clone(),
-                    status: status_from_snapshot(self.projection)?,
+                    status,
                 });
             }
         }

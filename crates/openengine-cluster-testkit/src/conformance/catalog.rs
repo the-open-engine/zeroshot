@@ -168,7 +168,7 @@ pub(crate) static CATALOG: [CaseDefinition; 18] = [
     CaseDefinition::dispatched(
         "portable.initialize.registration",
         ConformanceModule::Initialize,
-        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"openengine.cluster/v2"}}"#,
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"openengine.cluster/v3"}}"#,
         Expected::Initialize,
     ),
     CaseDefinition::dispatched(

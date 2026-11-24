@@ -1,5 +1,6 @@
 import { ApiError, type ApiClient } from './api';
-import { watchHistoryEvents, type HistoryObserver } from './history-stream';
+import { appendGroupedHistory } from './grouped-history';
+import { runPartsHeaders, watchHistoryEvents, type HistoryObserver } from './history-stream';
 import { historyRetryDelay } from './history-response';
 import type { HistoryRetryDelay } from './history-readiness';
 import {
@@ -16,6 +17,7 @@ import type { HistoryEvent, HistoryPage, RunDetail, RunSummary } from './run-his
 export interface RunHistoryReader {
   /** Sources may identify transient read failures without exposing their transport to the viewer. */
   retryDelay?: HistoryRetryDelay;
+  forPart?(partId: string): RunHistoryReader;
   detail(id: string, signal?: AbortSignal): Promise<RunDetail>;
   page(id: string, after: string, signal?: AbortSignal): Promise<HistoryPage>;
   watch?(id: string, after: string, observer: HistoryObserver, signal?: AbortSignal): () => void;
@@ -28,7 +30,11 @@ export interface RunHistorySource extends RunHistoryReader {
 }
 
 /** A definition and its projection must agree before any history is replayed. */
-export function readRunDetail(value: unknown, requestedRunId: string): RunDetail {
+export function readRunDetail(
+  value: unknown,
+  requestedRunId: string,
+  requestedPartId?: string
+): RunDetail {
   const detail = value as Partial<RunDetail> | null;
   if (detail?.version !== 1 || detail?.projectionVersion !== 1)
     throw new ApiError(
@@ -36,11 +42,24 @@ export function readRunDetail(value: unknown, requestedRunId: string): RunDetail
       'incompatible_history',
       'This run uses incompatible definition or history versions. Reload after updating Zeroshot.'
     );
-  if (detail.runId !== requestedRunId)
+  if (
+    detail.runId !== requestedRunId &&
+    !(
+      detail.parts?.[0] === detail.runId &&
+      detail.parts?.at(-1) === detail.currentPartId &&
+      detail.parts?.includes(requestedRunId)
+    )
+  )
     throw new ApiError(
       200,
       'run_identity_mismatch',
       'The server returned a different run. Reload to try again.'
+    );
+  if (requestedPartId && (detail.partId !== requestedPartId || !detail.partView))
+    throw new ApiError(
+      200,
+      'run_identity_mismatch',
+      'The server returned a different run part. Reload to try again.'
     );
   readObservation(detail.observation);
   if (detail.terminal?.status === 'failed')
@@ -65,31 +84,40 @@ function validateDefinitionRuntimeFailure(detail: Partial<RunDetail>) {
 export function createRunHistorySource(
   api: ApiClient,
   base: URL,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  partId?: string
 ): RunHistorySource {
+  const path = (id: string, route = '', after?: string) => {
+    const query = new URLSearchParams();
+    if (after !== undefined) query.set('after', after);
+    if (partId) query.set('partId', partId);
+    return `runs/${encodeURIComponent(id)}${route}${query.size ? '?' + query : ''}`;
+  };
   return {
+    forPart: (part) => createRunHistorySource(api, base, fetcher, part),
     retryDelay: historyRetryDelay,
     list: (after, signal) =>
-      api(`runs${after ? `?after=${encodeURIComponent(after)}` : ''}`, undefined, signal),
+      api(
+        `runs${after ? `?after=${encodeURIComponent(after)}` : ''}`,
+        undefined,
+        signal,
+        runPartsHeaders
+      ),
     detail: async (id, signal) =>
-      readRunDetail(await api(`runs/${encodeURIComponent(id)}`, undefined, signal), id),
+      readRunDetail(await api(path(id), undefined, signal, runPartsHeaders), id, partId),
     page: async (id, after, signal) => {
       const page = await api<HistoryPage>(
-        `runs/${encodeURIComponent(id)}/history?after=${encodeURIComponent(after)}`,
+        path(id, '/history', after),
         undefined,
-        signal
+        signal,
+        runPartsHeaders
       );
       readPageRuntimeFailure(page);
       readObservation(page.observation);
       return page;
     },
     watch: (id, after, observer, signal) =>
-      watchHistoryEvents(
-        new URL(`runs/${encodeURIComponent(id)}/events?after=${encodeURIComponent(after)}`, base),
-        observer,
-        signal,
-        fetcher
-      ),
+      watchHistoryEvents(new URL(path(id, '/events', after), base), observer, signal, fetcher),
   };
 }
 type Example = { detail: RunDetail; events: HistoryEvent[] };
@@ -172,9 +200,11 @@ function withoutRecordedAt({ recordedAt: _recordedAt, ...event }: HistoryEvent):
 /** Merge a contiguous replay prefix, accepting identical retransmitted events only. */
 export function appendHistory(
   previous: readonly HistoryEvent[],
-  page: HistoryPage
+  page: HistoryPage,
+  expected?: string
 ): HistoryEvent[] {
   readPageRuntimeFailure(page);
+  if (page.partAfterCursor) return appendGroupedHistory(previous, page, expected);
   const seen = new Map<string, HistoryEvent>();
   let sequence = 0n;
   let latestRecordedAt = 0;

@@ -159,11 +159,15 @@ export function RunStory({
                   <p className="story-handoff">
                     <CornerDownRight size={13} aria-hidden="true" />
                     <span>
-                      Continued from{' '}
-                      {run.runHref ? (
-                        <a href={run.runHref(section.handoff.from)}>{section.handoff.from}</a>
-                      ) : (
-                        section.handoff.from
+                      {section.handoff.label ?? (
+                        <>
+                          Continued from{' '}
+                          {run.runHref ? (
+                            <a href={run.runHref(section.handoff.from)}>{section.handoff.from}</a>
+                          ) : (
+                            section.handoff.from
+                          )}
+                        </>
                       )}
                     </span>
                   </p>

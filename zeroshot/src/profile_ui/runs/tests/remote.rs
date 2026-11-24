@@ -199,6 +199,7 @@ impl RunHistoryTransport for ScriptedTransport {
 fn ui_get(client: &reqwest::Client, server: &LocalServer, path: &str) -> reqwest::RequestBuilder {
     client
         .get(format!("{}{}", server.origin, path))
+        .header(openengine_cluster_protocol::RUN_PARTS_HEADER, "1")
         .header(header::ORIGIN, &server.origin)
 }
 
@@ -813,9 +814,6 @@ async fn hosted_pending_problem_reaches_history_and_initial_sse_read_unchanged()
     }
     assert_eq!(
         *routes.lock().assert_value(),
-        [
-            format!("page:{id}?after=v2:0"),
-            format!("page:{id}?after=v2:0"),
-        ]
+        [format!("detail:{id}"), format!("detail:{id}"),]
     );
 }

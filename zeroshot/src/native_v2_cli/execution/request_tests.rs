@@ -110,7 +110,7 @@ impl NativeV2CliBackend for RequestBackend {
         assert_eq!(target, Some("remote"));
         let mut status = serde_json::to_value(&self.suspension).expect("suspension JSON");
         status["phase"] = json!("suspended");
-        let mut status: CliRunStatusResult = serde_json::from_value(json!({"runId":"original", "title":"Request", "size":"host", "atCursor":"v2:1", "status":status})).expect("status");
+        let mut status: CliRunStatusResult = serde_json::from_value(json!({"partId":"original","currentPartId":"original","runId":"original", "title":"Request", "size":"host", "atCursor":"v2:1", "status":status})).expect("status");
         status.workspace_recovery.successor_run_id = self.successor.map(RunId::new);
         Ok(status)
     }
@@ -149,8 +149,9 @@ impl NativeV2CliBackend for RequestBackend {
             )));
         }
         Ok(openengine_cluster_protocol::RunResumeResult {
-            run_id: params.successor_run_id,
-            resumed_from: params.run_id,
+            current_part_id: params.successor_run_id,
+            run_id: params.run_id,
+            resumed_from: params.part_id,
         })
     }
 }
@@ -165,6 +166,7 @@ async fn answer(
             RunSelector {
                 controller: Default::default(),
                 target: Some("remote".to_owned()),
+                part_id: None,
                 run_id: RunId::new("original"),
             },
             path,
@@ -198,8 +200,13 @@ async fn named_target_request_deadline_uses_controller_clock_and_preserves_valid
             json!({"kind":"answer","signals":{"decision":"approved"},"output":{}})
         );
         let receipt: serde_json::Value = serde_json::from_slice(&output).expect("resume receipt");
-        assert_eq!(receipt["runId"], resumes[0].successor_run_id.as_str());
-        assert_eq!(receipt["resumedFrom"], "original");
+        assert_eq!(receipt["runId"], "original");
+        assert_eq!(
+            receipt["currentPartId"],
+            resumes[0].successor_run_id.as_str()
+        );
+        assert_eq!(receipt["resumedFromPartId"], "original");
+        assert_eq!(receipt["resumedFrom"], receipt["resumedFromPartId"]);
         assert!(matches!(
             *backend.resolution.lock().expect("resolution"),
             Some(RequestResolution::Answer { .. })
@@ -315,6 +322,7 @@ async fn default_resume_of_a_request_names_the_successor_before_answer() {
                 run: RunSelector {
                     controller: Default::default(),
                     target: Some("remote".to_owned()),
+                    part_id: None,
                     run_id: RunId::new("original"),
                 },
                 from: None,

@@ -159,7 +159,6 @@ impl LocalCliBackend {
         use openengine_cluster_protocol::RunStatus;
         // Resume publishes under this lock but prepares outside it under a per-run claim.
         // Hold every lineage member's claim and stopped-controller lease through deletion.
-        let _submission_lock = self.acquire_submission_lock().await?;
         let (_paths, _directory) = self.recorded_storage(run_id)?;
         let source = self.read_recovery_document(run_id)?;
         let root = self.delivery_run_id(run_id, &source)?;
@@ -190,7 +189,7 @@ impl LocalCliBackend {
             self.reconcile_local_resume_claim(&id, Duration::ZERO)
                 .await?;
             let status = self
-                .read_recorded_status(RunStatusParams { run_id: id.clone() })
+                .read_recorded_status(RunStatusParams::new(id.clone()))
                 .await?;
             let recovery = self.read_recovery_document(&id)?;
             if self.delivery_run_id(&id, &recovery)? != root {
@@ -269,6 +268,7 @@ impl LocalCliBackend {
             self.validate_resume_runtime(
                 &RunSelector {
                     target: None,
+                    part_id: None,
                     run_id: params.run_id.clone(),
                     controller: self.controller_mode,
                 },
@@ -290,9 +290,7 @@ impl LocalCliBackend {
                 .await?;
             self.confirm_loss_for_resume(&params.run_id).await?;
             let status = self
-                .status_local(RunStatusParams {
-                    run_id: params.run_id.clone(),
-                })
+                .status_local(RunStatusParams::new(params.run_id.clone()))
                 .await?;
             if let Some(successor) = &status.workspace_recovery.successor_run_id {
                 return Err(invalid_request(format!(
@@ -572,6 +570,7 @@ impl LocalCliBackend {
             )));
         }
         Ok(openengine_cluster_protocol::RunResumeResult {
+            current_part_id: params.successor_run_id.clone(),
             run_id: params.successor_run_id,
             resumed_from: params.run_id,
         })
@@ -769,8 +768,12 @@ impl NativeV2CliBackend for LocalCliBackend {
         request: PreparedRunRequest,
     ) -> Result<RunSubmitResult, NativeV2CliError> {
         require_local(target)?;
-        let run_id = self.start_controller(request).await?;
-        Ok(RunSubmitResult { run_id })
+        let submitted = self.start_controller(request).await?;
+        let lineage = self.lineage(&submitted).await?;
+        Ok(RunSubmitResult {
+            run_id: lineage.root().clone(),
+            current_part_id: lineage.current().clone(),
+        })
     }
 
     async fn run_list(
@@ -779,7 +782,7 @@ impl NativeV2CliBackend for LocalCliBackend {
         _params: RunListParams,
     ) -> Result<CliRunListResult, NativeV2CliError> {
         require_local(target)?;
-        self.list_local().await.map(Into::into)
+        self.logical_list().await.map(Into::into)
     }
 
     async fn run_status(
@@ -788,7 +791,7 @@ impl NativeV2CliBackend for LocalCliBackend {
         params: RunStatusParams,
     ) -> Result<CliRunStatusResult, NativeV2CliError> {
         require_local(target)?;
-        self.status_local(params).await.map(Into::into)
+        self.logical_status(params).await.map(Into::into)
     }
 
     async fn run_resume_status(
@@ -797,8 +800,11 @@ impl NativeV2CliBackend for LocalCliBackend {
         params: RunStatusParams,
     ) -> Result<CliRunStatusResult, NativeV2CliError> {
         require_local(target)?;
-        self.confirm_loss_for_resume(&params.run_id).await?;
-        let status = self.status_local(params).await?;
+        let (lineage, part) = self
+            .select_part(&params.run_id, params.part_id.as_ref(), true)
+            .await?;
+        self.confirm_loss_for_resume(&part).await?;
+        let status = self.status_local(RunStatusParams::new(part)).await?;
         // Preserve successor and request handling in the shared CLI. Only local refusals are
         // expanded here, before it falls back to the remote backend's generic diagnostic.
         if !status.workspace_recovery.recoverable
@@ -813,7 +819,9 @@ impl NativeV2CliBackend for LocalCliBackend {
         {
             self.claimable_recovery_document(&status, false).await?;
         }
-        Ok(status.into())
+        self.project_status(&lineage, status, params.part_id.is_some())
+            .await
+            .map(Into::into)
     }
 
     async fn run_watch(
@@ -822,7 +830,7 @@ impl NativeV2CliBackend for LocalCliBackend {
         params: RunWatchParams,
     ) -> Result<Self::Watch, NativeV2CliError> {
         require_local(target)?;
-        self.inspect_watch(params).await
+        self.run_stream(params).await
     }
 
     async fn run_logs(
@@ -831,7 +839,7 @@ impl NativeV2CliBackend for LocalCliBackend {
         params: RunLogsParams,
     ) -> Result<Self::Logs, NativeV2CliError> {
         require_local(target)?;
-        self.inspect_logs(params).await
+        self.run_stream(params).await
     }
 
     async fn run_attach(
@@ -840,7 +848,38 @@ impl NativeV2CliBackend for LocalCliBackend {
         params: RunAttachParams,
     ) -> Result<Self::Attach, NativeV2CliError> {
         require_local(target)?;
-        self.inspect_attach(params).await
+        let (lineage, part) = self
+            .select_part(&params.run_id, params.part_id.as_ref(), false)
+            .await?;
+        let mut physical = self
+            .inspect_attach(RunAttachParams {
+                run_id: part,
+                ..params
+            })
+            .await?;
+        Ok(ChannelSubscription::recorded(move |sender| async move {
+            use crate::native_v2_cli::{CliSubscription, CliSubscriptionItem};
+            loop {
+                let event = match physical.next().await {
+                    Ok(Some(CliSubscriptionItem::Event(mut event))) => {
+                        event.run_id = lineage.root().clone();
+                        Ok(CliSubscriptionItem::Event(event))
+                    }
+                    Ok(Some(closed)) => {
+                        let _ = sender.send(Ok(closed)).await;
+                        return;
+                    }
+                    Ok(None) => return,
+                    Err(error) => {
+                        let _ = sender.send(Err(error)).await;
+                        return;
+                    }
+                };
+                if sender.send(event).await.is_err() {
+                    return;
+                }
+            }
+        }))
     }
 
     async fn run_force(
@@ -849,7 +888,13 @@ impl NativeV2CliBackend for LocalCliBackend {
         params: RunForceParams,
     ) -> Result<CliRunForceResult, NativeV2CliError> {
         require_local(target)?;
-        self.force_local(params).await.map(Into::into)
+        let (lineage, part) = self
+            .select_part(&params.run_id, params.part_id.as_ref(), true)
+            .await?;
+        let result = self.force_local(RunForceParams::new(part)).await?;
+        let mut result = result.into();
+        self.project_control(&lineage, &mut result).await?;
+        Ok(result)
     }
 
     async fn validate_resume_selection(
@@ -870,12 +915,17 @@ impl NativeV2CliBackend for LocalCliBackend {
     async fn run_steer(
         &self,
         target: Option<&str>,
-        params: openengine_cluster_protocol::RunSteerParams,
+        mut params: openengine_cluster_protocol::RunSteerParams,
     ) -> Result<openengine_cluster_protocol::RunSteerResult, NativeV2CliError> {
         crate::execution::process::authority::require_human(std::process::id())
             .map_err(local_error)?;
+        require_local(target)?;
+        let (lineage, part) = self
+            .select_part(&params.run_id, params.part_id.as_ref(), true)
+            .await?;
+        params.run_id = part;
         let run_id = params.run_id.clone();
-        tokio::time::timeout(DEFAULT_READY_TIMEOUT, async {
+        let mut receipt = tokio::time::timeout(DEFAULT_READY_TIMEOUT, async {
             require_local(target)?;
             openengine_cluster_protocol::validate_steer(&params.text)
                 .map_err(NativeV2CliError::Usage)?;
@@ -888,9 +938,7 @@ impl NativeV2CliBackend for LocalCliBackend {
                 None
             };
             let status = self
-                .read_recorded_status(RunStatusParams {
-                    run_id: params.run_id.clone(),
-                })
+                .read_recorded_status(RunStatusParams::new(params.run_id.clone()))
                 .await?;
             // Status reads an interrupted launch as no successor; the next resume removes it.
             if let Some(successor) = self.workspace_recovery(&status).await?.successor_run_id {
@@ -944,15 +992,21 @@ impl NativeV2CliBackend for LocalCliBackend {
                 "steer timed out; it may have been recorded; check status for {}",
                 run_id.as_str()
             ))
-        })?
+        })??;
+        receipt.run_id = lineage.root().clone();
+        Ok(receipt)
     }
 
     async fn run_suspend(
         &self,
         target: Option<&str>,
-        params: openengine_cluster_protocol::RunSuspendParams,
+        mut params: openengine_cluster_protocol::RunSuspendParams,
     ) -> Result<CliRunStatusResult, NativeV2CliError> {
         require_local(target)?;
+        let (lineage, part) = self
+            .select_part(&params.run_id, params.part_id.as_ref(), true)
+            .await?;
+        params.run_id = part;
         let status = self.status_local(params.clone()).await?;
         if !matches!(
             status.status,
@@ -965,18 +1019,21 @@ impl NativeV2CliBackend for LocalCliBackend {
             });
         }
         let transport = self.connect_run(&params.run_id, false).await?;
-        self.controller_cleanup_request(
-            &params.run_id,
-            "suspend (it may still take effect; check status)",
-            async {
-                ClusterClient::new(transport.as_ref())
-                    .run_suspend(params.clone())
-                    .await
-                    .map(Into::into)
-                    .map_err(protocol_error)
-            },
-        )
-        .await
+        let mut receipt: CliRunStatusResult = self
+            .controller_cleanup_request(
+                &params.run_id,
+                "suspend (it may still take effect; check status)",
+                async {
+                    ClusterClient::new(transport.as_ref())
+                        .run_suspend(params.clone())
+                        .await
+                        .map(Into::into)
+                        .map_err(protocol_error)
+                },
+            )
+            .await?;
+        self.project_control(&lineage, &mut receipt).await?;
+        Ok(receipt)
     }
 
     async fn inbox_list(
@@ -997,7 +1054,7 @@ impl NativeV2CliBackend for LocalCliBackend {
             ));
         }
         let mut requests = Vec::new();
-        let mut runs = self.list_local().await?.runs;
+        let mut runs = self.logical_list().await?.runs;
         runs.sort_by(|a, b| a.run_id.as_str().cmp(b.run_id.as_str()));
         let now = crate::native_v2_runner::current_timestamp();
         for status in runs {
@@ -1020,9 +1077,10 @@ impl NativeV2CliBackend for LocalCliBackend {
             }
             if let openengine_cluster_protocol::RunStatus::Suspended { suspension, .. } =
                 &status.status
-                && let Some(entry) =
-                    crate::v2_run_ledger::inbox::entry(status.run_id, suspension, now)
+                && let Some(mut entry) =
+                    crate::v2_run_ledger::inbox::entry(status.part_id, suspension, now)
             {
+                entry.run_id = status.run_id;
                 requests.push(entry);
             }
             if requests.len() > params.limit.unwrap_or(50) as usize {
@@ -1037,32 +1095,46 @@ impl NativeV2CliBackend for LocalCliBackend {
         params: openengine_cluster_protocol::InboxShowParams,
     ) -> Result<openengine_cluster_protocol::InboxShowResult, NativeV2CliError> {
         require_local(target)?;
-        let (paths, _directory) = self.recorded_storage(&params.run_id)?;
-        let ledger = SqliteRunLedger::open_read_only(paths.ledger()).map_err(local_error)?;
-        let mut request = crate::v2_run_ledger::inbox::show(
-            &ledger,
-            &params.run_id,
-            crate::native_v2_runner::current_timestamp(),
-        )
-        .await
-        .map_err(vector_error)?;
-        let status = self.status_local(params).await?;
-        if let Some(successor) = status.workspace_recovery.successor_run_id {
-            request.successor_run_id = Some(successor.clone());
-            let (paths, _successor_directory) = match self.recorded_storage(&successor) {
-                Ok(storage) => storage,
-                Err(NativeV2CliError::RunNotFound { .. }) => return Ok(request),
-                Err(error) => return Err(error),
-            };
-            // SQLite creates the file before installing its first schema transaction.
-            if std::fs::metadata(paths.ledger()).map_err(local_io)?.len() == 0 {
-                return Ok(request);
+        let (lineage, part) = self
+            .select_part(&params.run_id, params.part_id.as_ref(), false)
+            .await?;
+        let candidates = lineage
+            .parts()
+            .iter()
+            .rev()
+            .filter(|id| params.part_id.is_none() || **id == part);
+        let mut owned = None;
+        for id in candidates {
+            let (paths, _directory) = self.recorded_storage(id)?;
+            let ledger = SqliteRunLedger::open_read_only(paths.ledger()).map_err(local_error)?;
+            match crate::v2_run_ledger::inbox::show(
+                &ledger,
+                id,
+                crate::native_v2_runner::current_timestamp(),
+            )
+            .await
+            {
+                Ok(request) => {
+                    owned = Some(request);
+                    break;
+                }
+                Err(RunLedgerError::VectorNotFound) => continue,
+                Err(error) => return Err(vector_error(error)),
             }
+        }
+        let mut request = owned.ok_or_else(|| vector_error(RunLedgerError::VectorNotFound))?;
+        request.run_id = lineage.root().clone();
+        if let Some(successor) = lineage.successor(&request.part_id) {
+            let (paths, _directory) = self.recorded_storage(successor)?;
             let successor_ledger =
                 SqliteRunLedger::open_read_only(paths.ledger()).map_err(local_error)?;
-            crate::v2_run_ledger::inbox::with_successor(&successor_ledger, request, successor)
-                .await
-                .map_err(vector_error)
+            crate::v2_run_ledger::inbox::with_successor(
+                &successor_ledger,
+                request,
+                successor.clone(),
+            )
+            .await
+            .map_err(vector_error)
         } else {
             Ok(request)
         }
@@ -1071,45 +1143,64 @@ impl NativeV2CliBackend for LocalCliBackend {
     async fn run_vectors(
         &self,
         target: Option<&str>,
-        params: openengine_cluster_protocol::RunVectorsParams,
+        mut params: openengine_cluster_protocol::RunVectorsParams,
     ) -> Result<openengine_cluster_protocol::RunVectorsResult, NativeV2CliError> {
         require_local(target)?;
+        let (lineage, part) = self
+            .select_part(&params.run_id, params.part_id.as_ref(), false)
+            .await?;
+        params.run_id = part;
         let (paths, _directory) = self.recorded_storage(&params.run_id)?;
         let ledger = SqliteRunLedger::open_read_only(paths.ledger()).map_err(local_error)?;
-        crate::v2_run_ledger::vectors::list(&ledger, params)
+        let mut result = crate::v2_run_ledger::vectors::list(&ledger, params)
             .await
-            .map_err(vector_error)
+            .map_err(vector_error)?;
+        result.run_id = lineage.root().clone();
+        for vector in &mut result.vectors {
+            vector.run_id = result.run_id.clone();
+        }
+        Ok(result)
     }
 
     async fn run_vector(
         &self,
         target: Option<&str>,
-        params: openengine_cluster_protocol::RunVectorParams,
+        mut params: openengine_cluster_protocol::RunVectorParams,
     ) -> Result<openengine_cluster_protocol::RunVectorResult, NativeV2CliError> {
         require_local(target)?;
+        let (lineage, part) = self
+            .select_part(&params.run_id, params.part_id.as_ref(), false)
+            .await?;
+        params.run_id = part;
         let (paths, _directory) = self.recorded_storage(&params.run_id)?;
         let ledger = SqliteRunLedger::open_read_only(paths.ledger()).map_err(local_error)?;
-        crate::v2_run_ledger::vectors::show(&ledger, params)
+        let vector = crate::v2_run_ledger::vectors::show(&ledger, params)
             .await
-            .map_err(vector_error)
+            .map_err(vector_error)?;
+        let mut result = openengine_cluster_protocol::RunVectorResult::from(vector);
+        result.run_id = lineage.root().clone();
+        Ok(result)
     }
 
     async fn run_checkpoints(
         &self,
         target: Option<&str>,
-        params: openengine_cluster_protocol::RunCheckpointsParams,
+        mut params: openengine_cluster_protocol::RunCheckpointsParams,
     ) -> Result<openengine_cluster_protocol::RunCheckpointsResult, NativeV2CliError> {
         require_local(target)?;
+        let (lineage, part) = self
+            .select_part(&params.run_id, params.part_id.as_ref(), false)
+            .await?;
+        params.run_id = part;
         let status = self
-            .status_local(RunStatusParams {
-                run_id: params.run_id.clone(),
-            })
+            .status_local(RunStatusParams::new(params.run_id.clone()))
             .await?;
         let mut result = crate::native_v2_supervisor::checkpoints::list(
             &self.paths(&params.run_id)?.storage().join("checkpoints"),
             params,
         )
         .map_err(local_error)?;
+        result.run_id = lineage.root().clone();
         result.controller = status.controller;
         Ok(result)
     }
@@ -1121,8 +1212,11 @@ impl NativeV2CliBackend for LocalCliBackend {
         github_token: bool,
     ) -> Result<(), NativeV2CliError> {
         require_local(run.target.as_deref())?;
-        let (_paths, _directory) = self.recorded_storage(&run.run_id)?;
-        let recovery = self.read_resume_recovery_document(&run.run_id)?;
+        let (_, part) = self
+            .select_part(&run.run_id, run.part_id.as_ref(), true)
+            .await?;
+        let (_paths, _directory) = self.recorded_storage(&part)?;
+        let recovery = self.read_resume_recovery_document(&part)?;
         let environment = native_forge::capture_native_environment(&self.current_directory)?;
         admit_resume_runtime(&recovery, runtime, &environment, github_token).await?;
         Ok(())
@@ -1154,7 +1248,20 @@ impl NativeV2CliBackend for LocalCliBackend {
         discard_workspace_changes: bool,
     ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
         require_local(target)?;
-        self.resume_local(params, discard_workspace_changes).await
+        let (lineage, part) = self
+            .select_part(&params.run_id, Some(&params.part_id), true)
+            .await?;
+        let mut receipt = self
+            .resume_local(
+                openengine_cluster_protocol::RunResumeParams {
+                    run_id: part,
+                    ..params
+                },
+                discard_workspace_changes,
+            )
+            .await?;
+        receipt.run_id = lineage.root().clone();
+        Ok(receipt)
     }
 
     async fn run_discard_workspace(
@@ -1163,9 +1270,14 @@ impl NativeV2CliBackend for LocalCliBackend {
         params: openengine_cluster_protocol::RunDiscardWorkspaceParams,
     ) -> Result<openengine_cluster_protocol::RunDiscardWorkspaceResult, NativeV2CliError> {
         require_local(target)?;
-        let discarded = self.discard_local_checkpoints(&params.run_id).await?;
+        let _submission_lock = self.acquire_submission_lock().await?;
+        let (lineage, part) = self
+            .select_part(&params.run_id, params.part_id.as_ref(), true)
+            .await?;
+        let discarded = self.discard_local_checkpoints(&part).await?;
         Ok(openengine_cluster_protocol::RunDiscardWorkspaceResult {
-            run_id: params.run_id,
+            part_id: part,
+            run_id: lineage.root().clone(),
             discarded,
         })
     }

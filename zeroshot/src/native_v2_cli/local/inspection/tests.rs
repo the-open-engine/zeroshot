@@ -73,7 +73,7 @@ async fn missing_suspended_workspace_does_not_suggest_checkpoint_resume() {
         let removed_workspace = root.path().join("removed-workspace");
         std::fs::rename(&document.workspace, &removed_workspace).unwrap();
         backend.write_recovery_document(&id, &document).unwrap();
-        let params = RunStatusParams { run_id: id };
+        let params = RunStatusParams::new(id);
         let error = backend
             .run_resume_status(None, params.clone())
             .await
@@ -184,7 +184,7 @@ impl Fixture {
         let observed =
             crate::native_v2_observability::NativeV2Observability::new(Arc::new(ledger.clone()));
         let execution = observed
-            .status(RunStatusParams { run_id: id.clone() })
+            .status(RunStatusParams::new(id.clone()))
             .await
             .unwrap();
         let execution = match execution.status {
@@ -323,9 +323,7 @@ async fn inspection_leaves_read_only_running_lost_and_finished_directories_uncha
         let result = tokio::time::timeout(Duration::from_secs(20), async {
             let status = fixture
                 .backend
-                .status_local(RunStatusParams {
-                    run_id: fixture.id.clone(),
-                })
+                .status_local(RunStatusParams::new(fixture.id.clone()))
                 .await
                 .unwrap();
             assert_eq!(
@@ -352,6 +350,7 @@ async fn inspection_leaves_read_only_running_lost_and_finished_directories_uncha
                 .run_checkpoints(
                     None,
                     openengine_cluster_protocol::RunCheckpointsParams {
+                        part_id: None,
                         run_id: fixture.id.clone(),
                         after: None,
                         limit: None,
@@ -364,6 +363,7 @@ async fn inspection_leaves_read_only_running_lost_and_finished_directories_uncha
             let mut watch = fixture
                 .backend
                 .inspect_watch(RunWatchParams {
+                    part_id: None,
                     run_id: fixture.id.clone(),
                     from_cursor: None,
                 })
@@ -373,6 +373,7 @@ async fn inspection_leaves_read_only_running_lost_and_finished_directories_uncha
             let mut logs = fixture
                 .backend
                 .inspect_logs(RunLogsParams {
+                    part_id: None,
                     run_id: fixture.id.clone(),
                     from_cursor: None,
                     execution: None,
@@ -383,6 +384,7 @@ async fn inspection_leaves_read_only_running_lost_and_finished_directories_uncha
             let attach = fixture
                 .backend
                 .inspect_attach(RunAttachParams {
+                    part_id: None,
                     run_id: fixture.id.clone(),
                     execution: fixture.execution.clone(),
                 })
@@ -410,9 +412,7 @@ async fn force_of_a_recorded_terminal_needs_no_controller() {
     let before = tree(fixture.root.path());
     let forced = fixture
         .backend
-        .force_once(RunForceParams {
-            run_id: fixture.id.clone(),
-        })
+        .force_once(RunForceParams::new(fixture.id.clone()))
         .await
         .unwrap();
     assert!(matches!(
@@ -436,6 +436,7 @@ async fn steer_and_suspend_leave_a_lost_run_as_recorded() {
             None,
             openengine_cluster_protocol::RunSteerParams {
                 node: None,
+                part_id: None,
                 run_id: lost.id.clone(),
                 text: "direction".into(),
                 mode: openengine_cluster_protocol::SteeringMode::Standing,
@@ -445,12 +446,7 @@ async fn steer_and_suspend_leave_a_lost_run_as_recorded() {
         .map(|_| ());
     let suspend = lost
         .backend
-        .run_suspend(
-            None,
-            RunStatusParams {
-                run_id: lost.id.clone(),
-            },
-        )
+        .run_suspend(None, RunStatusParams::new(lost.id.clone()))
         .await
         .map(|_| ());
     for result in [steer, suspend] {
@@ -551,9 +547,7 @@ async fn controls_refuse_a_live_pid_or_held_lease_and_only_resume_confirms_loss(
     );
     assert!(
         live.backend
-            .force_once(RunForceParams {
-                run_id: live.id.clone()
-            })
+            .force_once(RunForceParams::new(live.id.clone()))
             .await
             .is_err()
     );
@@ -573,9 +567,7 @@ async fn controls_refuse_a_live_pid_or_held_lease_and_only_resume_confirms_loss(
         .unwrap();
     let status = lost
         .backend
-        .status_local(RunStatusParams {
-            run_id: lost.id.clone(),
-        })
+        .status_local(RunStatusParams::new(lost.id.clone()))
         .await
         .unwrap();
     assert!(status.controller.is_none());
@@ -588,9 +580,7 @@ async fn reconcile(fixture: &Fixture, force: bool) -> Result<(), NativeV2CliErro
     if force {
         fixture
             .backend
-            .force_once(RunForceParams {
-                run_id: fixture.id.clone(),
-            })
+            .force_once(RunForceParams::new(fixture.id.clone()))
             .await
             .map(|_| ())
     } else {
@@ -603,9 +593,7 @@ async fn assert_recovery_can_retry(fixture: &Fixture, force: bool, ready: &[u8])
     assert_eq!(std::fs::read(paths.ready()).unwrap(), ready);
     let status = fixture
         .backend
-        .status_local(RunStatusParams {
-            run_id: fixture.id.clone(),
-        })
+        .status_local(RunStatusParams::new(fixture.id.clone()))
         .await
         .unwrap();
     assert!(matches!(status.status, RunStatus::Running { .. }));
@@ -620,9 +608,7 @@ async fn assert_recovery_can_retry(fixture: &Fixture, force: bool, ready: &[u8])
     reconcile(fixture, force).await.unwrap();
     let status = fixture
         .backend
-        .read_recorded_status(RunStatusParams {
-            run_id: fixture.id.clone(),
-        })
+        .read_recorded_status(RunStatusParams::new(fixture.id.clone()))
         .await
         .unwrap();
     assert!(
@@ -743,6 +729,8 @@ impl ClusterBackend for LiveController {
         Ok(RunForceResult {
             steering: Default::default(),
             context_sources: Vec::new(),
+            part_id: stopped.run_id.clone(),
+            current_part_id: stopped.run_id.clone(),
             run_id: stopped.run_id,
             title: stopped.title,
             source: stopped.source,
@@ -779,9 +767,7 @@ fn failed(recorded: &RunStatusResult, reason: &str) -> RunStatusResult {
 #[tokio::test]
 async fn force_reaches_a_live_controller_whose_status_read_waits_for_storage() {
     let fixture = Fixture::new(false, false).await;
-    let params = RunStatusParams {
-        run_id: fixture.id.clone(),
-    };
+    let params = RunStatusParams::new(fixture.id.clone());
     let recorded = fixture
         .backend
         .read_recorded_status(params.clone())
@@ -800,9 +786,9 @@ async fn force_reaches_a_live_controller_whose_status_read_waits_for_storage() {
     // for storage, so the request must not wait for a status reply first.
     let forced = tokio::time::timeout(
         Duration::from_secs(30),
-        fixture.backend.force_once(RunForceParams {
-            run_id: fixture.id.clone(),
-        }),
+        fixture
+            .backend
+            .force_once(RunForceParams::new(fixture.id.clone())),
     )
     .await
     .expect("the force request settles")
@@ -816,9 +802,7 @@ async fn force_reaches_a_live_controller_whose_status_read_waits_for_storage() {
 #[tokio::test]
 async fn an_unreadable_ledger_does_not_hide_a_responding_controller() {
     let fixture = Fixture::new(false, false).await;
-    let params = RunStatusParams {
-        run_id: fixture.id.clone(),
-    };
+    let params = RunStatusParams::new(fixture.id.clone());
     let recorded = fixture
         .backend
         .read_recorded_status(params.clone())

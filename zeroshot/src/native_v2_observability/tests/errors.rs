@@ -35,6 +35,7 @@ async fn opaque_selectors_disambiguate_parallel_verifier_attachments() {
         .assert_value();
     let (_, mut left_attach) = service
         .attach(RunAttachParams {
+            part_id: None,
             run_id: run_id.clone(),
             execution: left_registration.public_execution().clone(),
         })
@@ -42,6 +43,7 @@ async fn opaque_selectors_disambiguate_parallel_verifier_attachments() {
         .assert_value();
     let (_, mut right_attach) = service
         .attach(RunAttachParams {
+            part_id: None,
             run_id,
             execution: right_registration.public_execution().clone(),
         })

@@ -69,11 +69,11 @@ async fn resume_without_the_lane_executable_on_path_is_refused_like_run() {
         .as_array()
         .assert_value_with("run list")
         .iter()
-        .map(|run| run.assert_key("runId").clone())
+        .map(|run| (run["runId"].clone(), run["currentPartId"].clone()))
         .collect::<Vec<_>>();
     assert_eq!(
         runs,
-        [json!(failed_run_id)],
+        [(json!(failed_run_id), json!(failed_run_id))],
         "a refused resume created a run"
     );
 
@@ -375,7 +375,8 @@ async fn assert_late_version_is_not_admitted(resuming: bool) {
                 "finish",
             )
             .await;
-        let successor = receipt.assert_key("runId").as_str().assert_value();
+        assert_eq!(receipt["runId"], run.as_str());
+        let successor = receipt.assert_key("currentPartId").as_str().assert_value();
         fixture.wait_succeeded(successor, "finish").await;
         wait_for_exit(fixture.ready_pid(successor)).await;
     }

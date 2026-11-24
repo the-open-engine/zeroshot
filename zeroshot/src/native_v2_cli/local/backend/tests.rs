@@ -136,12 +136,7 @@ async fn exercise_named_run_rejections(backend: &LocalCliBackend) {
     );
     assert_named_target_rejected(
         backend
-            .run_status(
-                Some("prod"),
-                RunStatusParams {
-                    run_id: run_id.clone(),
-                },
-            )
+            .run_status(Some("prod"), RunStatusParams::new(run_id.clone()))
             .await,
     );
     assert_named_target_rejected(
@@ -149,6 +144,7 @@ async fn exercise_named_run_rejections(backend: &LocalCliBackend) {
             .run_watch(
                 Some("prod"),
                 RunWatchParams {
+                    part_id: None,
                     run_id: run_id.clone(),
                     from_cursor: None,
                 },
@@ -160,6 +156,7 @@ async fn exercise_named_run_rejections(backend: &LocalCliBackend) {
             .run_logs(
                 Some("prod"),
                 RunLogsParams {
+                    part_id: None,
                     run_id: run_id.clone(),
                     from_cursor: None,
                     execution: None,
@@ -172,6 +169,7 @@ async fn exercise_named_run_rejections(backend: &LocalCliBackend) {
             .run_attach(
                 Some("prod"),
                 RunAttachParams {
+                    part_id: None,
                     run_id: run_id.clone(),
                     execution: ExecutionRef::new("execution").assert_value(),
                 },
@@ -180,12 +178,7 @@ async fn exercise_named_run_rejections(backend: &LocalCliBackend) {
     );
     assert_named_target_rejected(
         backend
-            .run_force(
-                Some("prod"),
-                RunForceParams {
-                    run_id: run_id.clone(),
-                },
-            )
+            .run_force(Some("prod"), RunForceParams::new(run_id.clone()))
             .await,
     );
     assert_named_target_rejected(
@@ -193,6 +186,7 @@ async fn exercise_named_run_rejections(backend: &LocalCliBackend) {
             .run_checkpoints(
                 Some("prod"),
                 RunCheckpointsParams {
+                    part_id: None,
                     run_id: run_id.clone(),
                     after: None,
                     limit: None,
@@ -210,6 +204,7 @@ async fn exercise_named_run_rejections(backend: &LocalCliBackend) {
                     commit_identity: None,
                     commit_co_author: None,
 
+                    part_id: run_id.clone(),
                     run_id: run_id.clone(),
                     successor_run_id: successor,
                     from: None,
@@ -223,7 +218,13 @@ async fn exercise_named_run_rejections(backend: &LocalCliBackend) {
     );
     assert_named_target_rejected(
         backend
-            .run_discard_workspace(Some("prod"), RunDiscardWorkspaceParams { run_id })
+            .run_discard_workspace(
+                Some("prod"),
+                RunDiscardWorkspaceParams {
+                    part_id: None,
+                    run_id,
+                },
+            )
             .await,
     );
 }
@@ -238,12 +239,7 @@ async fn exercise_absent_local_run_failures(backend: &LocalCliBackend) {
     );
     assert!(matches!(
         backend
-            .run_status(
-                None,
-                RunStatusParams {
-                    run_id: run_id.clone(),
-                },
-            )
+            .run_status(None, RunStatusParams::new(run_id.clone()),)
             .await,
         Err(NativeV2CliError::RunNotFound { .. })
     ));
@@ -252,6 +248,7 @@ async fn exercise_absent_local_run_failures(backend: &LocalCliBackend) {
             .run_watch(
                 None,
                 RunWatchParams {
+                    part_id: None,
                     run_id: run_id.clone(),
                     from_cursor: None,
                 },
@@ -264,6 +261,7 @@ async fn exercise_absent_local_run_failures(backend: &LocalCliBackend) {
             .run_logs(
                 None,
                 RunLogsParams {
+                    part_id: None,
                     run_id: run_id.clone(),
                     from_cursor: None,
                     execution: None,
@@ -277,6 +275,7 @@ async fn exercise_absent_local_run_failures(backend: &LocalCliBackend) {
             .run_attach(
                 None,
                 RunAttachParams {
+                    part_id: None,
                     run_id: run_id.clone(),
                     execution: ExecutionRef::new("execution").assert_value(),
                 },
@@ -286,12 +285,7 @@ async fn exercise_absent_local_run_failures(backend: &LocalCliBackend) {
     );
     assert!(
         backend
-            .run_force(
-                None,
-                RunForceParams {
-                    run_id: run_id.clone(),
-                },
-            )
+            .run_force(None, RunForceParams::new(run_id.clone()),)
             .await
             .is_err()
     );
@@ -300,6 +294,7 @@ async fn exercise_absent_local_run_failures(backend: &LocalCliBackend) {
             .run_checkpoints(
                 None,
                 RunCheckpointsParams {
+                    part_id: None,
                     run_id: run_id.clone(),
                     after: None,
                     limit: None,
@@ -313,6 +308,7 @@ async fn exercise_absent_local_run_failures(backend: &LocalCliBackend) {
             .run_resume(
                 None,
                 RunResumeParams {
+                    part_id: run_id.clone(),
                     runtime: None,
                     git_credentials: None,
                     commit_identity: None,
@@ -394,6 +390,7 @@ async fn local_backend_contract_delegates_storage_and_rejects_remote_routes() {
             .run_discard_workspace(
                 None,
                 RunDiscardWorkspaceParams {
+                    part_id: None,
                     run_id: run_id("0199f33f-3b44-7d21-9000-000000000001"),
                 },
             )
@@ -437,6 +434,7 @@ async fn local_resume_rejects_an_unusable_state_root_before_observing_the_run() 
                 commit_identity: None,
                 commit_co_author: None,
 
+                part_id: run_id("0199f33f-3b44-7d21-9000-000000000042").clone(),
                 run_id: run_id("0199f33f-3b44-7d21-9000-000000000042"),
                 successor_run_id: run_id("0199f33f-3b44-7d21-9000-000000000043"),
                 from: None,
@@ -471,6 +469,7 @@ async fn local_resume_rejects_a_commit_identity_or_co_author_before_touching_loc
             .resume_local(
                 RunResumeParams {
                     runtime: None,
+                    part_id: run_id("0199f33f-3b44-7d21-9000-000000000044").clone(),
                     run_id: run_id("0199f33f-3b44-7d21-9000-000000000044"),
                     successor_run_id: run_id("0199f33f-3b44-7d21-9000-000000000045"),
                     from: None,
@@ -552,6 +551,7 @@ async fn local_resume_reconciles_a_failed_successor_start_for_retry() {
                 commit_identity: None,
                 commit_co_author: None,
 
+                part_id: original.clone(),
                 run_id: original.clone(),
                 successor_run_id: successor.clone(),
                 from: None,
@@ -566,9 +566,7 @@ async fn local_resume_reconciles_a_failed_successor_start_for_retry() {
 
     assert!(matches!(error, NativeV2CliError::Local(_)));
     let status = backend
-        .status_local(RunStatusParams {
-            run_id: original.clone(),
-        })
+        .status_local(RunStatusParams::new(original.clone()))
         .await
         .assert_value();
     let restored = backend
@@ -788,6 +786,7 @@ async fn legacy_git_delivery_resume_without_branch_ownership_refuses_before_any_
                 .resume_local(
                     RunResumeParams {
                         runtime: None,
+                        part_id: original.clone(),
                         run_id: original.clone(),
                         successor_run_id: successor.clone(),
                         from,

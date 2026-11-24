@@ -90,6 +90,7 @@ async fn steer_node_uses_human_authorization_and_rejects_network_even_without_pa
         run: RunSelector {
             controller: Default::default(),
             target: None,
+            part_id: None,
             run_id: RunId::new("run"),
         },
         text: SteerText::Text("direction".into()),
@@ -128,6 +129,7 @@ async fn steer_default_backend_refuses_without_output_and_validation_precedes_di
             run: RunSelector {
                 controller: Default::default(),
                 target: Some("older-target".into()),
+                part_id: None,
                 run_id: RunId::new("run"),
             },
             text: SteerText::Text(text.into()),

@@ -225,6 +225,7 @@ impl UtilityCommand {
                     });
                 }
                 let run = RunSelectorArgs {
+                    part: args.part,
                     run_id: args.run_id.ok_or_else(|| usage("a run ID is required"))?,
                     target: args.target,
                 }
@@ -341,6 +342,7 @@ impl RunResumeArgs {
 impl RunExportWorkspaceArgs {
     fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
         let run = RunSelectorArgs {
+            part: None,
             run_id: self.run_id,
             target: Some(self.target),
         }
@@ -777,7 +779,11 @@ fn submission_key(
 impl RunSelectorArgs {
     fn into_selector(self) -> Result<RunSelector, NativeV2CliError> {
         validate_public_id(&self.run_id, "run ID")?;
+        if let Some(part) = &self.part {
+            validate_public_id(part, "part ID")?;
+        }
         Ok(RunSelector {
+            part_id: self.part.map(openengine_cluster_protocol::RunId::new),
             controller: Default::default(),
             target: validated_target(self.target)?,
             run_id: openengine_cluster_protocol::RunId::new(self.run_id),
@@ -796,6 +802,7 @@ impl super::LocalLaunchArgs {
 impl RunWatchArgs {
     fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
         Ok(NativeV2CliCommand::Watch(RunWatchCommand {
+            follow: self.follow,
             run: self.run.into_selector()?,
             after: self.after.map(Cursor::new),
         }))
@@ -823,11 +830,12 @@ impl AttachArgs {
         let execution = ExecutionRef::new(self.execution)
             .map_err(|error| usage(format!("invalid execution reference: {error}")))?;
         Ok(NativeV2CliCommand::Attach {
-            run: RunSelector {
-                controller: Default::default(),
-                target: validated_target(self.target)?,
-                run_id: openengine_cluster_protocol::RunId::new(self.run_id),
-            },
+            run: RunSelectorArgs {
+                run_id: self.run_id,
+                part: self.part,
+                target: self.target,
+            }
+            .into_selector()?,
             execution,
         })
     }

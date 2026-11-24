@@ -348,9 +348,7 @@ impl FailureHarness {
         .await
         .assert_value_with("initial output persisted");
         let before = controller
-            .status(RunStatusParams {
-                run_id: receipt.run_id,
-            })
+            .status(RunStatusParams::new(receipt.run_id))
             .await
             .assert_value_with("active status before fault");
         assert!(matches!(before.status, RunStatus::Running { .. }));
@@ -398,9 +396,7 @@ impl FailureHarness {
         .assert_value_with("runtime removed after explicit failure");
         assert!(self.ledger.triggered.load(Ordering::SeqCst));
         self.controller
-            .status(RunStatusParams {
-                run_id: self.before.run_id.clone(),
-            })
+            .status(RunStatusParams::new(self.before.run_id.clone()))
             .await
             .assert_value_with("failed status survives engine removal")
     }
@@ -464,6 +460,7 @@ impl FailureHarness {
             &self.controller,
             &context,
             RunWatchParams {
+                part_id: None,
                 run_id: self.before.run_id.clone(),
                 from_cursor: None,
             },
@@ -476,6 +473,7 @@ impl FailureHarness {
             &self.controller,
             &context,
             RunLogsParams {
+                part_id: None,
                 run_id: self.before.run_id.clone(),
                 from_cursor: None,
                 execution: None,
@@ -493,6 +491,7 @@ impl FailureHarness {
             &self.controller,
             &context,
             RunWatchParams {
+                part_id: None,
                 run_id: self.before.run_id.clone(),
                 from_cursor: None,
             },
@@ -503,6 +502,7 @@ impl FailureHarness {
             &self.controller,
             &context,
             RunLogsParams {
+                part_id: None,
                 run_id: self.before.run_id.clone(),
                 from_cursor: None,
                 execution: None,
@@ -635,7 +635,11 @@ async fn permanent_storage_failure_preserves_status_and_reports_stream_completen
                 logs.assert_at(1).record.message.as_str(),
                 "Preparing execution environment"
             );
-            assert_eq!(logs.assert_at(2).cursor, harness.before.at_cursor);
+            let cursor = crate::native_v2_observability::lineage::part_cursor(
+                &harness.before.run_id,
+                &harness.before.at_cursor,
+            );
+            assert_eq!(logs.assert_at(2).cursor, cursor);
             assert_eq!(logs.assert_at(2).record.message.as_str(), RETAINED_OUTPUT);
             harness.assert_storage_diagnostic();
             harness.assert_recovery_diagnostic(&sqlite_failure(harness.ledger.point).to_string());
@@ -848,7 +852,8 @@ async fn force_cancels_before_storage_recovers_and_survives_a_dropped_waiter() {
         harness.ledger.force_write.hold(true);
         let controller = harness.controller.clone();
         let run_id = harness.before.run_id.clone();
-        let force = tokio::spawn(async move { controller.force(RunForceParams { run_id }).await });
+        let force =
+            tokio::spawn(async move { controller.force(RunForceParams::new(run_id)).await });
 
         tokio::time::timeout(
             Duration::from_secs(2),
@@ -919,9 +924,9 @@ async fn confirmed_failure_is_observable_while_terminal_persistence_is_blocked()
         harness.ledger.reads.hold(true);
         let status = tokio::time::timeout(
             Duration::from_secs(2),
-            harness.controller.status(RunStatusParams {
-                run_id: harness.before.run_id.clone(),
-            }),
+            harness
+                .controller
+                .status(RunStatusParams::new(harness.before.run_id.clone())),
         )
         .await
         .assert_value_with("failure observation is independent of pending ledger operations")

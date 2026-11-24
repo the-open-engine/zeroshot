@@ -72,6 +72,8 @@ pub enum NativeV2PlatformError {
     PreparationTimeout,
     #[error("{0}")]
     InvalidRequest(String),
+    #[error("the current part is {}. Refresh the run before acting", .0.as_str())]
+    StalePart(RunId),
     #[error(transparent)]
     ControllerClaim(#[from] ControllerClaimUnavailable),
     #[error(transparent)]
@@ -680,35 +682,13 @@ impl NativeV2PlatformController {
             .await
             .successor_run_id
         {
+            self.ensure_current_part(params.part_id.as_ref()).await?;
             return Err(NativeV2PlatformError::InvalidRequest(format!(
                 "run already has successor {}",
                 successor.as_str()
             )));
         }
-        let engine = if self.allocator.retains_suspended_ledger() {
-            None
-        } else {
-            let runtime = self.runtimes.lock().await.get(&params.run_id).cloned();
-            match runtime {
-                Some(RuntimeSlot::Running(engine)) => Some(engine),
-                _ => {
-                    if self
-                        .ledger
-                        .get(&params.run_id)
-                        .await?
-                        .is_some_and(|stored| {
-                            stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended
-                        })
-                    {
-                        return Err(NativeV2PlatformError::InvalidRequest(
-                            crate::native_v2_supervisor::SUSPENSION_STEER_RETRY.to_owned(),
-                        ));
-                    }
-                    None
-                }
-            }
-        };
-        let result = match engine {
+        let result = match self.steer_engine(&params.run_id).await? {
             Some(engine) => engine.steer(params).await,
             None => crate::v2_run_ledger::steering::record(self.ledger.as_ref(), params).await,
         };
@@ -721,10 +701,33 @@ impl NativeV2PlatformController {
         })
     }
 
+    async fn steer_engine(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Option<Arc<PortableRunEngine>>, NativeV2PlatformError> {
+        if self.allocator.retains_suspended_ledger() {
+            return Ok(None);
+        }
+        if let Some(RuntimeSlot::Running(engine)) = self.runtimes.lock().await.get(run_id) {
+            return Ok(Some(engine.clone()));
+        }
+        if self.ledger.get(run_id).await?.is_some_and(|stored| {
+            stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended
+        }) {
+            return Err(NativeV2PlatformError::InvalidRequest(
+                crate::native_v2_supervisor::SUSPENSION_STEER_RETRY.to_owned(),
+            ));
+        }
+        Ok(None)
+    }
+
     pub async fn suspend(
         &self,
         params: openengine_cluster_protocol::RunSuspendParams,
     ) -> Result<openengine_cluster_protocol::RunSuspendResult, NativeV2PlatformError> {
+        let _control = self
+            .lock_observed_part(&params.run_id, params.part_id.as_ref())
+            .await?;
         if self.hosted_workspace_checkpoint_opt_out.is_some()
             && let Some(stored) = self.ledger.get(&params.run_id).await?
             && !stored.admitted.runtime.workspace_checkpoints
@@ -760,7 +763,11 @@ impl NativeV2PlatformController {
         &self,
         params: openengine_cluster_protocol::RunVectorParams,
     ) -> Result<openengine_cluster_protocol::RunVectorResult, NativeV2PlatformError> {
-        Ok(crate::v2_run_ledger::vectors::show(self.ledger.as_ref(), params).await?)
+        Ok(
+            crate::v2_run_ledger::vectors::show(self.ledger.as_ref(), params)
+                .await?
+                .into(),
+        )
     }
 
     pub async fn checkpoints(
@@ -777,6 +784,9 @@ impl NativeV2PlatformController {
         &self,
         params: RunDiscardWorkspaceParams,
     ) -> Result<RunDiscardWorkspaceResult, NativeV2PlatformError> {
+        let _control = self
+            .lock_observed_part(&params.run_id, params.part_id.as_ref())
+            .await?;
         let Some(stored) = self.ledger.get(&params.run_id).await? else {
             return Err(RunLedgerError::RunNotFound.into());
         };
@@ -800,6 +810,7 @@ impl NativeV2PlatformController {
             .await
             .map_err(|_| NativeV2SupervisorError::RuntimeCleanup(RuntimeCleanupUnavailable))?;
         Ok(RunDiscardWorkspaceResult {
+            part_id: params.run_id.clone(),
             run_id: params.run_id,
             discarded,
         })
@@ -920,7 +931,7 @@ impl NativeV2PlatformController {
                 ..
             }
         );
-        result.workspace_recovery = self.allocator.workspace_recovery(&result.run_id).await;
+        result.workspace_recovery = self.allocator.committed_recovery(&result.run_id).await;
         if result.workspace_recovery.recoverable
             && self.hosted_workspace_checkpoint_opt_out.is_some()
             && let Some(stored) = self.ledger.get(&result.run_id).await?
@@ -1007,6 +1018,9 @@ impl NativeV2PlatformController {
                 self.force_reconstructed(&params.run_id).await?;
             }
         }
+        // A concurrent resume can cause the physical force operation to return an
+        // idempotent no-op after its preceding run-level guard was evaluated.
+        self.ensure_current_part(params.part_id.as_ref()).await?;
         self.force_result(&params.run_id).await
     }
 
@@ -1125,6 +1139,8 @@ impl NativeV2PlatformController {
     async fn force_result(&self, run_id: &RunId) -> Result<RunForceResult, NativeV2PlatformError> {
         let RunStatusResult {
             steering: _,
+            part_id,
+            current_part_id,
             run_id,
             title,
             source,
@@ -1136,12 +1152,12 @@ impl NativeV2PlatformController {
             workspace_recovery,
         } = self
             .observability
-            .status(RunStatusParams {
-                run_id: run_id.clone(),
-            })
+            .status(RunStatusParams::new(run_id.clone()))
             .await?;
         Ok(RunForceResult {
             steering: Default::default(),
+            part_id,
+            current_part_id,
             run_id,
             title,
             source,
@@ -1233,6 +1249,19 @@ impl NativeV2PlatformController {
         &self,
         params: openengine_cluster_protocol::InboxShowParams,
     ) -> Result<openengine_cluster_protocol::InboxShowResult, NativeV2PlatformError> {
+        let successor = self
+            .allocator
+            .committed_recovery(&params.run_id)
+            .await
+            .successor_run_id;
+        self.inbox_part(&params.run_id, successor).await
+    }
+
+    async fn inbox_part(
+        &self,
+        id: &RunId,
+        successor: Option<RunId>,
+    ) -> Result<openengine_cluster_protocol::InboxShowResult, NativeV2PlatformError> {
         if !self.allocator.supports_request_ask() {
             return Err(NativeV2PlatformError::InvalidRequest(
                 "host does not enable openengine.request-ask/v1".to_owned(),
@@ -1243,14 +1272,8 @@ impl NativeV2PlatformController {
             .suspension_policy()
             .unwrap_or_default()
             .wall_clock)();
-        let request =
-            crate::v2_run_ledger::inbox::show(self.ledger.as_ref(), &params.run_id, now).await?;
-        match self
-            .allocator
-            .workspace_recovery(&params.run_id)
-            .await
-            .successor_run_id
-        {
+        let request = crate::v2_run_ledger::inbox::show(self.ledger.as_ref(), id, now).await?;
+        match successor {
             Some(successor) => Ok(crate::v2_run_ledger::inbox::with_successor(
                 self.ledger.as_ref(),
                 request,
@@ -1264,6 +1287,14 @@ impl NativeV2PlatformController {
         &self,
         params: openengine_cluster_protocol::InboxListParams,
     ) -> Result<openengine_cluster_protocol::InboxListResult, NativeV2PlatformError> {
+        self.inbox_inventory(params, false).await
+    }
+
+    async fn inbox_inventory(
+        &self,
+        params: openengine_cluster_protocol::InboxListParams,
+        physical: bool,
+    ) -> Result<openengine_cluster_protocol::InboxListResult, NativeV2PlatformError> {
         if !self.allocator.supports_request_ask() {
             return Err(NativeV2PlatformError::InvalidRequest(
                 "host does not enable openengine.request-ask/v1".to_owned(),
@@ -1273,47 +1304,48 @@ impl NativeV2PlatformController {
             .validate()
             .map_err(|error| NativeV2PlatformError::InvalidRequest(error.to_string()))?;
         let mut requests = Vec::new();
-        let mut runs = self.list().await?;
-        runs.sort_by(|a, b| a.run_id.as_str().cmp(b.run_id.as_str()));
+        let mut families = self.run_families(physical).await?;
+        families.sort_by(|a, b| a.root().cmp(b.root()));
         let now = (self
             .allocator
             .suspension_policy()
             .unwrap_or_default()
             .wall_clock)();
-        for summary in runs {
+        for family in families {
             if params
                 .after
                 .as_ref()
-                .is_some_and(|after| summary.run_id.as_str() <= after.as_str())
+                .is_some_and(|after| family.root() <= after)
             {
                 continue;
             }
+            let id = family.current();
             let stored = self
                 .ledger
-                .get(&summary.run_id)
+                .get(id)
                 .await?
                 .ok_or(RunLedgerError::RunNotFound)?;
-            if stored.snapshot.phase != crate::v2_run_ledger::RunPhase::Suspended
-                || !matches!(
-                    stored.snapshot.suspension,
-                    Some(openengine_cluster_protocol::RunSuspension::Request { .. })
-                )
-                || self
+            if physical
+                && self
                     .allocator
-                    .workspace_recovery(&summary.run_id)
+                    .workspace_recovery(id)
                     .await
                     .successor_run_id
                     .is_some()
             {
                 continue;
             }
-            if let Some(entry) = stored.snapshot.suspension.as_ref().and_then(|suspension| {
-                crate::v2_run_ledger::inbox::entry(summary.run_id, suspension, now)
-            }) {
+            if stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended
+                && let Some(mut entry) =
+                    stored.snapshot.suspension.as_ref().and_then(|suspension| {
+                        crate::v2_run_ledger::inbox::entry(id.clone(), suspension, now)
+                    })
+            {
+                entry.run_id = family.root().clone();
                 requests.push(entry);
-            }
-            if requests.len() > params.limit.unwrap_or(50) as usize {
-                break;
+                if requests.len() > params.limit.unwrap_or(50) as usize {
+                    break;
+                }
             }
         }
         Ok(crate::v2_run_ledger::inbox::page(requests, params)?)

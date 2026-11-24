@@ -342,6 +342,7 @@ async fn escaped_failure_text_is_bounded_without_losing_the_explanation() {
         let service = crate::native_v2_observability::NativeV2Observability::new(ledger);
         let (_, mut logs) = service
             .logs(openengine_cluster_protocol::RunLogsParams {
+                part_id: None,
                 run_id,
                 from_cursor: None,
                 execution: None,

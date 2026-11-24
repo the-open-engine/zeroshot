@@ -266,6 +266,15 @@ pub trait CapsuleAllocator: Send + Sync {
         Default::default()
     }
 
+    /// Recovery links after the workspace handoff commits. Storage adapters that
+    /// publish a provisional claim override this separately from control fencing.
+    async fn committed_recovery(
+        &self,
+        id: &RunId,
+    ) -> openengine_cluster_protocol::WorkspaceRecovery {
+        self.workspace_recovery(id).await
+    }
+
     /// Reconcile predecessor ledger facts into the existing lineage before any successor claim.
     /// This must not capture workspace bytes or restore graph execution history.
     async fn retain_delivery_state(

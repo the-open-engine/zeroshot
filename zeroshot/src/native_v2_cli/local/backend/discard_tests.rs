@@ -115,7 +115,13 @@ impl Fixture {
     async fn discard(&self, id: &RunId) -> Result<bool, NativeV2CliError> {
         Ok(self
             .backend
-            .run_discard_workspace(None, RunDiscardWorkspaceParams { run_id: id.clone() })
+            .run_discard_workspace(
+                None,
+                RunDiscardWorkspaceParams {
+                    part_id: None,
+                    run_id: id.clone(),
+                },
+            )
             .await?
             .discarded)
     }

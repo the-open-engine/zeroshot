@@ -9,6 +9,7 @@ use crate::v2_run_ledger::{cursor_sequence, initial_cursor, RunLedger, RunLedger
 
 mod contract;
 pub(crate) mod control;
+pub mod parts;
 pub(crate) mod status;
 mod wire;
 pub use control::ControlRecord;

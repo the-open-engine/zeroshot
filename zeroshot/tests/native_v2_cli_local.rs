@@ -420,14 +420,18 @@ async fn failed_local_run_restarts_on_its_retained_workspace_with_fresh_connecti
     );
 
     let resumed = fixture.json(&["resume", &failed_run_id], "finish").await;
+    assert_eq!(resumed["runId"], failed_run_id);
     let successor_run_id = resumed
-        .assert_key("runId")
+        .assert_key("currentPartId")
         .as_str()
         .assert_value_with("successor run identity")
         .to_owned();
     assert_local_run_id(&successor_run_id);
     assert_ne!(successor_run_id, failed_run_id);
-    assert_eq!(resumed.assert_key("resumedFrom"), failed_run_id.as_str());
+    assert_eq!(
+        resumed.assert_key("resumedFromPartId"),
+        failed_run_id.as_str()
+    );
 
     let successor = fixture.wait_succeeded(&successor_run_id, "finish").await;
     for run_id in [&failed_run_id, &successor_run_id] {
@@ -461,7 +465,12 @@ async fn failed_local_run_restarts_on_its_retained_workspace_with_fresh_connecti
             .any(|line| line == "arg=resume"),
         "successor reused a predecessor provider session"
     );
-    let predecessor = fixture.json(&["status", &failed_run_id], "finish").await;
+    let predecessor = fixture
+        .json(
+            &["status", &failed_run_id, "--part", &failed_run_id],
+            "finish",
+        )
+        .await;
     assert_eq!(
         predecessor
             .assert_key("workspaceRecovery")
@@ -569,8 +578,9 @@ async fn suspended_attempt_exits_continues_once_and_preserves_vector_record_and_
             .success()
     );
     let resumed = fixture.json(&["resume", &run_id], "finish").await;
-    let successor = resumed["runId"].as_str().assert_value();
-    assert_eq!(resumed["resumedFrom"], run_id);
+    assert_eq!(resumed["runId"], run_id);
+    let successor = resumed["currentPartId"].as_str().assert_value();
+    assert_eq!(resumed["resumedFromPartId"], run_id);
     fixture.wait_succeeded(successor, "finish").await;
     assert_eq!(calls(), 2);
     assert_eq!(
@@ -581,11 +591,24 @@ async fn suspended_attempt_exits_continues_once_and_preserves_vector_record_and_
         fs::read(fixture.repository.join("new-file")).assert_value(),
         b"untracked after suspension"
     );
-    let source = fixture.json(&["status", &run_id], "finish").await;
+    let source = fixture
+        .json(&["status", &run_id, "--part", &run_id], "finish")
+        .await;
     assert_eq!(source["status"]["phase"], "suspended");
     assert_eq!(source["workspaceRecovery"]["successorRunId"], successor);
-    fixture.json(&["force-stop", &run_id], "finish").await;
-    assert_eq!(fixture.json(&["status", &run_id], "finish").await, source);
+    assert!(
+        !fixture
+            .output(&["force-stop", &run_id, "--part", &run_id], "finish")
+            .await
+            .status
+            .success()
+    );
+    assert_eq!(
+        fixture
+            .json(&["status", &run_id, "--part", &run_id], "finish")
+            .await,
+        source
+    );
     assert!(
         !fixture
             .output(&["resume", &run_id], "finish")

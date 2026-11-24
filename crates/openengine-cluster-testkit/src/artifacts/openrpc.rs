@@ -66,6 +66,17 @@ fn method_document(descriptor: &MethodDescriptor) -> Value {
     if matches!(descriptor.name, "inbox/list" | "inbox/show") {
         object.insert("description".to_owned(),json!("Read-only vector-backed request inbox. Requires request_ask, kind openengine.request-ask/v1, in target discovery. Reads do not apply expiry or start a successor."));
     }
+    if openengine_cluster_protocol::physical_runs::run_method(descriptor.name) {
+        object
+            .get_mut("params")
+            .and_then(Value::as_array_mut)
+            .expect("method parameters")
+            .push(json!({
+                "name": "protocolVersion", "required": false,
+                "description": "Select logical run IDs without initializing the connection.",
+                "schema": { "const": PROTOCOL_VERSION }
+            }));
+    }
     object.insert("name".to_owned(), json!(descriptor.name));
     object.insert(
         "x-subscription".to_owned(),
@@ -131,6 +142,7 @@ fn native_v2_method(name: &str) -> Option<Value> {
             mode["$ref"] = json!("schema.json#/$defs/SteeringMode");
             json!({"paramStructure":"by-name", "params":[
                 {"name":"runId","required":true,"schema":property_schema(&schema,"runId")},
+                {"name":"partId","required":false,"schema":property_schema(&schema,"partId")},
                 {"name":"text","required":true,"schema":{"$ref":"schema.json#/$defs/NodeInstructions"}},
                 {"name":"mode","required":false,"schema":mode},
                 {"name":"node","required":false,"schema":{
@@ -157,15 +169,19 @@ fn native_v2_method(name: &str) -> Option<Value> {
 fn native_v2_recovery_method(name: &str) -> Option<Value> {
     match name {
         RUN_CHECKPOINTS_METHOD => run_checkpoints_method(),
-        openengine_cluster_protocol::RUN_RESUME_REQUIREMENTS_METHOD => json!({
+        openengine_cluster_protocol::RUN_RESUME_REQUIREMENTS_METHOD => {
+            let schema = serde_json::to_value(schema_for!(openengine_cluster_protocol::RunResumeRequirementsParams)).assert_value();
+            json!({
             "summary":"Resolve runtime replacement connection declarations without starting a successor",
             "paramStructure":"by-name",
             "params":[
                 {"name":"runId","required":true,"schema":{"type":"string"}},
+                {"name":"partId","required":false,"schema":property_schema(&schema, "partId")},
                 {"name":"runtime","required":true,"schema":{"$ref":"schema.json#/$defs/RunResumeRequirementsParams/properties/runtime"}}
             ],
             "result":{"name":"runResumeRequirementsResult","schema":{"$ref":"schema.json#/$defs/RunResumeRequirementsResult"}}
-        }),
+            })
+        }
         RUN_RESUME_METHOD => run_resume_method(),
         RUN_DISCARD_WORKSPACE_METHOD => run_discard_workspace_method(),
         _ => return None,
@@ -181,7 +197,7 @@ fn initialize_method() -> Value {
             "required": true,
             "schema": {
                 "type": "string",
-                "const": PROTOCOL_VERSION
+                "enum": [PROTOCOL_VERSION, openengine_cluster_protocol::physical_runs::VERSION]
             }
         }],
         "result": {
@@ -461,6 +477,7 @@ fn run_checkpoints_method() -> Value {
         "paramStructure": "by-name",
         "params": [
             {"name": "runId", "required": true, "schema": property_schema(&schema, "runId")},
+            {"name": "partId", "required": false, "schema": property_schema(&schema, "partId")},
             {"name": "after", "required": false, "schema": property_schema(&schema, "after")},
             {"name": "limit", "required": false, "schema": property_schema(&schema, "limit")}
         ],
@@ -476,7 +493,7 @@ fn run_resume_method() -> Value {
         .assert_value_with("run resume parameter JSON Schema serialization must succeed");
     json!({
         "summary": "Admit a successor from a retained workspace or entry checkpoint",
-        "description": "Omitting from or selecting restart restarts a failed run where it started, on \
+        "description": "RunId identifies the original submission. PartId must identify its current part. A successful resume returns the same runId and the new currentPartId. Omitting from or selecting restart restarts a failed run where it started, on \
             the latest retained workspace: a submitted run at its graph root, a successor at the \
             boundary it began at, so an accepted answer stays accepted. Selecting checkpoint restores the matching workspace and predecessor \
             outputs and reruns the named node or atomic concurrent group. Graph, input, source and \
@@ -492,7 +509,8 @@ fn run_resume_method() -> Value {
         "paramStructure": "by-name",
         "params": [
             {"name": "runId", "required": true, "schema": property_schema(&schema, "runId")},
-            {"name": "successorRunId", "required": true, "schema": property_schema(&schema, "successorRunId")},
+            {"name": "partId", "required": true, "schema": property_schema(&schema, "partId")},
+            {"name": "successorPartId", "required": true, "schema": property_schema(&schema, "successorPartId")},
             {"name": "runtime", "required": false, "schema": {"$ref":"schema.json#/$defs/RunResumeParams/properties/runtime"}},
             {"name": "from", "required": false, "schema": property_schema(&schema, "from")},
             {"name": "connections", "required": false, "schema": property_schema(&schema, "connections")},
@@ -517,7 +535,7 @@ fn run_id_method<P: schemars::JsonSchema>(result_name: &str, result_type: &str) 
         "params": [{
             "name": "runId", "required": true,
             "schema": property_schema(&schema, "runId")
-        }],
+        }, { "name": "partId", "required": false, "schema": property_schema(&schema, "partId") }],
         "result": {
             "name": result_name,
             "schema": { "$ref": format!("schema.json#/$defs/{result_type}") }
@@ -532,6 +550,7 @@ fn run_watch_method() -> Value {
         "paramStructure": "by-name",
         "params": [
             { "name": "runId", "required": true, "schema": property_schema(&schema, "runId") },
+            { "name": "partId", "required": false, "schema": property_schema(&schema, "partId") },
             { "name": "fromCursor", "required": false, "schema": property_schema(&schema, "fromCursor") }
         ],
         "result": {
@@ -548,6 +567,7 @@ fn run_logs_method() -> Value {
         "paramStructure": "by-name",
         "params": [
             { "name": "runId", "required": true, "schema": property_schema(&schema, "runId") },
+            { "name": "partId", "required": false, "schema": property_schema(&schema, "partId") },
             { "name": "fromCursor", "required": false, "schema": property_schema(&schema, "fromCursor") },
             { "name": "execution", "required": false, "schema": property_schema(&schema, "execution") }
         ],
@@ -565,6 +585,7 @@ fn run_attach_method() -> Value {
         "paramStructure": "by-name",
         "params": [
             { "name": "runId", "required": true, "schema": property_schema(&schema, "runId") },
+            { "name": "partId", "required": false, "schema": property_schema(&schema, "partId") },
             { "name": "execution", "required": true, "schema": property_schema(&schema, "execution") }
         ],
         "result": {
@@ -580,6 +601,7 @@ fn run_vectors_method() -> Value {
     json!({"summary":"Read an ordered page of the durable vector record", "paramStructure":"by-name",
         "params":[
             {"name":"runId","required":true,"schema":property_schema(&schema,"runId")},
+            {"name":"partId","required":false,"schema":property_schema(&schema,"partId")},
             {"name":"after","required":false,"schema":{"$ref":"schema.json#/$defs/RunVectorsParams/properties/after"}},
             {"name":"limit","required":false,"schema":property_schema(&schema,"limit")}],
         "result":{"name":"runVectorsResult","schema":{"$ref":"schema.json#/$defs/RunVectorsResult"}}})
@@ -591,8 +613,9 @@ fn run_vector_method() -> Value {
     json!({"summary":"Read one vector entry in full", "paramStructure":"by-name",
         "params":[
             {"name":"runId","required":true,"schema":property_schema(&schema,"runId")},
+            {"name":"partId","required":false,"schema":property_schema(&schema,"partId")},
             {"name":"id","required":true,"schema":{"$ref":"schema.json#/$defs/VectorId"}}],
-        "result":{"name":"runVectorResult","schema":{"$ref":"schema.json#/$defs/RunVector"}}})
+        "result":{"name":"runVectorResult","schema":{"$ref":"schema.json#/$defs/RunVectorResult"}}})
 }
 
 fn inbox_list_method() -> Value {

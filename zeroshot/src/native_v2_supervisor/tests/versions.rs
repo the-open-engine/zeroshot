@@ -70,6 +70,7 @@ async fn force_stop_before_or_during_initialization_keeps_one_first_version_reco
         let ledger = Arc::new(SqliteRunLedger::open_read_only(path).assert_value());
         let (_, mut logs) = NativeV2Observability::new(ledger)
             .logs(RunLogsParams {
+                part_id: None,
                 run_id,
                 from_cursor: None,
                 execution: None,

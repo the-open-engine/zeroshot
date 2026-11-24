@@ -15,7 +15,7 @@ use super::ConnectionState;
 use crate::native_v2::{
     RunAttachEventStream, RunLogEventStream, RunSubscriptionItem, RunWatchEventStream,
 };
-use crate::{serialize_backend_error, serialize_error, serialize_success, ClusterBackend, Dispatcher};
+use crate::{serialize_backend_error, serialize_error, ClusterBackend, Dispatcher};
 
 pub(crate) async fn run_run_watch_subscription<B>(
     dispatcher: Dispatcher<B>,
@@ -25,8 +25,9 @@ pub(crate) async fn run_run_watch_subscription<B>(
 ) where
     B: ClusterBackend,
 {
-    let (response, established) = dispatcher.dispatch_run_watch(id.clone(), params).await;
-    run_cursor_subscription(id, state, response, established).await;
+    let reply = dispatcher.dispatch_run_watch(id.clone(), params).await;
+    let physical = dispatcher.context().physical_run_ids();
+    run_cursor_subscription(id, state, reply, physical).await;
 }
 
 pub(crate) async fn run_run_logs_subscription<B>(
@@ -37,8 +38,9 @@ pub(crate) async fn run_run_logs_subscription<B>(
 ) where
     B: ClusterBackend,
 {
-    let (response, established) = dispatcher.dispatch_run_logs(id.clone(), params).await;
-    run_cursor_subscription(id, state, response, established).await;
+    let reply = dispatcher.dispatch_run_logs(id.clone(), params).await;
+    let physical = dispatcher.context().physical_run_ids();
+    run_cursor_subscription(id, state, reply, physical).await;
 }
 
 trait CursorNotification: serde::Serialize {
@@ -69,8 +71,8 @@ impl CursorNotification for RunLogEventNotification {
 async fn run_cursor_subscription<S, E>(
     id: RequestId,
     state: ConnectionState,
-    response: String,
-    established: Option<(SubscriptionId, S, ())>,
+    (response, established): (String, Option<(SubscriptionId, S, ())>),
+    physical: bool,
 ) where
     S: EventSource<Item = RunSubscriptionItem<E>>,
     E: CursorNotification,
@@ -86,7 +88,7 @@ async fn run_cursor_subscription<S, E>(
         RunSubscriptionItem::Event(mut event) => {
             event.bind_subscription(subscription_id.clone());
             last_delivered_cursor = Some(event.cursor());
-            event_notification(event)
+            event_notification(event, physical)
         }
         RunSubscriptionItem::Closed { reason } => closed_notification(
             subscription_id.clone(),
@@ -106,6 +108,7 @@ pub(crate) async fn run_run_attach_subscription<B>(
     B: ClusterBackend,
 {
     let (response, established) = dispatcher.dispatch_run_attach(id.clone(), params).await;
+    let physical = dispatcher.context().physical_run_ids();
     let channels = subscription_channels(id, state);
     let Some((established, ())) = establish_subscription(&channels, response, established).await
     else {
@@ -115,7 +118,7 @@ pub(crate) async fn run_run_attach_subscription<B>(
     run_established_subscription(established, channels, move |item| match item {
         RunSubscriptionItem::Event(mut event) => {
             event.subscription_id = subscription_id.clone();
-            event_notification(event)
+            event_notification(event, physical)
         }
         RunSubscriptionItem::Closed { reason } => {
             closed_notification(subscription_id.clone(), reason, None)
@@ -137,7 +140,12 @@ fn subscription_channels(id: RequestId, state: ConnectionState) -> SubscriptionC
     }
 }
 
-fn event_notification<P: serde::Serialize>(params: P) -> Option<String> {
+fn event_notification<P: serde::Serialize>(params: P, physical: bool) -> Option<String> {
+    if physical {
+        let mut value = serde_json::to_value(params).ok()?;
+        openengine_cluster_protocol::physical_runs::write_response("event", &mut value);
+        return event_notification_with_method("event", value);
+    }
     serde_json::to_string(&JsonRpcNotification {
         jsonrpc: JSON_RPC_VERSION.to_owned(),
         method: "event".to_owned(),
@@ -187,7 +195,7 @@ where
             Ok((result, stream)) => {
                 let subscription_id = result.subscription_id.clone();
                 (
-                    serialize_success(id, result),
+                    self.run_response(openengine_cluster_protocol::RUN_WATCH_METHOD, id, result),
                     Some((subscription_id, stream, ())),
                 )
             }
@@ -208,7 +216,7 @@ where
             Ok((result, stream)) => {
                 let subscription_id = result.subscription_id.clone();
                 (
-                    serialize_success(id, result),
+                    self.run_response(openengine_cluster_protocol::RUN_LOGS_METHOD, id, result),
                     Some((subscription_id, stream, ())),
                 )
             }
@@ -229,7 +237,7 @@ where
             Ok((result, stream)) => {
                 let subscription_id = result.subscription_id.clone();
                 (
-                    serialize_success(id, result),
+                    self.run_response(openengine_cluster_protocol::RUN_ATTACH_METHOD, id, result),
                     Some((subscription_id, stream, ())),
                 )
             }

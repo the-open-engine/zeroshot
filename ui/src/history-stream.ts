@@ -3,6 +3,8 @@ import { observationEnded } from './history-contract';
 import { historyRetryDelay, readHistoryProblem, readHistoryResponse } from './history-response';
 import { waitForHistoryRetry, type HistoryRetryWait } from './history-readiness';
 
+export const runPartsHeaders = { 'X-Zeroshot-Run-Parts': '1' };
+
 export type HistoryConnection = 'connecting' | 'connected' | 'reconnecting';
 export type HistoryObserver = {
   page(page: HistoryPage): void;
@@ -72,7 +74,7 @@ class HistoryWatch {
     try {
       const fetcher = this.fetcher;
       return await fetcher(this.url, {
-        headers: { Accept: 'text/event-stream', 'Last-Event-ID': this.cursor },
+        headers: { ...runPartsHeaders, Accept: 'text/event-stream', 'Last-Event-ID': this.cursor },
         credentials: 'same-origin',
         cache: 'no-store',
         redirect: 'error',

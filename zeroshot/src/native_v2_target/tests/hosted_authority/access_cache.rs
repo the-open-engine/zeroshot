@@ -28,9 +28,8 @@ async fn mixed_hosted_operations_reuse_one_validated_persisted_token() {
     authority
         .hosted_run_status(
             &target,
-            RunStatusParams {
-                run_id: RunId::new("run-hosted"),
-            },
+            RunStatusParams::new(RunId::new("run-hosted")),
+            false,
         )
         .await
         .assert_value();

@@ -156,6 +156,7 @@ async fn steered_turn(mode: &str) -> (Value, usize) {
         RunSteerParams {
             node: None,
             mode: openengine_cluster_protocol::SteeringMode::Standing,
+            part_id: None,
             run_id: run.clone(),
             text: "x".repeat(openengine_cluster_protocol::MAX_NODE_INSTRUCTIONS_BYTES),
         },

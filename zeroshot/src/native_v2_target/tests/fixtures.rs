@@ -248,6 +248,11 @@ impl TargetControlAuthority for FakeAuthority {
             Box::new(request.clone()),
         ));
         Ok(RunSubmitResult {
+            current_part_id: self
+                .receipt_run_id
+                .clone()
+                .unwrap_or_else(|| request.run_id.clone())
+                .clone(),
             run_id: self
                 .receipt_run_id
                 .clone()
@@ -316,7 +321,11 @@ impl TargetControlAuthority for FakeAuthority {
         &self,
         _target: &TargetRecord,
         _params: RunStatusParams,
-    ) -> Result<CliRunStatusResult, TargetAuthorityError> {
+        grouped_only: bool,
+    ) -> Result<Option<HostedRunRoute>, TargetAuthorityError> {
+        if grouped_only {
+            return Ok(None);
+        }
         Err(TargetAuthorityError::new(
             "fake hosted lifecycle is unavailable",
         ))

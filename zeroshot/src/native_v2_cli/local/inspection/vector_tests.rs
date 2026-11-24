@@ -7,6 +7,7 @@ pub(super) async fn assert_vectors(fixture: &Fixture) {
         .run_vectors(
             None,
             RunVectorsParams {
+                part_id: None,
                 run_id: fixture.id.clone(),
                 after: None,
                 limit: None,
@@ -24,13 +25,14 @@ pub(super) async fn assert_vectors(fixture: &Fixture) {
         .run_vector(
             None,
             RunVectorParams {
+                part_id: None,
                 run_id: fixture.id.clone(),
                 id: fixture.vector.id.clone(),
             },
         )
         .await
         .unwrap();
-    assert_eq!(vector, fixture.vector);
+    assert_eq!(vector, fixture.vector.clone().into());
     let missing = VectorId::new("unknown").unwrap();
     let errors = [
         fixture
@@ -38,6 +40,7 @@ pub(super) async fn assert_vectors(fixture: &Fixture) {
             .run_vector(
                 None,
                 RunVectorParams {
+                    part_id: None,
                     run_id: fixture.id.clone(),
                     id: missing.clone(),
                 },
@@ -49,6 +52,7 @@ pub(super) async fn assert_vectors(fixture: &Fixture) {
             .run_vectors(
                 None,
                 RunVectorsParams {
+                    part_id: None,
                     run_id: fixture.id.clone(),
                     after: Some(missing),
                     limit: None,
@@ -68,9 +72,7 @@ pub(super) async fn assert_vectors(fixture: &Fixture) {
 async fn assert_boundary_refused(fixture: &Fixture) {
     let expected = fixture
         .backend
-        .status_local(RunStatusParams {
-            run_id: fixture.id.clone(),
-        })
+        .status_local(RunStatusParams::new(fixture.id.clone()))
         .await
         .unwrap_err()
         .to_string();
@@ -79,6 +81,7 @@ async fn assert_boundary_refused(fixture: &Fixture) {
         .run_vectors(
             None,
             RunVectorsParams {
+                part_id: None,
                 run_id: fixture.id.clone(),
                 after: None,
                 limit: None,
@@ -90,6 +93,7 @@ async fn assert_boundary_refused(fixture: &Fixture) {
         .run_vector(
             None,
             RunVectorParams {
+                part_id: None,
                 run_id: fixture.id.clone(),
                 id: fixture.vector.id.clone(),
             },

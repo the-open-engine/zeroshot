@@ -97,9 +97,7 @@ async fn force_reconstructed_active_nodes_records_stopped_and_preserves_complete
     let run_id = interrupted_parallel_run(&harness.ledger).await;
     let forced = harness
         .controller
-        .force(RunForceParams {
-            run_id: run_id.clone(),
-        })
+        .force(RunForceParams::new(run_id.clone()))
         .await
         .assert_value();
     assert_eq!(
@@ -137,6 +135,7 @@ async fn force_reconstructed_active_nodes_records_stopped_and_preserves_complete
     let records = read_logs(
         &harness.controller,
         RunLogsParams {
+            part_id: None,
             run_id,
             from_cursor: None,
             execution: None,
@@ -171,6 +170,7 @@ async fn restarted_active_nodes_keep_public_failure_logs_and_replay_without_dupl
         .await
         .assert_value();
     let params = || RunLogsParams {
+        part_id: None,
         run_id: run_id.clone(),
         from_cursor: None,
         execution: None,
@@ -237,9 +237,7 @@ async fn restarted_active_nodes_keep_public_failure_logs_and_replay_without_dupl
     assert!(filtered_replay.is_empty());
 
     let before = controller
-        .status(RunStatusParams {
-            run_id: run_id.clone(),
-        })
+        .status(RunStatusParams::new(run_id.clone()))
         .await
         .assert_value();
     drop(controller);
@@ -247,13 +245,14 @@ async fn restarted_active_nodes_keep_public_failure_logs_and_replay_without_dupl
         .await
         .assert_value();
     let after = reconstructed
-        .status(RunStatusParams { run_id })
+        .status(RunStatusParams::new(run_id))
         .await
         .assert_value();
     assert_eq!(after, before);
     let persisted = read_logs(
         &reconstructed,
         RunLogsParams {
+            part_id: None,
             run_id: after.run_id,
             from_cursor: None,
             execution: None,

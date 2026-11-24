@@ -78,16 +78,19 @@ another run. A failed Platform run does not authorize silently implementing the 
    submitted payload and key. If the response is lost, replay those identical values to recover the
    original run receipt; do not invent a new key or require a client-generated run ID. If replay
    cannot establish acceptance, report the uncertainty and stop rather than submitting new work.
-5. Keep the returned `runId`. Use `get_run`, `wait_for_run` with its status cursor, and
-   `read_run_logs` with its history cursor. Wait accepts at most 30 seconds; timeout or client
-   disconnect leaves the run running. Read bounded history pages until the required output is
-   available, keeping status, history, and checkpoint cursors separate. Report terminal outcome and
-   observed delivery receipts; admission alone is not completion.
-6. `list_run_checkpoints` inspects recovery choices. Call `resume_run` only for requested recovery,
-   with the chosen `from` selector and a fresh explicit UUIDv7 `successorRunId`; retain both for
-   identical retries. Generate the UUID with host tooling or use one supplied by the user; when
-   neither is available, direct the user to Platform recovery. Never reuse the original run ID as
-   its successor. Use `stop_run` or `discard_run_workspace` only when the user intends that action.
+5. Keep the submitted `runId`. When the receipt includes `currentPartId`, the run ID remains
+   stable across requests, resumes and checkpoint retries. Use `get_run`, `wait_for_run` with
+   its status cursor, and `read_run_logs` with its history cursor. Keep each cursor with its
+   stream and part selection. A wait lasts up to 30 seconds. Report a suspension that still needs
+   input and the final outcome or delivery evidence when available.
+6. Inspect `list_run_checkpoints` before a requested recovery. If the discovered `resume_run`
+   schema exposes `partId` and `successorPartId`, pass the stable `runId`, the part the user
+   inspected, the chosen `from` selector, and a fresh UUIDv7 for the new part. Keep all four
+   values for identical retries. Follow the original run ID after acceptance. If the selected
+   part became stale, read current status and report it before taking another action.
+   On a server advertising `successorRunId` instead, use that field and follow its returned run
+   ID. Generate a UUID with host tooling or use one supplied by the user. Use `stop_run` or
+   `discard_run_workspace` only when the user intends that action.
 
 The same server exposes typed environment and Memory operations. Before those writes, capture
 `workspace_id` from `get_authoring_catalog` and supply current revisions where required; do not
@@ -351,6 +354,11 @@ zeroshot status RUN_ID --target platform
 zeroshot watch RUN_ID --target platform
 zeroshot logs RUN_ID --target platform
 ```
+
+On versions reporting `currentPartId`, the same run ID follows every continuation. Use
+`zeroshot status RUN_ID --part PART_ID` to inspect one part. Preserve the part that issued a
+question and send it with `zeroshot answer RUN_ID --part PART_ID --input ANSWER.json`.
+`zeroshot resume RUN_ID --part PART_ID` likewise targets an observed part.
 
 A foreground run streams events. Ctrl-C detaches observation without stopping the run. Use
 `zeroshot force-stop RUN_ID --target platform` only when the user explicitly intends to stop it.

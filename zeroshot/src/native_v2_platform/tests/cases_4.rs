@@ -29,9 +29,7 @@ async fn force_cancels_preparation_without_waiting_for_allocation_or_starting_no
     assert!(cleanup.exits().is_empty());
     let forced = tokio::time::timeout(
         Duration::from_secs(2),
-        controller.force(RunForceParams {
-            run_id: receipt.run_id.clone(),
-        }),
+        controller.force(RunForceParams::new(receipt.run_id.clone())),
     )
     .await
     .assert_value()

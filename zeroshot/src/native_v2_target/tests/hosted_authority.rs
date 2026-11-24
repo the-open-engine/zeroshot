@@ -91,6 +91,7 @@ pub(super) struct CapturedHttpRequest {
     pub(super) path: String,
     pub(super) authorization: Option<String>,
     pub(super) organization: Option<String>,
+    pub(super) run_parts: bool,
     pub(super) body: String,
 }
 
@@ -486,12 +487,14 @@ pub(super) async fn read_http_request(stream: &mut tokio::net::TcpStream) -> Cap
         .map_or(0, |value| value.parse::<usize>().assert_value());
     let authorization = header_value(head, "authorization").map(str::to_owned);
     let organization = header_value(head, "x-zeroshot-organization").map(str::to_owned);
+    let run_parts = header_value(head, openengine_cluster_protocol::RUN_PARTS_HEADER) == Some("1");
     read_http_body(stream, &mut bytes, header_end + content_length).await;
     CapturedHttpRequest {
         method,
         path,
         authorization,
         organization,
+        run_parts,
         body: String::from_utf8(
             bytes
                 .get(header_end..header_end + content_length)

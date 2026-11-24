@@ -5,6 +5,7 @@
       "type": "output"
     },
     "execution": "opaque-verifier-b",
+    "partId": "run-1",
     "runId": "run-1",
     "subscriptionId": "attach-1"
   },
@@ -14,6 +15,7 @@
   },
   "result": {
     "execution": "opaque-verifier-b",
+    "partId": "run-1",
     "runId": "run-1",
     "subscriptionId": "attach-1"
   }

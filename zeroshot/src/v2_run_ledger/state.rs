@@ -560,37 +560,49 @@ fn add_usage(
     snapshot: &mut RunSnapshot,
     usage: Option<&TokenUsageDelta>,
 ) -> Result<(), RunLedgerError> {
-    match (&mut snapshot.token_usage, usage) {
-        (None, Some(usage)) => {
-            snapshot.token_usage = Some(TokenUsage {
-                input_tokens: usage.input_tokens,
-                output_tokens: usage.output_tokens,
-                cache_read_input_tokens: usage.cache_read_input_tokens,
-                cache_creation_input_tokens: usage.cache_creation_input_tokens,
-                complete: true,
-            });
-        }
-        (None, None) => {
-            snapshot.token_usage = Some(TokenUsage {
-                input_tokens: TokenCount::default(),
-                output_tokens: TokenCount::default(),
-                cache_read_input_tokens: None,
-                cache_creation_input_tokens: None,
-                complete: false,
-            });
-        }
-        (Some(total), Some(usage)) => {
-            total.input_tokens = add_tokens(total.input_tokens, usage.input_tokens)?;
-            total.output_tokens = add_tokens(total.output_tokens, usage.output_tokens)?;
-            total.cache_read_input_tokens =
-                add_optional_tokens(total.cache_read_input_tokens, usage.cache_read_input_tokens)?;
-            total.cache_creation_input_tokens = add_optional_tokens(
-                total.cache_creation_input_tokens,
-                usage.cache_creation_input_tokens,
-            )?;
-        }
-        (Some(total), None) => total.complete = false,
+    let part = usage.map(|usage| TokenUsage {
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        cache_read_input_tokens: usage.cache_read_input_tokens,
+        cache_creation_input_tokens: usage.cache_creation_input_tokens,
+        complete: true,
+    });
+    if let Some(part) = &part {
+        return merge_usage(&mut snapshot.token_usage, Some(part));
     }
+    snapshot
+        .token_usage
+        .get_or_insert_with(|| TokenUsage {
+            input_tokens: TokenCount::default(),
+            output_tokens: TokenCount::default(),
+            cache_read_input_tokens: None,
+            cache_creation_input_tokens: None,
+            complete: false,
+        })
+        .complete = false;
+    Ok(())
+}
+
+/// A part without model work contributes zero; an unreported invocation is
+/// already represented by a present, incomplete total.
+pub(crate) fn merge_usage(
+    total: &mut Option<TokenUsage>,
+    part: Option<&TokenUsage>,
+) -> Result<(), RunLedgerError> {
+    let Some(part) = part else { return Ok(()) };
+    let Some(total) = total else {
+        *total = Some(part.clone());
+        return Ok(());
+    };
+    total.input_tokens = add_tokens(total.input_tokens, part.input_tokens)?;
+    total.output_tokens = add_tokens(total.output_tokens, part.output_tokens)?;
+    total.cache_read_input_tokens =
+        add_optional_tokens(total.cache_read_input_tokens, part.cache_read_input_tokens)?;
+    total.cache_creation_input_tokens = add_optional_tokens(
+        total.cache_creation_input_tokens,
+        part.cache_creation_input_tokens,
+    )?;
+    total.complete &= part.complete;
     Ok(())
 }
 

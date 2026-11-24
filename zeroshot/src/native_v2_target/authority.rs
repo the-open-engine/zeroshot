@@ -17,7 +17,7 @@ use openengine_cluster_protocol::{
     RunProfileListRequest, RunProfileListResult, RunProfileMutationResult, RunProfileRunRequest,
     RunProfileSelector, RunProfileSetRequest,
 };
-use zeroshot_engine::native_v2_cli::oecp::BoxedSubscription;
+use zeroshot_engine::native_v2_cli::oecp::{BoxedSubscription, HostedRunRoute};
 use zeroshot_engine::native_v2_cli::{
     CliRunForceResult, CliRunListResult, CliRunStatusResult, CliRunWatchEventNotification,
 };
@@ -359,7 +359,8 @@ pub trait TargetControlAuthority: Send + Sync {
         &self,
         target: &TargetRecord,
         params: RunStatusParams,
-    ) -> Result<CliRunStatusResult, TargetAuthorityError>;
+        grouped_only: bool,
+    ) -> Result<Option<HostedRunRoute>, TargetAuthorityError>;
     async fn hosted_run_watch(
         &self,
         target: &TargetRecord,

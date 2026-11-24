@@ -134,6 +134,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
     for run in runs {
         let (_, mut logs) = NativeV2Observability::new(ledger.clone())
             .logs(RunLogsParams {
+                part_id: None,
                 run_id: RunId::new(run),
                 from_cursor: None,
                 execution: None,

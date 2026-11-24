@@ -355,6 +355,23 @@ pub trait TargetConnector: Send + Sync {
         name: &str,
         params: RunStatusParams,
     ) -> Result<Option<CliRunStatusResult>, NativeV2CliError>;
+    async fn hosted_run_route(
+        &self,
+        name: &str,
+        params: RunStatusParams,
+        grouped_only: bool,
+    ) -> Result<Option<super::HostedRunRoute>, NativeV2CliError> {
+        if grouped_only {
+            return Ok(None);
+        }
+        Ok(self
+            .hosted_run_status(name, params)
+            .await?
+            .map(|status| super::HostedRunRoute {
+                status,
+                run_parts: false,
+            }))
+    }
     async fn hosted_run_watch(
         &self,
         name: &str,

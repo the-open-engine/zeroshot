@@ -8,16 +8,23 @@ description: 'Target discovery, local harness configuration, permissions and wor
 
 ## Wire compatibility
 
-Clients and targets must implement the same current wire contract. OECP initialization requires
-`openengine.cluster/v2`; target discovery requires `zeroshot.native-v2-target/v3`; hosted run
-observation requires `zeroshot.hosted-runs/v2`. These are wire identifiers, independent of package
-versions. The discovery URL, HTTP routes and JSON-RPC method names are unchanged.
+OECP initialization negotiates `openengine.cluster/v3` for grouped runs and
+`openengine.cluster/v2` for physical runs. Direct and hosted discovery use
+`zeroshot.native-v2-target/v3`.
 
-An incompatible client or target stops at discovery or initialization, before submitting or
-observing a run. Upgrade the Zeroshot client and target together to releases implementing these
-identifiers. Hosted gateway operators must update the gateway's discovery and protocol dependencies
-as part of the same rollout. An incompatibility is final for that operation: submissions are not
-automatically retried. Existing runs keep executing and compatible clients can observe them.
+Targets that group run parts advertise `run_parts: {"kind":"openengine.run-parts/v1"}`.
+Clients opt in on HTTP requests with `X-Zeroshot-Run-Parts: 1`. Requests without that
+header receive physical identities, including bare cursors on browser history pages.
+A grouped status returns the original `runId`, the selected `partId` and `currentPartId`.
+Resume includes the observed `partId` and the proposed `successorPartId`. A stale source
+returns `RUN_CONFLICT` with the current part ID. Grouped log and watch cursors include the
+originating part and can be passed back unchanged.
+
+Hosted run routes use `zeroshot.hosted-runs/v2`. A host without the run-parts capability continues addressing
+physical runs. A request selecting a different part requires a host advertising the capability.
+Grouped hosts serve status, watch, logs and force through their hosted routes across every phase.
+For attach and steer, the CLI opens an OECP session scoped to the selected physical part.
+A guarded steer must still address the current part when the host accepts it.
 
 Active execution `startedAt` and watch notification `recordedAt` are Unix
 milliseconds when known. Python users upgrade the native client by upgrading the

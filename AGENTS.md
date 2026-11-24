@@ -1148,6 +1148,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   latched primary outcome. No terminal is invented when settlement fails or
   the deadline/OS ends the process. Terminal closure remains detached. Windows keeps Ctrl-C and
   Ctrl-Break guards and adds no close/logoff/shutdown handler; cooperative stop uses force-stop.
+- Public native run operations use the original submission ID as `runId` across accepted
+  resumes, request answers, retries and checkpoint rewinds. `partId` identifies the physical
+  ledger and `currentPartId` the latest accepted handoff. Only reciprocal, committed ownership
+  advances the run. A failed preparation can retain its own diagnostic ledger. Group lists before
+  pagination. Public history cursors identify a part and its local cursor. Ledgers, snapshots,
+  provider execution references, checkpoint ownership and private archive exports remain per part.
+  Aggregate only original work and usage. Imports seed the part's replay. A live logical watch
+  follows suspension, while foreground observation returns control at the current suspension.
 - Failed and suspended local and direct-target runs retain an exclusively claimable workspace for a successor
   attempt. Local recovery metadata lives beside each run ledger while the checkout remains
   user-owned; direct targets retain only the candidate and Git metadata, dispose private runtime
@@ -1965,11 +1973,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 
 ## CLI and target contracts
 
-- The current wire contract uses `openengine.cluster/v2` at OECP initialization,
-  `zeroshot.native-v2-target/v3` at target discovery, and `zeroshot.hosted-runs/v2` for hosted
-  observation. These protocol-owned identifiers gate incompatible peers before submission or
-  observation; upgrade clients (including Python wheels), targets and hosted gateways together.
-  Keep one strict timed payload format, existing paths and protocol artifact locations. The
+- OECP initialization negotiates `openengine.cluster/v3` for logical runs and
+  `openengine.cluster/v2` for physical runs. Direct and hosted HTTP discovery retain
+  `zeroshot.native-v2-target/v3`, and hosted observation retains `zeroshot.hosted-runs/v2`.
+  Keep strict payloads for each negotiated version, existing paths and protocol artifact locations. The
   isolated `crates/openengine-cluster-testkit/tests/released-wire-contract` workspace pins the
   untouched v16.0.0 client/server sources for early-rejection controls without adding duplicate
   package identities to the product workspace. The protocol's `native_v2_observation` integration
@@ -1980,6 +1987,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   feature profile and keep each Cargo workspace's build artifacts independent.
   Child commands clear the parent package's Cargo metadata so Windows can reuse its leaf-test
   prebuilds inside the bounded native execution host.
+
+  Targets advertise `openengine.run-parts/v1`. HTTP run and browser history clients request
+  logical identity with `X-Zeroshot-Run-Parts: 1`; unmarked requests retain physical responses.
+  Legacy HTTP translation may address only the physical run being acted on.
+  Grouped hosts own observation and force in every phase. Live attachment and steering mint
+  exact-part sessions after the host resolves membership. Steering retains the observed head guard.
 
 - `target list` and `target remove` manage local named-target state, including the built-in
   `platform` listing. Inventory exposes only name, origin and hosted/direct kind. Removal refuses

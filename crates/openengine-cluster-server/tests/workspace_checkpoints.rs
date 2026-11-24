@@ -46,7 +46,7 @@ impl ClusterBackend for CheckpointBackend {
         );
         assert_eq!(params.page_limit(), 1);
         Ok(serde_json::from_value(json!({
-            "runId": params.run_id,
+            "runId": params.run_id, "partId": params.run_id,
             "checkpoints": [{
                 "checkpointId": "entry-2", "sequence": 2, "node": "writers",
                 "mapIndices": [], "loopIterations": [0], "createdAt": 42
@@ -69,13 +69,19 @@ impl ClusterBackend for CheckpointBackend {
             })
         );
         Ok(RunResumeResult {
-            run_id: params.successor_run_id,
-            resumed_from: params.run_id,
+            current_part_id: params.successor_run_id,
+            run_id: params.run_id,
+            resumed_from: params.part_id,
         })
     }
 }
 
-async fn call<B: ClusterBackend>(dispatcher: &Dispatcher<B>, method: &str, params: Value) -> Value {
+async fn call<B: ClusterBackend>(
+    dispatcher: &Dispatcher<B>,
+    method: &str,
+    mut params: Value,
+) -> Value {
+    params["protocolVersion"] = json!(openengine_cluster_protocol::PROTOCOL_VERSION);
     let request = json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
     serde_json::from_str(&dispatcher.dispatch(&request.to_string()).await).assert_value()
 }
@@ -99,14 +105,14 @@ async fn checkpoint_listing_and_selected_resume_reach_the_backend() {
         &dispatcher,
         "run/resume",
         json!({
-            "runId": "prior", "successorRunId": "successor",
+            "runId": "prior", "partId":"prior", "successorPartId": "successor",
             "from": {"kind": "checkpoint", "checkpointId": "entry-2"}
         }),
     )
     .await;
     assert_eq!(
         resumed["result"],
-        json!({"runId": "successor", "resumedFrom": "prior"})
+        json!({"runId":"prior","currentPartId":"successor","resumedFromPartId":"prior"})
     );
     assert_eq!(backend.calls.load(Ordering::SeqCst), 2);
 }
@@ -126,6 +132,7 @@ async fn invalid_wire_and_typed_queries_are_rejected_before_backend_dispatch() {
     }
     let error = dispatcher
         .run_checkpoints(RunCheckpointsParams {
+            part_id: None,
             run_id: RunId::new("prior"),
             after: None,
             limit: Some(0),

@@ -119,12 +119,31 @@ where
         shape: RunSubscriptionShape<R, E>,
     ) -> Result<(R, RunSubscriptionEventStream<'a, T, E>), ClientError>
     where
-        P: Serialize + Send,
+        P: Serialize + Send + Sync,
         R: DeserializeOwned,
         E: DeserializeOwned,
     {
-        let (result, subscription) =
-            open_subscription(self.core.transport(), method, params).await?;
+        let transport = self.core.transport();
+        let current =
+            open_subscription(transport, method, crate::VersionedRunParams::new(&params)).await;
+        let (result, subscription, physical) = match current {
+            Err(ref error)
+                if crate::ClusterClient::new(transport)
+                    .physical_peer_after_rejection(error, transport.next_watch_request_id())
+                    .await =>
+            {
+                let (mut value, subscription): (serde_json::Value, _) =
+                    open_subscription(transport, method, crate::physical_params(&params)?).await?;
+                openengine_cluster_protocol::physical_runs::read_response(method, &mut value);
+                let result = serde_json::from_value(value)
+                    .map_err(|e| ClientError::InvalidResponse(e.to_string()))?;
+                (result, subscription, true)
+            }
+            other => {
+                let (result, subscription) = other?;
+                (result, subscription, false)
+            }
+        };
         let subscription_id = (shape.result_subscription_id)(&result).clone();
         let subscription = subscription.ok_or_else(|| {
             ClientError::InvalidResponse(
@@ -142,6 +161,7 @@ where
                 event_subscription_id: shape.event_subscription_id,
                 event_cursor: shape.event_cursor,
                 closed: false,
+                physical,
             },
         ))
     }
@@ -152,6 +172,7 @@ pub struct RunSubscriptionEventStream<'a, T, E> {
     event_subscription_id: fn(&E) -> &SubscriptionId,
     event_cursor: fn(&E) -> Option<&Cursor>,
     closed: bool,
+    physical: bool,
 }
 
 impl<'a, T, E> RunSubscriptionEventStream<'a, T, E>
@@ -180,20 +201,7 @@ where
     fn parse_notification(&mut self, line: &str) -> Result<RunSubscriptionEvent<E>, ClientError> {
         let (method, value) = parse_subscription_notification(line)?;
         match method.as_deref() {
-            Some("event") => {
-                let notification: JsonRpcNotification<E> = serde_json::from_value(value)
-                    .map_err(|error| ClientError::InvalidResponse(error.to_string()))?;
-                let event = notification.params;
-                if (self.event_subscription_id)(&event) != self.core.subscription_id() {
-                    return Err(ClientError::InvalidResponse(
-                        "native-v2 event subscription id mismatch".to_owned(),
-                    ));
-                }
-                if let Some(cursor) = (self.event_cursor)(&event) {
-                    self.core.record_delivered_cursor(cursor.clone());
-                }
-                Ok(RunSubscriptionEvent::Event(event))
-            }
+            Some("event") => self.parse_event(value),
             Some("subscription/closed") => {
                 let (reason, observed_cursor) =
                     parse_subscription_close(value, self.core.subscription_id())?;
@@ -212,6 +220,29 @@ where
                 "unexpected subscription notification method {other:?}"
             ))),
         }
+    }
+
+    fn parse_event(
+        &mut self,
+        mut value: serde_json::Value,
+    ) -> Result<RunSubscriptionEvent<E>, ClientError> {
+        if self.physical {
+            if let Some(params) = value.get_mut("params") {
+                openengine_cluster_protocol::physical_runs::read_response("event", params);
+            }
+        }
+        let notification: JsonRpcNotification<E> = serde_json::from_value(value)
+            .map_err(|error| ClientError::InvalidResponse(error.to_string()))?;
+        let event = notification.params;
+        if (self.event_subscription_id)(&event) != self.core.subscription_id() {
+            return Err(ClientError::InvalidResponse(
+                "native-v2 event subscription id mismatch".to_owned(),
+            ));
+        }
+        if let Some(cursor) = (self.event_cursor)(&event) {
+            self.core.record_delivered_cursor(cursor.clone());
+        }
+        Ok(RunSubscriptionEvent::Event(event))
     }
 
     impl_cursor_subscription_controls!();

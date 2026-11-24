@@ -168,6 +168,19 @@ impl Bounds {
                         return Err(too_large());
                     }
                     bounded_json_from_slice::<RunStatusResult>(item)
+                        .or_else(|error| {
+                            let mut legacy: serde_json::Value = bounded_json_from_slice(item)?;
+                            if legacy.get("partId").is_some()
+                                || legacy.get("currentPartId").is_some()
+                            {
+                                return Err(error);
+                            }
+                            openengine_cluster_protocol::physical_runs::read_response(
+                                openengine_cluster_protocol::RUN_STATUS_METHOD,
+                                &mut legacy,
+                            );
+                            serde_json::from_value(legacy)
+                        })
                         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
                     self.segment = prefix.len();
                 }

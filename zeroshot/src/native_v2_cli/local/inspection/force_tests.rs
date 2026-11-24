@@ -55,9 +55,7 @@ async fn suspend(fixture: &Fixture) -> RunStatusResult {
         .unwrap();
     fixture
         .backend
-        .read_recorded_status(RunStatusParams {
-            run_id: fixture.id.clone(),
-        })
+        .read_recorded_status(RunStatusParams::new(fixture.id.clone()))
         .await
         .unwrap()
 }
@@ -68,9 +66,7 @@ async fn running_force_fences_continuation_until_the_controller_replies() {
     recovery(&fixture);
     let recorded = fixture
         .backend
-        .read_recorded_status(RunStatusParams {
-            run_id: fixture.id.clone(),
-        })
+        .read_recorded_status(RunStatusParams::new(fixture.id.clone()))
         .await
         .unwrap();
     assert!(matches!(recorded.status, RunStatus::Running { .. }));
@@ -82,9 +78,9 @@ async fn running_force_fences_continuation_until_the_controller_replies() {
         force_gate: Some(gate.clone()),
     });
     let _endpoint = ServedEndpoint::start(&fixture.backend.paths(&fixture.id).unwrap(), controller);
-    let force = fixture.backend.force_once(RunForceParams {
-        run_id: fixture.id.clone(),
-    });
+    let force = fixture
+        .backend
+        .force_once(RunForceParams::new(fixture.id.clone()));
     tokio::pin!(force);
     tokio::select! {
         result = &mut force => panic!("force returned before the controller reply: {result:?}"),
@@ -134,9 +130,7 @@ async fn continuation_claim_fences_force_even_while_recorded_status_is_running()
     recovery(&fixture);
     let recorded = fixture
         .backend
-        .read_recorded_status(RunStatusParams {
-            run_id: fixture.id.clone(),
-        })
+        .read_recorded_status(RunStatusParams::new(fixture.id.clone()))
         .await
         .unwrap();
     assert!(matches!(recorded.status, RunStatus::Running { .. }));
@@ -152,9 +146,7 @@ async fn continuation_claim_fences_force_even_while_recorded_status_is_running()
     assert!(
         fixture
             .backend
-            .force_once(RunForceParams {
-                run_id: fixture.id.clone()
-            })
+            .force_once(RunForceParams::new(fixture.id.clone()))
             .await
             .is_err()
     );
@@ -186,9 +178,7 @@ async fn accepted_continuation_preserves_suspended_source_and_bypasses_live_cont
     let before = tree(fixture.root.path());
     let forced = fixture
         .backend
-        .force_once(RunForceParams {
-            run_id: fixture.id.clone(),
-        })
+        .force_once(RunForceParams::new(fixture.id.clone()))
         .await
         .unwrap();
     assert!(matches!(forced.status, RunStatus::Suspended { .. }));

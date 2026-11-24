@@ -6,9 +6,7 @@ async fn force_of_controller_reconstructed_run_confirms_absence_and_finishes() {
     let run_id = seed_controller_reconstructed_run(&harness.ledger, "run-force-orphaned").await;
     let forced = harness
         .controller
-        .force(RunForceParams {
-            run_id: run_id.clone(),
-        })
+        .force(RunForceParams::new(run_id.clone()))
         .await
         .assert_value_with("force");
     assert!(matches!(forced.status, RunStatus::Finished { .. }));
@@ -23,18 +21,12 @@ async fn concurrent_force_of_reconstructed_run_cleans_up_and_terminalizes_once()
     let run_id = seed_controller_reconstructed_run(&harness.ledger, "run-concurrent-force").await;
     let left_controller = harness.controller.clone();
     let left_id = run_id.clone();
-    let left = tokio::spawn(async move {
-        left_controller
-            .force(RunForceParams { run_id: left_id })
-            .await
-    });
+    let left =
+        tokio::spawn(async move { left_controller.force(RunForceParams::new(left_id)).await });
     let right_controller = harness.controller.clone();
     let right_id = run_id.clone();
-    let right = tokio::spawn(async move {
-        right_controller
-            .force(RunForceParams { run_id: right_id })
-            .await
-    });
+    let right =
+        tokio::spawn(async move { right_controller.force(RunForceParams::new(right_id)).await });
     let (left, right) = tokio::join!(left, right);
     assert!(matches!(
         left.assert_value_with("left task")
@@ -83,9 +75,7 @@ async fn drive_cleanup_failure_automatically_retries_and_reports_runtime_failure
 
     let forced = harness
         .controller
-        .force(RunForceParams {
-            run_id: receipt.run_id.clone(),
-        })
+        .force(RunForceParams::new(receipt.run_id.clone()))
         .await
         .assert_value_with("force after automatic recovery");
     assert!(matches!(forced.status, RunStatus::Finished { .. }));

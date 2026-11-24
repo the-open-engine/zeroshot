@@ -86,6 +86,7 @@ impl NativeV2Supervisor {
                 let page = crate::v2_run_ledger::vectors::list_full(
                     self.ledger.as_ref(),
                     openengine_cluster_protocol::RunVectorsParams {
+                        part_id: None,
                         run_id: self.run_id.clone(),
                         after,
                         limit: Some(100),

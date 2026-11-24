@@ -19,6 +19,10 @@ Switch the run view between **Steps** and **Graph**. Runs open in Steps until yo
 graph, and a run you have not opened before starts in the view you chose last. Both show the same
 replay position, and the selection carries over when you switch.
 
+Resuming, answering a question, or retrying from a checkpoint extends the same row and URL.
+Steps shows each attempt in order. Select an earlier attempt and choose **Show in graph** to
+see the graph and runtime at that point. **Go to latest** returns to the current state.
+
 In the graph, selecting a step opens it in the inspector, whose header names the groups that enclose
 it, each a link up the hierarchy; while it is open, selecting the empty canvas or the header's first
 link shows the run's own details. The graph
@@ -359,12 +363,15 @@ prerequisite outputs. The selected node runs again. Parallel and mapped groups h
 for the whole outer group, including nested groups and all mapped batches; individual concurrent
 writers do not have separate snapshots. Read-only boundaries can share the same workspace bytes.
 
-Both modes create a new run ID, keep the original graph, input, source, and delivery lineage, and
-resolve credentials again. A selected checkpoint or the continuation of a suspended run restores each supported
+Both modes keep the original `runId` and start a new part with fresh credentials.
+Status reports the active or latest part as `currentPartId`. CLI JSON also preserves the
+`resumedFrom` field on a resume receipt and `successorRunId` on an answered inbox request.
+Use `zeroshot status RUN_ID --part PART_ID` to inspect an earlier attempt. Each part uses the original graph, input, source, and
+delivery lineage. A selected checkpoint or the continuation of a suspended run restores each supported
 `node_instance` agent's provider conversation as it was at the checkpoint, even on another machine
 or without restoring workspace files. Restarting such a successor restores the same conversations
 again, without the turns it added before it failed. A restarted run you submitted and every
-`execution`-scoped agent start new conversations. Successor token usage starts at zero.
+`execution`-scoped agent start new conversations. Each part records its own token usage. Run totals include every part that performed work.
 
 Checkpoints hold raw provider transcripts and conversation files, up to 1 GiB per conversation.
 They are kept and deleted with their checkpoint, deduplicated across its lineage, and never included
@@ -449,17 +456,19 @@ status becomes `suspended`, with `reason`, `node` and `createdAt`. The controlle
 the workspace lock. A graph that finishes first keeps its ordinary result. Running status includes
 `suspendRequested` after the request. Suspension requires workspace checkpoints.
 
-`zeroshot resume RUN_ID` creates a successor (`runId`, `resumedFrom`) beginning at the held-back
-node. It preserves workspace changes made after suspension and restores captured node-instance provider
+`zeroshot resume RUN_ID` returns the same `runId` and a new `currentPartId`. The part begins
+at the held-back node. It preserves workspace changes made after suspension and restores captured node-instance provider
 conversations from the checkpoint. Unsupported or missing conversations start new with a system log.
 A suspended wait can continue only from its reported `wait.dueAt`, and continues after the wait.
 No timer starts successors locally or on a direct target. Selected checkpoint resume and
-`--discard-workspace-changes` are refused for suspended runs. The predecessor stays suspended and
-`workspaceRecovery.successorRunId` links to its sole successor. `force-stop` can finish an unclaimed
+`--discard-workspace-changes` are refused for suspended runs. The old part stays suspended in its own history. Reading the original run ID shows the current
+part. Add `--part PART_ID` to pin a read, resume or answer to the part you observed. A second
+attempt to answer an earlier question then reports that the run has advanced. `force-stop` can finish an unclaimed
 suspended attempt as `force_stopped` and removes its retained checkpoints. A direct target refuses
 `discard-workspace` for a suspended run that has no successor; force-stop it first.
 
-Foreground `run` and `watch` end with exit 0 at suspension. `logs` and read-only status commands
+Foreground `run` and `watch` end with exit 0 at suspension. Use `zeroshot watch RUN_ID --follow`
+to stay attached while someone answers or resumes the run. `logs` and read-only status commands
 continue to work after the controller exits. Add `--target NAME` for the same controls on a direct
 target. Hosts advertise suspension with `openengine.run-suspension/v1`.
 
@@ -494,12 +503,9 @@ status line reads **Waiting for a person** with the question, and the step shows
 the `answer` command. When the deadline passes, the open view marks it and removes the answer hint;
 this does not imply that a successor has recorded an expiry. Replay uses the selected position's
 recorded time and shows successor information only at the current end of history.
-Once a successor run took the question over, the step names that run and the
-status line reads **Continued in run** with its ID; a question the run stopped waiting for without
-a successor reads as closed without an answer. Once answered, the chosen answer is marked with how
-long the answer took, from the recorded request and answer times.
-Who answered is not recorded. A successor run lists the work it carried over, marks where it
-continued after each answer, and links back to the run that asked.
+In the live run view, the same URL follows the answer into the next part. Replay keeps the
+selected moment. A second question appears in order after the first answer. Earlier work keeps
+its original logs and usage, and a checkpoint retry marks where the graph started again.
 
 ## Steer a run
 

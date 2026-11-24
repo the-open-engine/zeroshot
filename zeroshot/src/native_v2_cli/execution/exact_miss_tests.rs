@@ -38,7 +38,7 @@ fn assert_durable_duplicate_and_close_edges() {
     let mut duplicate_output = Vec::new();
     let duplicate = serde_json::from_value(serde_json::json!({
         "subscriptionId":"wave11",
-        "runId":RunId::new("run-settled"),
+        "partId":RunId::new("run-settled"),"runId":RunId::new("run-settled"),
         "title":"Exact miss",
         "source":{
             "repository":"open-engine/zeroshot",
@@ -203,7 +203,7 @@ async fn wave11_cli_contract_exact_dispatch_refusals_and_discard_are_serialized(
     );
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&output).assert_value(),
-        serde_json::json!({"runId":"run-settled", "discarded":true})
+        serde_json::json!({"partId":"run-settled","runId":"run-settled", "discarded":true})
     );
     assert!(matches!(
         backend.calls().as_slice(),
