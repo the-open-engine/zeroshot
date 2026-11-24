@@ -261,7 +261,7 @@ async fn local_resume_reuses_saved_hooks_and_assigns_a_fresh_run_id() {
     wait_for_exit(fixture.ready_pid(&original)).await;
     fs::remove_file(fixture.root.path("environment.json")).assert_value();
 
-    let output = fixture.output(&["resume", &original], "finish").await;
+    let output = fixture.output(&["resume", &original, "--restart"], "finish").await;
     assert_success(&output, "resume local environment run");
     let successor = receipt_run_id(&output);
     assert_ne!(successor, original);

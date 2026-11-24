@@ -211,13 +211,16 @@ enum UtilityCommand {
     /// A suspended run continues at its saved boundary without restoring files. A suspended wait
     /// continues after its wait node, from the due time onward. Suspended runs accept no checkpoint
     /// selection or --discard-workspace-changes. Every successor takes over the vector record.
-    /// By default, a failed run restarts where it started, on its retained workspace: a submitted
+    /// By default, a failed run selects its newest entry checkpoint. The selected node can run
+    /// again, even when it completed before the failure. Local restores require
+    /// --discard-workspace-changes. Use --from-checkpoint to select a specific entry instead.
+    /// Use --restart to restart where the failed run started, on its retained workspace: a submitted
     /// run at the root of its graph, a successor at the boundary it began at, so an answered
     /// request stays answered. A local run keeps its
     /// checkout as it is now, including files and Git state changed after the failure; a named
     /// target restarts on the latest snapshot of its retained copy.
-    /// Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. For a
-    /// local run this replaces the checkout and requires --discard-workspace-changes.
+    /// List available entries with `zeroshot checkpoints`. Restoring a local checkpoint replaces
+    /// the checkout and requires --discard-workspace-changes.
     /// Files and the index return to the checkpoint; attached HEAD and branch tips are kept.
     /// After a local history rewrite, first merge the published head into the run branch to
     /// preserve published ancestry, or start a new run on a feature branch based on that head.
@@ -257,7 +260,7 @@ enum UtilityCommand {
     /// Locally, frees space retained by failed runs across their recovery lineage without
     /// reading or changing the checkout, ledger or logs. Delivery recovery state is kept.
     /// Running runs must be force-stopped first; interrupted restores must be resumed first.
-    /// Local checkpoints never expire automatically. Plain resume keeps the current checkout.
+    /// Local checkpoints never expire automatically. Resume with --restart keeps the current checkout.
     DiscardWorkspace(RunSelectorArgs),
 
     /// Print the Zeroshot version.
@@ -895,8 +898,18 @@ struct RunResumeArgs {
     run: LocalLaunchArgs,
 
     /// Restore this checkpoint and continue from its saved graph boundary.
-    #[arg(long, value_name = "ID")]
+    #[arg(long, value_name = "ID", conflicts_with = "restart")]
     from_checkpoint: Option<String>,
+    /// Restart where the failed run began instead of selecting its newest entry checkpoint.
+    #[arg(long)]
+    restart: bool,
+    /// Preserve native API resume defaults for the bundled SDK.
+    #[arg(
+        long,
+        hide = true,
+        conflicts_with_all = ["from_checkpoint", "restart", "discard_workspace_changes"]
+    )]
+    api_default: bool,
     /// Allow a local checkpoint restore to replace the current checkout.
     ///
     /// The checkpoint replaces tracked, staged, untracked, and ignored files and the index.

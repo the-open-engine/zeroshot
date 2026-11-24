@@ -25,7 +25,7 @@ fn resume_command(files: &FixtureFiles, uniform: bool, target: Option<&str>) -> 
     } else {
         "--runtime-config"
     };
-    let mut argv = args(&["resume", "run-failed", flag]);
+    let mut argv = args(&["resume", "run-failed", "--restart", flag]);
     argv.push(files.runtime.as_os_str().to_owned());
     if let Some(target) = target {
         argv.extend(args(&["--target", target]));

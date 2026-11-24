@@ -318,6 +318,7 @@ async fn default_resume_of_a_request_names_the_successor_before_answer() {
                     run_id: RunId::new("original"),
                 },
                 from: None,
+                api_default: false,
                 discard_workspace_changes: false,
                 forward_github_token: false,
             },

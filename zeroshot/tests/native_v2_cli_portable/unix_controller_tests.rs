@@ -275,7 +275,7 @@ fn unix_controller_sigterm_persists_stop_retains_checkpoints_and_resumes() {
     assert!(!checkpoints["checkpoints"].as_array().unwrap().is_empty());
     success(
         &run.fixture
-            .command(&["resume", &run.id])
+            .command(&["resume", &run.id, "--restart"])
             .env("FIXTURE_MODE", "finish")
             .output()
             .unwrap(),

@@ -10,7 +10,7 @@ use std::process::Stdio;
 use std::time::{Duration, Instant, SystemTime};
 
 #[path = "../support/sqlite_crash.rs"]
-mod sqlite_crash;
+pub(super) mod sqlite_crash;
 
 #[derive(Debug, PartialEq)]
 struct Entry {
@@ -83,7 +83,7 @@ fn make_readonly(entries: &BTreeMap<PathBuf, Entry>) {
     }
 }
 
-fn wait_released(storage: &Path) {
+pub(super) fn wait_released(storage: &Path) {
     let file = File::open(storage.join("controller.lock")).unwrap();
     let deadline = Instant::now() + Duration::from_secs(40);
     while FileExt::try_lock_shared(&file).is_err() {
@@ -106,7 +106,7 @@ fn wait_released(storage: &Path) {
     }
 }
 
-fn kill_controller(pid: u32) {
+pub(super) fn kill_controller(pid: u32) {
     #[cfg(unix)]
     assert_eq!(unsafe { libc::kill(pid as i32, libc::SIGKILL) }, 0);
     #[cfg(target_os = "macos")]
@@ -330,6 +330,9 @@ fn explicit_controls_recover_interrupted_ledgers_without_a_temporary_image() {
         sqlite_crash::interrupt(&storage.join("runs.sqlite3"));
         let missing = fixture.root.path("missing-temporary-directory");
         let mut control = fixture.command(&[command, &id]);
+        if command == "resume" {
+            control.arg("--restart");
+        }
         if missing_temporary_directory {
             control
                 .env("TMPDIR", &missing)

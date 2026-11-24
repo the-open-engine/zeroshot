@@ -283,7 +283,7 @@ complete entry with `await run.vector(id)`. These methods use the client's selec
 
 `await run.discard_workspace()` returns whether retained data was deleted. For a finished local
 run it frees the recovery lineage's checkpoints, including those of failed runs, while keeping
-the checkout, ledger, logs and delivery recovery state. Plain resume still uses the current
+the checkout, ledger, logs and delivery recovery state. `await run.resume()` still uses the current
 checkout; checkpoint restore is no longer available. Named targets keep their existing retained
 workspace discard behavior.
 

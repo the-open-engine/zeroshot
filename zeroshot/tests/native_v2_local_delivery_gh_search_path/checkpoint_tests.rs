@@ -86,11 +86,11 @@ async fn checkpoint_resume_checks_the_restored_gh_once_before_agents_start() {
     let checkpoint = checkpoint.as_str();
     fs::write(fixture.root.path("check-resume-network"), b"check").assert_value();
 
-    let plain = output(&fixture, &["resume", &run_id], &path).await;
+    let plain = output(&fixture, &["resume", &run_id, "--restart"], &path).await;
     assert!(
         !plain.status.success()
             && String::from_utf8_lossy(&plain.stderr).contains("needs the `gh` executable"),
-        "plain resume must still check the retained workspace: {plain:?}"
+        "explicit restart must still check the retained workspace: {plain:?}"
     );
     assert_eq!(project_reads(&fixture), 1);
 
@@ -276,7 +276,7 @@ async fn controller_shutdown_cancels_the_restored_forge_check_before_agents_star
     assert_eq!(listed.assert_key("runs").as_array().assert_value().len(), 1);
 }
 
-/// A plain resume asks the forge under its own recovery claim. The lock that every local
+/// An explicit restart asks the forge under its own recovery claim. The lock that every local
 /// submission and resume on this state directory takes must stay free meanwhile.
 #[tokio::test(flavor = "multi_thread")]
 async fn stalled_plain_resume_forge_check_does_not_block_other_local_commands() {
@@ -289,14 +289,14 @@ async fn stalled_plain_resume_forge_check_does_not_block_other_local_commands() 
         run_id,
         ..
     } = checkpointed_run(&fixture).await;
-    // A plain resume keeps the checkout, so the workspace needs its delivery program again.
+    // An explicit restart keeps the checkout, so the workspace needs its delivery program again.
     write_checkpoint_gh(&fixture, &tools.join("gh"));
     let processes = fixture.root.path(STALLED_READ_PROCESSES);
     fs::write(fixture.root.path(STALLED_READ), b"stall").assert_value();
 
     let mut stalled = fixture
         .command(&path)
-        .args(["resume", &run_id])
+        .args(["resume", &run_id, "--restart"])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
@@ -312,12 +312,15 @@ async fn stalled_plain_resume_forge_check_does_not_block_other_local_commands() 
         }
     })
     .await
-    .assert_value_with("the plain resume's forge check must start");
+    .assert_value_with("the explicit restart's forge check must start");
 
     // The claim still excludes a second resume of this run, which status reports at once.
-    let second = timeout(UNBLOCKED, output(&fixture, &["resume", &run_id], &path))
-        .await
-        .assert_value_with("a second resume must not wait for the stalled forge request");
+    let second = timeout(
+        UNBLOCKED,
+        output(&fixture, &["resume", &run_id, "--restart"], &path),
+    )
+    .await
+    .assert_value_with("a second resume must not wait for the stalled forge request");
     assert!(
         !second.status.success()
             && String::from_utf8_lossy(&second.stderr).contains("already being resumed")

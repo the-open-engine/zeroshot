@@ -1041,7 +1041,13 @@ def test_suspension_continuation_and_vector_target_arguments(
             assert (await run.vector(page.vectors[0].id)).run_id == "original"
         args = [entry["args"] for entry in read_invocations(fake_native)]
         assert ["suspend", "original", *route] in args
-        assert ["resume", "original", *route, *(["--forward-gh-token"] if forward else [])] in args
+        assert [
+            "resume",
+            "original",
+            *route,
+            *(["--forward-gh-token"] if forward else []),
+            "--api-default",
+        ] in args
         assert [
             "vectors",
             "original",
@@ -1293,6 +1299,28 @@ def test_resume_replaces_runtime_files(fake_native: Path, target_kind: str, unif
         assert not Path(record["args"][record["args"].index(option) + 1]).exists()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("target_kind", ["local", "contained", "direct", "hosted"])
+def test_resume_preserves_api_defaults_without_inspecting_status(
+    target_kind: str, fake_native: Path
+) -> None:
+    async def scenario() -> None:
+        target = {
+            "local": LocalTarget(),
+            "contained": LocalTarget(controller="contained"),
+            "direct": DirectTarget("https://target.example"),
+            "hosted": HostedTarget("prod"),
+        }[target_kind]
+        async with Client(target=target) as client:
+            assert (await client.get_run("original").resume()).id == "successor"
+
+    asyncio.run(scenario())
+    calls = [entry["args"] for entry in read_invocations(fake_native)]
+    assert not any(args[0] == "status" for args in calls)
+    resume = next(args for args in calls if args[0] == "resume")
+    assert "--api-default" in resume
+    assert "--restart" not in resume
 
 
 @pytest.mark.parametrize("controller", ["detached", "contained"])

@@ -75,6 +75,9 @@ fn recovery_help_distinguishes_restart_from_checkpoint_continuation() {
         &[
             "retained workspace",
             "checkout as it is now",
+            "newest entry checkpoint",
+            "selected node can run again",
+            "--restart",
             "--from-checkpoint",
             "saved graph boundary",
             "--discard-workspace-changes",

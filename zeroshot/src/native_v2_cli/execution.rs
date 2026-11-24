@@ -30,6 +30,8 @@ mod graph_tree;
 mod profiles;
 #[path = "execution/reconnect.rs"]
 mod reconnect;
+#[path = "execution/resume_selection.rs"]
+mod resume_selection;
 #[path = "execution/sizes.rs"]
 mod sizes;
 #[path = "execution/stacks.rs"]
@@ -322,7 +324,7 @@ async fn prepare_resume_runtime<B: NativeV2CliBackend>(
 }
 
 async fn execute_resume<B, S, W>(
-    command: RunResumeCommand,
+    mut command: RunResumeCommand,
     context: &CliExecutionContext<'_, B>,
     signal: &mut S,
     output: &mut W,
@@ -388,6 +390,7 @@ where
             "run does not have a recoverable workspace".to_owned(),
         ));
     }
+    resume_selection::apply_default(&mut command, &status.status, context.backend).await?;
     context.backend.validate_resume_selection(&command).await?;
     let run = command.run;
     let requirements = context
@@ -439,6 +442,12 @@ where
             .forwarded_token(context.environment)?
             .filter(|_| github_com)
     };
+    let selected_checkpoint = command.from.as_ref().and_then(|from| match from {
+        openengine_cluster_protocol::RunResumeFrom::Checkpoint { checkpoint_id } => {
+            Some(checkpoint_id.clone())
+        }
+        _ => None,
+    });
     let result = context
         .backend
         .run_resume(
@@ -458,6 +467,9 @@ where
             command.discard_workspace_changes,
         )
         .await?;
+    if let Some(checkpoint) = selected_checkpoint {
+        eprintln!("Selected checkpoint {checkpoint}. The selected node can run again.");
+    }
     write_json(output, &result)?;
     let detach = signal.wait();
     tokio::pin!(detach);
@@ -1071,6 +1083,7 @@ async fn execute_answer<B: NativeV2CliBackend, S: DetachSignal, W: Write>(
             runtime: None,
             run,
             from: Some(from),
+            api_default: false,
             discard_workspace_changes: false,
             forward_github_token,
         },

@@ -358,7 +358,7 @@ fn parser_exposes_workspace_recovery_commands() {
         parse_native_v2_args(args(&["resume", "run-7", "--target", "docker"])).assert_value();
     assert!(matches!(
         resume,
-        NativeV2CliCommand::Resume(RunResumeCommand { runtime: None, run: RunSelector { target, run_id, .. }, from: None, discard_workspace_changes: false, forward_github_token: false })
+        NativeV2CliCommand::Resume(RunResumeCommand { runtime: None, run: RunSelector { target, run_id, .. }, from: None, api_default: false, discard_workspace_changes: false, forward_github_token: false })
             if target.as_deref() == Some("docker") && run_id.as_str() == "run-7"
     ));
 
@@ -388,6 +388,7 @@ fn checkpoint_selection_and_bounded_listing_preserve_opaque_ids() {
             runtime: None,
             run: RunSelector { target, run_id, .. },
             from: Some(RunResumeFrom::Checkpoint { checkpoint_id }),
+            api_default: false,
             discard_workspace_changes: false,
             forward_github_token: false,
         }) if target.as_deref() == Some("docker")
@@ -449,6 +450,60 @@ fn checkpoint_selection_and_bounded_listing_preserve_opaque_ids() {
             limit: None,
         })
     ));
+}
+
+#[test]
+fn explicit_restart_uses_existing_api_and_conflicts_with_checkpoint_selection() {
+    let command = parse_native_v2_args(args(&["resume", "run-7", "--restart"])).assert_value();
+    assert!(matches!(
+        command,
+        NativeV2CliCommand::Resume(RunResumeCommand {
+            from: Some(RunResumeFrom::Restart {}),
+            ..
+        })
+    ));
+    assert!(
+        parse_native_v2_args(args(&[
+            "resume",
+            "run-7",
+            "--restart",
+            "--from-checkpoint",
+            "entry-1"
+        ]))
+        .is_err()
+    );
+    // Legacy interrupted latest restores still require consent to finish the pinned restore.
+    assert!(
+        parse_native_v2_args(args(&[
+            "resume",
+            "run-7",
+            "--restart",
+            "--discard-workspace-changes"
+        ]))
+        .is_ok()
+    );
+}
+
+#[test]
+fn sdk_api_default_preserves_omission_and_conflicts_with_cli_selectors() {
+    let command = parse_native_v2_args(args(&["resume", "run-7", "--api-default"])).assert_value();
+    assert!(matches!(
+        command,
+        NativeV2CliCommand::Resume(RunResumeCommand {
+            api_default: true,
+            from: None,
+            ..
+        })
+    ));
+    for selector in [
+        &["--restart"][..],
+        &["--from-checkpoint", "entry-1"][..],
+        &["--discard-workspace-changes"][..],
+    ] {
+        let mut values = vec!["resume", "run-7", "--api-default"];
+        values.extend_from_slice(selector);
+        assert!(parse_native_v2_args(args(&values)).is_err());
+    }
 }
 
 #[test]

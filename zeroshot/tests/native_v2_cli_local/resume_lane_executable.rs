@@ -33,13 +33,13 @@ async fn resume_without_the_lane_executable_on_path_is_refused_like_run() {
         "precondition: run from a PATH without codex must refuse\nstderr:\n{stderr}"
     );
 
-    // A plain resume keeps the checkout; `--from-checkpoint` restores the selected one.
+    // An explicit restart keeps the checkout; `--from-checkpoint` restores the selected one.
     let rollback = [
         "--from-checkpoint",
         checkpoint_id.as_str(),
         "--discard-workspace-changes",
     ];
-    for selection in [&[][..], &rollback[..]] {
+    for selection in [&["--restart"][..], &rollback[..]] {
         let mut arguments = vec!["resume", failed_run_id.as_str()];
         arguments.extend_from_slice(selection);
         let resume = fixture.output(&arguments, "finish").await;
@@ -80,7 +80,9 @@ async fn resume_without_the_lane_executable_on_path_is_refused_like_run() {
     // From a PATH that finds codex, the same run still resumes. The refused rollback may have
     // left its restore incomplete, so a plain resume is refused until that rollback is repeated.
     fixture.harness_environment.remove("PATH");
-    let plain = fixture.output(&["resume", &failed_run_id], "finish").await;
+    let plain = fixture
+        .output(&["resume", &failed_run_id, "--restart"], "finish")
+        .await;
     let stderr = String::from_utf8_lossy(&plain.stderr);
     assert!(
         !plain.status.success() && stderr.contains("partially restored"),

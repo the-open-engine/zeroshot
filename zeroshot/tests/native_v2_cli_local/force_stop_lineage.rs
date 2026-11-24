@@ -16,7 +16,9 @@ async fn force_stopped_successor_discards_every_catalog_of_its_lineage() {
     assert!(!fixture.checkpoints(&original).await.is_empty());
     assert_eq!(fixture.checkpoint_repositories(), 2);
 
-    let resumed = fixture.json(&["resume", &original], "block").await;
+    let resumed = fixture
+        .json(&["resume", &original, "--restart"], "block")
+        .await;
     let successor = resumed
         .assert_key("runId")
         .as_str()

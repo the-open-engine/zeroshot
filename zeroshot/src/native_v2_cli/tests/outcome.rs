@@ -228,6 +228,8 @@ async fn assert_resume_resolves_current_values(
     };
     if let Some(id) = checkpoint {
         command_args.extend(["--from-checkpoint", id]);
+    } else {
+        command_args.push("--restart");
     }
     // Only a local checkpoint restore replaces the caller's checkout and needs consent.
     let discard = expected_target.is_none() && checkpoint.is_some();
@@ -260,9 +262,11 @@ async fn assert_resume_resolves_current_values(
     assert_eq!(*discard_workspace_changes, discard);
     assert_eq!(
         params.from,
-        checkpoint.map(|id| RunResumeFrom::Checkpoint {
-            checkpoint_id: CheckpointId::new(id).assert_value(),
-        })
+        Some(
+            checkpoint.map_or(RunResumeFrom::Restart {}, |id| RunResumeFrom::Checkpoint {
+                checkpoint_id: CheckpointId::new(id).assert_value(),
+            })
+        )
     );
     assert_ne!(params.run_id, params.successor_run_id);
     assert!(params.connection_resolver.is_none());
@@ -561,8 +565,14 @@ async fn named_target_resume_leaves_gh_token_to_the_target_without_opt_in() {
     // Hosted targets resolve retained connections themselves and return no requirements.
     let backend =
         FakeBackend::with_resume_requirements(Default::default()).with_resume_source(source());
-    let command =
-        parse_native_v2_args(args(&["resume", "run-failed", "--target", "docker"])).assert_value();
+    let command = parse_native_v2_args(args(&[
+        "resume",
+        "run-failed",
+        "--restart",
+        "--target",
+        "docker",
+    ]))
+    .assert_value();
     execute_with_environment(command, &backend, &environment)
         .await
         .assert_value();
@@ -731,7 +741,7 @@ async fn resume_keeps_local_trusted_authority_and_scopes_named_github_fallback()
             .collect();
         let backend =
             FakeBackend::with_resume_requirements(requirements).with_resume_source(retained);
-        let mut arguments = vec!["resume", "run-failed"];
+        let mut arguments = vec!["resume", "run-failed", "--restart"];
         if let Some(target) = target {
             arguments.extend(["--target", target, "--forward-gh-token"]);
         }

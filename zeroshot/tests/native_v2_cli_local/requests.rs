@@ -609,7 +609,7 @@ fn two_request_fixture() -> LocalFixture {
 async fn resume_lost(fixture: &LocalFixture, run: &str, mode: &str) -> String {
     let deadline = Instant::now() + SUSPENSION_TIMEOUT;
     loop {
-        let output = fixture.output(&["resume", run], mode).await;
+        let output = fixture.output(&["resume", run, "--restart"], mode).await;
         if output.status.success() {
             let receipt: Value = serde_json::from_slice(&output.stdout).assert_value();
             return receipt["runId"].as_str().assert_value().to_owned();
@@ -677,7 +677,7 @@ async fn lost_and_failed_answer_successors_restart_after_the_answer() {
     assert_eq!(worker_calls("finish"), 0);
 
     // The restart of that failed restart begins after the answer as well.
-    let restarted = fixture.json(&["resume", &failed], "finish").await;
+    let restarted = fixture.json(&["resume", &failed, "--restart"], "finish").await;
     let restarted = restarted["runId"].as_str().assert_value();
     let status = fixture.wait_suspended(restarted).await;
     assert_eq!(status["status"]["node"], "rating");
