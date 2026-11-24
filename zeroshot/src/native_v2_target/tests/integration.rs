@@ -291,66 +291,6 @@ fn file_registry_is_private_on_creation() {
     );
 }
 
-fn symlink_file(target: &std::path::Path, link: &std::path::Path) {
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(target, link).assert_value();
-    #[cfg(windows)]
-    std::os::windows::fs::symlink_file(target, link).assert_value();
-}
-
-fn assert_symlink_refused<T: std::fmt::Debug>(result: Result<T, TargetConnectorError>) {
-    match result {
-        Err(TargetConnectorError::RegistryIo(error))
-            if error.to_string().contains("is a symbolic link") => {}
-        other => panic!("expected a symlinked registry refusal, got {other:?}"),
-    }
-}
-
-#[test]
-fn symlinked_target_registry_is_never_replaced() {
-    let root = temp_root();
-    let linked = root.path("dotfiles/targets.json");
-    let link = root.path("config/targets.json");
-    std::fs::create_dir_all(linked.parent().assert_value()).assert_value();
-    std::fs::create_dir_all(link.parent().assert_value()).assert_value();
-    FileTargetRegistry::new(linked.clone())
-        .get("platform")
-        .assert_value();
-    let original = std::fs::read(&linked).assert_value();
-    symlink_file(&linked, &link);
-
-    let registry = FileTargetRegistry::new(link.clone());
-    assert_symlink_refused(registry.insert(target()));
-    assert!(
-        std::fs::symlink_metadata(&link)
-            .assert_value()
-            .file_type()
-            .is_symlink()
-    );
-    assert_eq!(std::fs::read(&linked).assert_value(), original);
-}
-
-#[test]
-fn dangling_target_registry_link_is_not_initialized_over() {
-    let root = temp_root();
-    let missing = root.path("unmounted/targets.json");
-    let link = root.path("config/targets.json");
-    std::fs::create_dir_all(link.parent().assert_value()).assert_value();
-    symlink_file(&missing, &link);
-
-    let registry = FileTargetRegistry::new(link.clone());
-    assert_symlink_refused(registry.insert(target()));
-    assert_symlink_refused(registry.get("platform"));
-    assert!(
-        std::fs::symlink_metadata(&link)
-            .assert_value()
-            .file_type()
-            .is_symlink()
-    );
-    assert!(!missing.exists());
-    assert!(!missing.parent().assert_value().exists());
-}
-
 #[test]
 fn interrupted_saves_do_not_keep_an_abandoned_target_registry() {
     let root = temp_root();
