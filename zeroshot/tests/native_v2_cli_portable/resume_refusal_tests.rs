@@ -186,7 +186,7 @@ fn local_resume_restores_checkpoint_into_recreated_empty_workspace() {
         .unwrap();
     success(&output);
     let receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
-    let successor = receipt["runId"].as_str().unwrap();
+    let successor = receipt["currentPartId"].as_str().unwrap();
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let status = fixture.json(&["status", successor]);
@@ -208,10 +208,13 @@ fn local_resume_restores_checkpoint_into_recreated_empty_workspace() {
         fs::read_to_string(fixture.workspace.join("mutation.txt")).unwrap(),
         "native worker ran"
     );
-    refusal(
-        &fixture,
-        &id,
-        &format!("run already has successor {successor}"),
-        None,
-    );
+    let stale = fixture
+        .command(&["resume", &id, "--part", &id])
+        .env("ZEROSHOT_ERROR_FORMAT", "json")
+        .output()
+        .unwrap();
+    assert_eq!(stale.status.code(), Some(1));
+    let diagnostic: Value = serde_json::from_slice(&stale.stderr).unwrap();
+    assert_eq!(diagnostic["code"], "submission.conflict");
+    assert_eq!(diagnostic["details"]["currentPartId"], successor);
 }

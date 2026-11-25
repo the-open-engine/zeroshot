@@ -14,6 +14,7 @@ async fn assert_reconstructed_discard_contracts(
     assert!(matches!(
         controller
             .discard_workspace(RunDiscardWorkspaceParams {
+                part_id: None,
                 run_id: RunId::new("missing-run"),
             })
             .await,
@@ -22,6 +23,7 @@ async fn assert_reconstructed_discard_contracts(
     assert!(matches!(
         controller
             .checkpoints(openengine_cluster_protocol::RunCheckpointsParams {
+                part_id: None,
                 run_id: RunId::new("missing-run"),
                 after: None,
                 limit: None,
@@ -31,6 +33,7 @@ async fn assert_reconstructed_discard_contracts(
     ));
     let discarded = controller
         .discard_workspace(RunDiscardWorkspaceParams {
+            part_id: None,
             run_id: successor_run_id,
         })
         .await
@@ -212,6 +215,7 @@ async fn allocator_defaults_are_explicit_fail_closed_and_side_effect_free() {
     );
     let checkpoint_error = allocator
         .checkpoints(openengine_cluster_protocol::RunCheckpointsParams {
+            part_id: None,
             run_id: run_id.clone(),
             after: None,
             limit: None,
@@ -293,9 +297,7 @@ async fn startup_reconciles_every_persisted_nonterminal_before_status_is_visible
         .assert_value_with("reconciled startup");
 
     let status = controller
-        .status(RunStatusParams {
-            run_id: run_id.clone(),
-        })
+        .status(RunStatusParams::new(run_id.clone()))
         .await
         .assert_value_with("status after startup");
     assert_eq!(
@@ -339,6 +341,7 @@ async fn failed_reservation_returns_no_resume_receipt_and_settles_preparation() 
         controller.resume(RunResumeParams {
             runtime: None,
             from: None,
+            part_id: source_id.clone(),
             run_id: source_id,
             successor_run_id: successor.clone(),
             connections: BTreeMap::from([(
@@ -395,6 +398,7 @@ async fn wave8_cli_contract_retained_cleanup_and_discard_fail_closed_across_reco
         .resume(RunResumeParams {
             runtime: None,
             from: None,
+            part_id: source_run_id.clone(),
             run_id: source_run_id,
             successor_run_id: successor_run_id.clone(),
             connections: BTreeMap::from([(
@@ -641,9 +645,7 @@ async fn assert_recoverable_source_resume(
         .await
         .assert_value();
     let status = controller
-        .status(RunStatusParams {
-            run_id: submitted.run_id.clone(),
-        })
+        .status(RunStatusParams::new(submitted.run_id.clone()))
         .await
         .assert_value();
     assert!(status.workspace_recovery.recoverable);
@@ -665,6 +667,7 @@ async fn assert_recoverable_source_resume(
     controller
         .resume(RunResumeParams {
             runtime: None,
+            part_id: submitted.run_id.clone(),
             run_id: submitted.run_id,
             successor_run_id: successor_run_id.clone(),
             from: None,
@@ -874,6 +877,7 @@ async fn resume_runtime_readmits_replacement_before_allocation_and_preserves_def
                 serde_json::from_value(json!({"kind":"exact","runtime":replacement}))
                     .assert_value(),
             ),
+            part_id: submitted.run_id.clone(),
             run_id: submitted.run_id.clone(),
             successor_run_id: RunId::new("runtime-successor"),
             from: None,
@@ -963,6 +967,7 @@ async fn resume_runtime_readmits_replacement_before_allocation_and_preserves_def
             &controller,
             &ConnectionContext::default(),
             openengine_cluster_protocol::RunResumeRequirementsParams {
+                part_id: None,
                 run_id: submitted.run_id.clone(),
                 runtime: params.runtime.clone().assert_value(),
             },

@@ -21,6 +21,7 @@ async fn direct_resume_runtime_authorizes_new_declarations_and_preserves_source_
     );
     let params = RunResumeParams {
         runtime: Some(runtime),
+        part_id: fixture.run_id.clone(),
         run_id: fixture.run_id.clone(),
         successor_run_id: RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c993"),
         from: None,
@@ -109,6 +110,7 @@ async fn direct_resume_runtime_accepts_forge_default_names_without_expanding_sec
         })
         .collect();
     let params = RunResumeParams {
+        part_id: run_id.clone(),
         run_id: run_id.clone(),
         successor_run_id: RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c993"),
         runtime: Some(runtime.clone()),

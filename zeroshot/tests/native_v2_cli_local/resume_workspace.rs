@@ -23,9 +23,9 @@ async fn plain_resume_keeps_the_work_done_after_a_failure() {
 
     let resumed = fixture.json(&["resume", &failed], "finish").await;
     let successor = resumed
-        .assert_key("runId")
+        .assert_key("currentPartId")
         .as_str()
-        .assert_value_with("successor run identity")
+        .assert_value_with("successor part identity")
         .to_owned();
     fixture.wait_succeeded(&successor, "finish").await;
 
@@ -77,15 +77,9 @@ async fn checkpoint_rollback_requires_consent_and_changes_nothing_without_it() {
          stderr:\n{stderr}"
     );
     work.assert_kept(&fixture);
-    let recovery = fixture
-        .json(&["status", &failed], "finish")
-        .await
-        .assert_key("workspaceRecovery")
-        .clone();
-    assert!(
-        recovery.assert_key("recoverable") == true && recovery.get("successorRunId").is_none(),
-        "a refused rollback must not claim a successor: {recovery}"
-    );
+    let status = fixture.json(&["status", &failed], "finish").await;
+    assert_eq!(status["currentPartId"], failed);
+    assert_eq!(status["workspaceRecovery"]["recoverable"], true);
     assert_eq!(
         fixture
             .json(&["list"], "finish")
@@ -111,9 +105,9 @@ async fn checkpoint_rollback_requires_consent_and_changes_nothing_without_it() {
         )
         .await;
     let successor = restored
-        .assert_key("runId")
+        .assert_key("currentPartId")
         .as_str()
-        .assert_value_with("successor run identity")
+        .assert_value_with("successor part identity")
         .to_owned();
     fixture.wait_succeeded(&successor, "finish").await;
     let repository = &fixture.repository;

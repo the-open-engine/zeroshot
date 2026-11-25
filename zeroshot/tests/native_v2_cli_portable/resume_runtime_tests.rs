@@ -131,7 +131,7 @@ fn resume_runtime_replaces_both_file_forms_and_preserves_checkpoint_outputs() {
             .unwrap();
         success(&output);
         let receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
-        let successor = receipt["runId"].as_str().unwrap();
+        let successor = receipt["currentPartId"].as_str().unwrap();
         await_success(&fixture, successor);
         let recovery: Value = serde_json::from_slice(
             &fs::read(
@@ -331,7 +331,7 @@ fn resume_runtime_uses_the_harness_restored_from_the_selected_snapshot() {
             .unwrap();
         success(&resumed);
         let receipt: Value = serde_json::from_slice(&resumed.stdout).unwrap();
-        let successor = receipt["runId"].as_str().unwrap();
+        let successor = receipt["currentPartId"].as_str().unwrap();
         await_success(&fixture, successor);
         assert!(
             bin.join(if cfg!(windows) { "codex.cmd" } else { "codex" })

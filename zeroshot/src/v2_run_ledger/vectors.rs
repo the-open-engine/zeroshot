@@ -15,6 +15,7 @@ pub async fn list(
 ) -> Result<RunVectorsResult, RunLedgerError> {
     let page = list_full(ledger, params).await?;
     Ok(RunVectorsResult {
+        part_id: page.run_id.clone(),
         run_id: page.run_id,
         vectors: page.vectors.into_iter().map(Into::into).collect(),
         next_after: page.next_after,
@@ -100,14 +101,16 @@ pub async fn show(
 pub async fn inherit(
     source: &dyn RunLedger,
     destination: &dyn RunLedger,
-    predecessor: &RunId,
-    successor: &RunId,
+    parts: (&RunId, &RunId),
+    checkpoint_id: Option<openengine_cluster_protocol::CheckpointId>,
 ) -> Result<(), RunLedgerError> {
+    let (predecessor, successor) = parts;
     let mut after = None;
     loop {
         let page = list_full(
             source,
             RunVectorsParams {
+                part_id: None,
                 run_id: predecessor.clone(),
                 after,
                 limit: Some(100),
@@ -136,6 +139,7 @@ pub async fn inherit(
             vec![vector_event(
                 successor,
                 openengine_cluster_protocol::RunVectorContent::Continuation {
+                    checkpoint_id,
                     resumed_from: predecessor.clone(),
                 },
             )?],

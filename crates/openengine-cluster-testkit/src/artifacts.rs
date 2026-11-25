@@ -147,7 +147,7 @@ pub async fn generate_artifacts() -> Vec<Artifact> {
     let cases = [
         (
             "initialize.ndjson",
-            r#"{"jsonrpc":"2.0","id":"init-1","method":"initialize","params":{"protocolVersion":"openengine.cluster/v2"}}"#,
+            r#"{"jsonrpc":"2.0","id":"init-1","method":"initialize","params":{"protocolVersion":"openengine.cluster/v3"}}"#,
         ),
         (
             "get-empty.ndjson",

@@ -7,10 +7,10 @@ pub(crate) fn artifacts() -> Vec<Artifact> {
     vec![
         json_artifact(
             format!("{root}/inbox-show-with-files.json"),
-            json!({"runId":"run-1","node":"approval","createdAt":1762905600000u64,
+            json!({"runId":"run-1","partId":"run-2","node":"approval","createdAt":1762905600000u64,
             "state":"pending","request":{
                 "artifacts":{"report":{"kind":"managed","target":"direct-target",
-                    "address":{"scope":{"kind":"run","runId":"run-1"},"path":"requests/request-1/report/report"}}},
+                    "address":{"scope":{"kind":"run","runId":"run-2"},"path":"requests/request-1/report/report"}}},
                 "id":request["id"],"text":request["text"],"signals":request["signals"],"output":request["output"],"expiresAt":request["expiresAt"]
             }}),
         ),
@@ -27,11 +27,11 @@ pub(crate) fn artifacts() -> Vec<Artifact> {
         ),
         json_artifact(
             format!("{root}/request-resume.json"),
-            json!({"runId":"run-1","successorRunId":"run-2","from":{"kind":"answer","signals":{"decision":"approved"},"output":{"feedback":""}},"connections":{}}),
+            json!({"runId":"run-1","partId":"run-1","successorPartId":"run-2","from":{"kind":"answer","signals":{"decision":"approved"},"output":{"feedback":""}},"connections":{}}),
         ),
         json_artifact(
             format!("{root}/inbox-page.json"),
-            json!({"requests":[{"runId":"run-1","node":"approval","createdAt":1762905600000u64,"expiresAt":1763510400000u64,"state":"pending"}],"nextAfter":"run-1"}),
+            json!({"requests":[{"runId":"run-1","partId":"run-1","node":"approval","createdAt":1762905600000u64,"expiresAt":1763510400000u64,"state":"pending"}],"nextAfter":"run-1"}),
         ),
         json_artifact(
             format!("{root}/suspended-request.json"),
@@ -39,15 +39,15 @@ pub(crate) fn artifacts() -> Vec<Artifact> {
         ),
         json_artifact(
             format!("{root}/request-vector.json"),
-            json!({"id":"request-1","kind":"request","runId":"run-1","node":"approval","createdAt":1762905600000u64,"text":request["text"],"signals":request["signals"],"output":request["output"],"expiresAt":request["expiresAt"]}),
+            json!({"id":"request-1","kind":"request","runId":"run-1","partId":"run-1","node":"approval","createdAt":1762905600000u64,"text":request["text"],"signals":request["signals"],"output":request["output"],"expiresAt":request["expiresAt"]}),
         ),
         json_artifact(
             format!("{root}/answer-vector.json"),
-            json!({"id":"answer-1","kind":"answer","runId":"run-2","createdAt":1762905600001u64,"requestId":"request-1","answer":{"signals":{"decision":"approved"},"output":{"feedback":""}}}),
+            json!({"id":"answer-1","kind":"answer","runId":"run-1","partId":"run-2","createdAt":1762905600001u64,"requestId":"request-1","answer":{"signals":{"decision":"approved"},"output":{"feedback":""}}}),
         ),
         json_artifact(
             format!("{root}/expiry-vector.json"),
-            json!({"id":"expiry-1","kind":"expiry","runId":"run-3","createdAt":1763510400000u64,"requestId":"request-1"}),
+            json!({"id":"expiry-1","kind":"expiry","runId":"run-1","partId":"run-3","createdAt":1763510400000u64,"requestId":"request-1"}),
         ),
     ]
 }

@@ -6,6 +6,7 @@ async fn durable_logs_resume_exclusively_without_gaps_or_duplicates() {
     let public_left = public_reference(&left);
     let (_, mut logs) = service
         .logs(RunLogsParams {
+            part_id: None,
             run_id: run_id.clone(),
             from_cursor: Some(Cursor::new("v2:3")),
             execution: Some(public_left.clone()),
@@ -27,6 +28,7 @@ async fn durable_logs_resume_exclusively_without_gaps_or_duplicates() {
     drop(logs);
     let (_, mut resumed_logs) = service
         .logs(RunLogsParams {
+            part_id: None,
             run_id: run_id.clone(),
             from_cursor: Some(saved_log_cursor),
             execution: Some(public_left),

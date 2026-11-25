@@ -170,6 +170,7 @@ exec /usr/bin/git "$@"
     async fn checkpoints(&self, run_id: &RunId) -> RunCheckpointsResult {
         self.allocator
             .checkpoints(RunCheckpointsParams {
+                part_id: None,
                 run_id: run_id.clone(),
                 after: None,
                 limit: None,

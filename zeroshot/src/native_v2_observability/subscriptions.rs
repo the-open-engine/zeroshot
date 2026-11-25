@@ -1,12 +1,15 @@
 use super::*;
 
 pub struct RunWatchSubscription {
+    pub(super) follow: Option<RunFollow>,
     pub(super) ledger: Arc<dyn RunLedger>,
     pub(super) runtime: RuntimeObservation,
     pub(super) subscription_id: SubscriptionId,
     pub(super) run_id: RunId,
     pub(super) scanned_through: Cursor,
     pub(super) projection: RunSnapshot,
+    /// Earlier parts are merged into published metadata, independently of this part's replay.
+    pub(super) previous_usage: Option<TokenUsage>,
     pub(super) after: u64,
     pub(super) pending: VecDeque<RunWatchEventNotification>,
 }
@@ -17,18 +20,13 @@ impl RunWatchSubscription {
             .ledger
             .snapshot_and_tail(&self.run_id, Some(&self.scanned_through))
             .await?;
-        WatchFold {
-            subscription_id: &self.subscription_id,
-            after: self.after,
-            projection: &mut self.projection,
-            pending: &mut self.pending,
-        }
-        .apply(&tail.events)?;
+        self.enqueue(&tail.events)?;
         replay_progress(&self.runtime, &tail, &mut self.scanned_through)
     }
 }
 
 pub struct RunLogsSubscription {
+    pub(super) follow: Option<RunFollow>,
     pub(super) ledger: Arc<dyn RunLedger>,
     pub(super) runtime: RuntimeObservation,
     pub(super) subscription_id: SubscriptionId,
@@ -61,6 +59,7 @@ impl RunLogsSubscription {
 struct ReplayProgress {
     caught_up: bool,
     finished: bool,
+    suspended: bool,
 }
 
 fn replay_progress(
@@ -76,6 +75,7 @@ fn replay_progress(
     Ok(ReplayProgress {
         caught_up,
         finished,
+        suspended: tail.snapshot.phase == RunPhase::Suspended,
     })
 }
 
@@ -88,7 +88,7 @@ trait DurableSubscription {
 }
 
 macro_rules! durable_subscription {
-    ($subscription:ty, $notification:ty) => {
+    ($subscription:ty, $notification:ty $(, $status:ident)?) => {
         impl $subscription {
             /// Replays only the head captured by a read-only local inspector, without waiting
             /// for a controller or inventing a terminal event.
@@ -113,16 +113,34 @@ macro_rules! durable_subscription {
                 &mut self,
             ) -> Result<Vec<$notification>, NativeV2ObservationError> {
                 if self.pending.is_empty() {
-                    self.refresh().await?;
+                    self.refresh_subscription().await?;
                 }
-                Ok(self.pending.drain(..).collect())
+                let mut events: Vec<_> = self.pending.drain(..).collect();
+                for event in &mut events {
+                    self.project_identity(event);
+                }
+                Ok(events)
             }
 
             /// Waits for a durable notification. Dropping an observer cannot stop execution.
             pub async fn recv(
                 &mut self,
             ) -> Result<Option<$notification>, NativeV2ObservationError> {
-                recv_durable(self).await
+                let mut event = recv_durable(self).await?;
+                if let Some(event) = &mut event {
+                    self.project_identity(event);
+                }
+                Ok(event)
+            }
+
+            fn project_identity(&self, event: &mut $notification) {
+                if let Some(scope) = &self.follow {
+                    event.run_id = scope.root.clone();
+                    if scope.qualify {
+                        event.cursor = lineage::part_cursor(&event.part_id, &event.cursor);
+                        $(lineage::scope_diagnostic_cursors(&event.part_id, &mut event.$status);)?
+                    }
+                }
             }
         }
 
@@ -137,13 +155,26 @@ macro_rules! durable_subscription {
             async fn refresh_subscription(
                 &mut self,
             ) -> Result<ReplayProgress, NativeV2ObservationError> {
-                self.refresh().await
+                let mut progress = self.refresh().await?;
+                if progress.finished
+                    && self.pending.is_empty()
+                    && let Some(scope) = &self.follow
+                {
+                    if let Some(next) = scope.advance(&self.run_id).await? {
+                        self.enter_part(next).await?;
+                        progress.finished = false;
+                        progress.caught_up = false;
+                    } else if progress.suspended && scope.follows_suspensions() {
+                        progress.finished = false;
+                    }
+                }
+                Ok(progress)
             }
         }
     };
 }
 
-durable_subscription!(RunWatchSubscription, RunWatchEventNotification);
+durable_subscription!(RunWatchSubscription, RunWatchEventNotification, status);
 durable_subscription!(RunLogsSubscription, RunLogEventNotification);
 
 async fn recv_durable<S>(
@@ -204,6 +235,7 @@ impl RunAttachSubscription {
         };
         Ok(RunAttachEventNotification {
             subscription_id: self.subscription_id.clone(),
+            part_id: self.run_id.clone(),
             run_id: self.run_id.clone(),
             execution: self.execution.clone(),
             event,

@@ -79,13 +79,7 @@ async fn force_stop_without_workspace_snapshots_discards_delivery_receipts_and_p
     for _ in 0..2 {
         let forced = tokio::time::timeout(
             Duration::from_secs(5),
-            ClusterBackend::run_force(
-                &controller,
-                &context,
-                RunForceParams {
-                    run_id: run_id.clone(),
-                },
-            ),
+            ClusterBackend::run_force(&controller, &context, RunForceParams::new(run_id.clone())),
         )
         .await
         .assert_value()

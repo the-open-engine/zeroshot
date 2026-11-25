@@ -15,9 +15,7 @@ async fn status_lists_every_parallel_execution_with_opaque_selectors() {
     let service = NativeV2Observability::new(ledger);
 
     let status = service
-        .status(RunStatusParams {
-            run_id: run_id.clone(),
-        })
+        .status(RunStatusParams::new(run_id.clone()))
         .await
         .assert_value();
     let admitted = admitted_run();
@@ -114,9 +112,7 @@ async fn failure_fallback_refreshes_usage_and_yields_to_a_durable_terminal() {
         .await
         .assert_value();
     service.refresh_runtime(&run_id).await;
-    let params = RunStatusParams {
-        run_id: run_id.clone(),
-    };
+    let params = RunStatusParams::new(run_id.clone());
     let fallback = service.status(params.clone()).await.assert_value();
     assert_eq!(fallback.at_cursor, updated.snapshot.cursor);
     let RunStatus::Finished {
@@ -161,9 +157,7 @@ async fn unpersisted_failure_preserves_first_safe_cause_without_fabricating_hist
     service.runtime_failed_with_cause(&run_id, "could not persist run history");
     service.runtime_failed_with_cause(&run_id, "secondary cleanup error");
     let status = service
-        .status(RunStatusParams {
-            run_id: run_id.clone(),
-        })
+        .status(RunStatusParams::new(run_id.clone()))
         .await
         .assert_value();
     assert_eq!(status.at_cursor, initial.snapshot.cursor);
@@ -240,6 +234,7 @@ async fn steer_retained_runtime_failure_reads_directions_when_the_ledger_is_avai
         openengine_cluster_protocol::RunSteerParams {
             node: None,
             mode: Default::default(),
+            part_id: None,
             run_id: worker.run_id.clone(),
             text: "Keep the observed failure evidence.".into(),
         },
@@ -248,9 +243,7 @@ async fn steer_retained_runtime_failure_reads_directions_when_the_ledger_is_avai
     .assert_value();
     service.runtime_failed_with_cause(&worker.run_id, "runtime failed");
     let status = service
-        .status(RunStatusParams {
-            run_id: worker.run_id,
-        })
+        .status(RunStatusParams::new(worker.run_id))
         .await
         .assert_value();
     fallback_context(&status);
@@ -262,9 +255,7 @@ async fn failure_fallback_refreshes_recorded_evidence_without_replacing_its_firs
     let (ledger, worker, initial, service) = tracked_worker_run("failure-evidence-refresh").await;
     let run_id = worker.run_id.clone();
     service.runtime_failed_with_cause(&run_id, "first runtime failure");
-    let params = RunStatusParams {
-        run_id: run_id.clone(),
-    };
+    let params = RunStatusParams::new(run_id.clone());
     let original = service.status(params.clone()).await.assert_value();
     let primary = fallback_context(&original).primary.clone().assert_value();
     assert!(primary.cursor.is_none());
@@ -367,6 +358,7 @@ async fn status_watch_and_history_retain_independent_delivery_evidence_after_res
     let service = NativeV2Observability::new(ledger.clone());
     let (_, mut watch) = service
         .watch(RunWatchParams {
+            part_id: None,
             run_id: run_id.clone(),
             from_cursor: Some(Cursor::new("v2:3")),
         })
@@ -404,9 +396,7 @@ async fn status_watch_and_history_retain_independent_delivery_evidence_after_res
     drop(service);
     let restarted = NativeV2Observability::new(ledger);
     let status = restarted
-        .status(RunStatusParams {
-            run_id: run_id.clone(),
-        })
+        .status(RunStatusParams::new(run_id.clone()))
         .await
         .assert_value();
     let RunStatus::Finished {

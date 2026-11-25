@@ -6,6 +6,7 @@ use std::collections::VecDeque;
 use std::sync::Mutex;
 
 use crate::profile_ui::RunHistoryResponse;
+mod family;
 
 struct TargetServer {
     origin: String,
@@ -781,41 +782,49 @@ fn remote_problem_and_transport_failures_remain_bounded_and_typed() {
 }
 
 #[tokio::test]
-async fn hosted_pending_problem_reaches_history_and_initial_sse_read_unchanged() {
-    let routes = Arc::new(Mutex::new(Vec::new()));
-    let problem = openengine_cluster_protocol::TargetHttpProblem::new(
-        "history_pending",
-        "History is still being prepared.",
-        None,
-    )
-    .assert_value();
-    let transport = FixedTransport {
-        status: StatusCode::SERVICE_UNAVAILABLE.as_u16(),
-        body: Arc::new(serde_json::to_vec(&problem).assert_value()),
-        routes: routes.clone(),
-    };
-    let local = local_server_with_runs(NativeRunHistory::transported(Arc::new(transport))).await;
-    let client = reqwest::Client::new();
+async fn pending_and_forbidden_problems_reach_history_and_initial_sse_reads_unchanged() {
     let id = uuid::Uuid::now_v7().to_string();
-    for suffix in ["history?after=v2%3A0", "events?after=v2%3A0"] {
-        let response = ui_get(&client, &local, &format!("/ui/api/runs/{id}/{suffix}"))
+    for (status, code, route_reads) in [
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "history_pending",
+            vec![format!("detail:{id}"), "list".to_owned()],
+        ),
+        (
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            vec![format!("detail:{id}")],
+        ),
+    ] {
+        let routes = Arc::new(Mutex::new(Vec::new()));
+        let problem =
+            openengine_cluster_protocol::TargetHttpProblem::new(code, "Archive response.", None)
+                .assert_value();
+        let transport = FixedTransport {
+            status: status.as_u16(),
+            body: Arc::new(serde_json::to_vec(&problem).assert_value()),
+            routes: routes.clone(),
+        };
+        let local =
+            local_server_with_runs(NativeRunHistory::transported(Arc::new(transport))).await;
+        for suffix in ["history?after=v2%3A0", "events?after=v2%3A0"] {
+            let response = ui_get(
+                &reqwest::Client::new(),
+                &local,
+                &format!("/ui/api/runs/{id}/{suffix}"),
+            )
             .send()
             .await
             .assert_value();
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(
-            response.json::<Value>().await.assert_value(),
-            json!({
-                "code": "history_pending",
-                "message": "History is still being prepared."
-            })
-        );
+            assert_eq!(response.status(), status);
+            assert_eq!(
+                response.json::<Value>().await.assert_value(),
+                json!(problem)
+            );
+            assert_eq!(
+                std::mem::take(&mut *routes.lock().assert_value()),
+                route_reads
+            );
+        }
     }
-    assert_eq!(
-        *routes.lock().assert_value(),
-        [
-            format!("page:{id}?after=v2:0"),
-            format!("page:{id}?after=v2:0"),
-        ]
-    );
 }

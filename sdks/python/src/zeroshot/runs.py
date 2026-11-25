@@ -124,6 +124,7 @@ class RunResult:
 
     Args:
         run_id: Public durable run identity.
+        part_id: Physical part that owns this projection or event.
         succeeded: Whether the graph completed successfully.
         output: Successful graph-authored output, which may be JSON null.
         delivery_receipt: Native delivery evidence, independent of output; None when unavailable.
@@ -132,6 +133,7 @@ class RunResult:
     """
 
     run_id: str
+    part_id: str
     succeeded: bool
     output: JsonValue = None
     delivery_receipt: JsonValue = None
@@ -165,6 +167,8 @@ class RunStatus:
 
     Args:
         run_id: Public durable run identity.
+        part_id: Part represented by this status.
+        current_part_id: Latest admitted part at lookup time. None for watch events.
         title: Immutable persisted title.
         source: Immutable Git source snapshot, or None when unavailable for a local run.
         size: Opaque size identifier accepted by the target.
@@ -188,6 +192,8 @@ class RunStatus:
     """
 
     run_id: str
+    part_id: str
+    current_part_id: str | None = None
     title: str
     source: ResolvedSource | None
     size: str
@@ -214,6 +220,8 @@ class RunSummary:
 
     Args:
         run_id: Public durable run identity.
+        part_id: Part represented by this status.
+        current_part_id: Latest admitted part at lookup time.
         title: Immutable persisted title.
         source: Immutable Git source snapshot, or None when unavailable for a local run.
         size: Opaque size identifier accepted by the target.
@@ -231,6 +239,8 @@ class RunSummary:
     """
 
     run_id: str
+    part_id: str
+    current_part_id: str
     title: str
     source: ResolvedSource | None
     size: str
@@ -253,6 +263,7 @@ class LogEvent:
 
     Args:
         run_id: Public durable run identity.
+        part_id: Physical part that owns this projection or event.
         cursor: Opaque durable log cursor.
         timestamp: Producer-captured Unix epoch milliseconds, preserved by replay.
         execution: Opaque execution selector, or None for run-wide records.
@@ -263,6 +274,7 @@ class LogEvent:
     """
 
     run_id: str
+    part_id: str
     cursor: str
     timestamp: int
     execution: str | None
@@ -306,14 +318,16 @@ class RunVector:
 
     Args:
         id: Opaque ordered entry identity, preserved by continuation.
-        run_id: Attempt that wrote the entry.
+        run_id: Stable public run identity.
+        part_id: Physical part that owns this projection or event.
         created_at: Entry time in Unix epoch milliseconds.
         kind: Entry kind.
         content: Complete kind-specific JSON fields.
     """
 
-    id: str
     run_id: str
+    part_id: str
+    id: str
     created_at: int
     kind: str
     content: JsonValue
@@ -325,11 +339,13 @@ class RunVectorsPage:
 
     Args:
         run_id: Run whose record was read.
+        part_id: Physical part that owns this projection or event.
         vectors: Ordered bounded summaries; use Run.vector() for complete content.
         next_after: Cursor for the next page, or None at the end.
     """
 
     run_id: str
+    part_id: str
     vectors: tuple[RunVector, ...]
     next_after: str | None
 
@@ -359,6 +375,7 @@ class InboxEntry:
 
     Args:
         run_id: Run held suspended by this request.
+        part_id: Physical part that owns this projection or event.
         node: Request verifier name.
         created_at: Creation time in Unix epoch milliseconds.
         expires_at: Exclusive answer deadline in Unix epoch milliseconds.
@@ -366,6 +383,7 @@ class InboxEntry:
     """
 
     run_id: str
+    part_id: str
     node: str
     created_at: int
     expires_at: int
@@ -391,16 +409,18 @@ class InboxRequest:
 
     Args:
         run_id: Run that asked the question.
+        part_id: Physical part that owns this projection or event.
         node: Request verifier name.
         created_at: Creation time in Unix epoch milliseconds.
         request: Complete question and answer contract.
         state: Pending, answered, expired, or stopped.
-        successor_run_id: Accepted continuation, if any.
+        successor_part_id: Part created by the accepted continuation, if any.
     """
 
     run_id: str
+    part_id: str
     node: str
     created_at: int
     request: HumanRequest
     state: Literal["pending", "answered", "expired", "stopped"]
-    successor_run_id: str | None
+    successor_part_id: str | None

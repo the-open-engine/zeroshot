@@ -232,14 +232,17 @@ fn submit_and_list_results_expose_only_public_run_identity_and_status() {
     let run_id = RunId::new("run-1");
     assert_eq!(
         serde_json::to_value(RunSubmitResult {
+            current_part_id: run_id.clone(),
             run_id: run_id.clone()
         })
         .assert_value(),
-        json!({ "runId": "run-1" })
+        json!({ "runId": "run-1", "currentPartId":"run-1" })
     );
 
     let result = RunListResult {
         runs: vec![RunStatusResult {
+            part_id: run_id.clone(),
+            current_part_id: run_id.clone(),
             steering: Default::default(),
             context_sources: Vec::new(),
             run_id,
@@ -266,7 +269,8 @@ fn submit_and_list_results_expose_only_public_run_identity_and_status() {
 fn resume_debug_exposes_connection_names_but_redacts_credentials() {
     let resume: RunResumeParams = serde_json::from_value(json!({
         "runId": "run-1",
-        "successorRunId": "run-2",
+        "partId":"run-1",
+        "successorPartId": "run-2",
         "connections": {
             "provider": {"API_KEY": "connection-secret"}
         },
@@ -350,6 +354,7 @@ fn hundred_worst_case_vector_summaries_fit_hosted_response_bound() {
         },
     };
     let result = RunVectorsResult {
+        part_id: RunId::new("r".repeat(64)),
         run_id: RunId::new("r".repeat(64)),
         vectors: vec![vector.into(); 100],
         next_after: Some(VectorId::new("v".repeat(64)).assert_value()),
@@ -408,6 +413,7 @@ fn hundred_maximum_inbox_rows_fit_the_hosted_response_limit() {
         InboxEntry, InboxListResult, NodeName, RequestState, UnixTimestampMillis,
     };
     let row = InboxEntry {
+        part_id: RunId::new("r".repeat(64)),
         run_id: RunId::new("r".repeat(64)),
         node: NodeName::new("n".repeat(128)).assert_value(),
         created_at: UnixTimestampMillis::new(openengine_cluster_protocol::MAX_SAFE_GENERATION)

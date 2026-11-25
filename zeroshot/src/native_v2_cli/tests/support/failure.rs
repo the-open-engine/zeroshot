@@ -44,7 +44,7 @@ pub(super) fn runtime_failure_watch(
         CliSubscriptionItem::Event(
             serde_json::from_value(json!({
                 "subscriptionId":"watch-1",
-                "runId":params.run_id,
+                "partId":params.run_id,"runId":params.run_id,
                 "title":"Repair checkout",
                 "source":source(),
                 "size":"medium",
@@ -61,7 +61,7 @@ pub(super) fn runtime_failure_watch(
 
 pub(super) fn runtime_failure_status(run_id: &RunId) -> CliRunStatusResult {
     serde_json::from_value(json!({
-        "runId":run_id,
+        "partId":run_id,"currentPartId":run_id,"runId":run_id,
         "title":"Repair checkout",
         "source":source(),
         "size":"medium",
@@ -91,7 +91,7 @@ pub(super) fn error_logs(
             events.push(
                 serde_json::from_value(json!({
                     "subscriptionId":"logs-1",
-                    "runId":params.run_id,
+                    "partId":params.run_id,"runId":params.run_id,
                     "cursor":format!("v2:{sequence}"),
                     "timestamp":1_725_000_000_123_u64,
                     "record":{"level":level,"target":"agent","message":message}

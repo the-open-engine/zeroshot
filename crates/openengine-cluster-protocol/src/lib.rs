@@ -50,7 +50,7 @@ use thiserror::Error;
 pub const JSON_RPC_VERSION: &str = "2.0";
 pub const PROTOCOL_NAME: &str = "openengine.cluster";
 /// The single current wire contract accepted at Cluster Protocol initialization.
-pub const PROTOCOL_VERSION: &str = "openengine.cluster/v2";
+pub const PROTOCOL_VERSION: &str = "openengine.cluster/v3";
 pub const BASE_PROFILE: &str = "openengine.cluster/base/v1";
 
 pub const PARSE_ERROR: i64 = -32700;

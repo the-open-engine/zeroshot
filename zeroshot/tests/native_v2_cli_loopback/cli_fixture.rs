@@ -47,9 +47,9 @@ while :; do
   test "$attempt" -lt 50 || exit 92
   sleep 0.05
 done
-watch_output=$(timeout --preserve-status --signal=INT 1 "$1" watch "$run_id" --target prod)
-logs_output=$(timeout --preserve-status --signal=INT 1 "$1" logs "$run_id" --target prod)
-attach_output=$(timeout --preserve-status --signal=INT 1 "$1" attach "$run_id" "$execution" --target prod)
+watch_output=$(timeout --preserve-status --signal=INT 1 "$1" watch "$run_id" --target prod) || exit $?
+logs_output=$(timeout --preserve-status --signal=INT 1 "$1" logs "$run_id" --target prod) || exit $?
+attach_output=$(timeout --preserve-status --signal=INT 1 "$1" attach "$run_id" "$execution" --target prod) || exit $?
 forced=$("$1" force-stop "$run_id" --target prod) || exit $?
 attempt=0
 while :; do

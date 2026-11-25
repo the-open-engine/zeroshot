@@ -52,6 +52,8 @@ pub struct InboxEntry {
     #[serde(deserialize_with = "super::vectors::deserialize_record_run_id")]
     #[schemars(with = "VectorId")]
     pub run_id: RunId,
+    /// Part that owns this record.
+    pub part_id: RunId,
     pub node: NodeName,
     pub created_at: UnixTimestampMillis,
     pub expires_at: UnixTimestampMillis,
@@ -92,11 +94,17 @@ pub type InboxShowParams = crate::RunStatusParams;
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct InboxShowResult {
     pub run_id: RunId,
+    /// Part that owns this record.
+    pub part_id: RunId,
     pub node: NodeName,
     pub created_at: UnixTimestampMillis,
     pub request: RunRequest,
     pub state: RequestState,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "successorPartId",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub successor_run_id: Option<RunId>,
 }
 pub const INBOX_LIST_METHOD: &str = "inbox/list";
@@ -106,6 +114,7 @@ impl From<InboxShowResult> for InboxEntry {
     fn from(request: InboxShowResult) -> Self {
         Self {
             run_id: request.run_id,
+            part_id: request.part_id,
             node: request.node,
             created_at: request.created_at,
             expires_at: request.request.expires_at,

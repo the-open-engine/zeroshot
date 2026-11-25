@@ -81,6 +81,7 @@ async fn acp_cancelled_before_drive_keeps_its_first_version_record() {
         );
         let (_, mut logs) = NativeV2Observability::new(ledger)
             .logs(RunLogsParams {
+                part_id: None,
                 run_id: turn.run_id,
                 from_cursor: None,
                 execution: None,

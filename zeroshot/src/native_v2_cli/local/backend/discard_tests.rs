@@ -115,7 +115,13 @@ impl Fixture {
     async fn discard(&self, id: &RunId) -> Result<bool, NativeV2CliError> {
         Ok(self
             .backend
-            .run_discard_workspace(None, RunDiscardWorkspaceParams { run_id: id.clone() })
+            .run_discard_workspace(
+                None,
+                RunDiscardWorkspaceParams {
+                    part_id: None,
+                    run_id: id.clone(),
+                },
+            )
             .await?
             .discarded)
     }
@@ -275,7 +281,29 @@ async fn local_discard_allows_a_suspended_predecessor_with_a_finished_successor(
         .unwrap(),
     }))
     .await;
+    let mut recovery = fixture.backend.read_recovery_document(&fixture.id).unwrap();
+    recovery.successor_run_id = Some(RunId::new(uuid::Uuid::now_v7().to_string()));
+    fixture
+        .backend
+        .write_recovery_document(&fixture.id, &recovery)
+        .unwrap();
+    assert!(
+        fixture
+            .backend
+            .protected_file_runs()
+            .await
+            .unwrap()
+            .contains(&fixture.id)
+    );
     fixture.successor(Some(failed())).await;
+    assert!(
+        fixture
+            .backend
+            .protected_file_runs()
+            .await
+            .unwrap()
+            .is_empty()
+    );
     assert!(fixture.discard(&fixture.id).await.unwrap());
 }
 

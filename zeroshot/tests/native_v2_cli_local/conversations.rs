@@ -113,7 +113,9 @@ pub(super) async fn assert_private_and_discarded(
 ) {
     for run in [predecessor, successor] {
         for command in ["logs", "status", "checkpoints"] {
-            let output = fixture.output(&[command, run], "finish").await;
+            let output = fixture
+                .output(&[command, predecessor, "--part", run], "finish")
+                .await;
             assert!(!String::from_utf8_lossy(&output.stdout).contains(TRANSCRIPT_MARKER));
         }
     }
@@ -168,15 +170,25 @@ async fn suspended_local_successor_restores_conversation_from_checkpoint() {
     assert_eq!(worker_calls(&fixture), ["fresh local-thread"]);
     new_provider_home(&mut fixture);
     let resumed = fixture.json(&["resume", &run], "finish").await;
-    let successor = resumed["runId"].as_str().assert_value();
+    let successor = resumed["currentPartId"].as_str().assert_value();
     fixture.wait_succeeded(successor, "finish").await;
     wait_for_exit(fixture.ready_pid(successor)).await;
     assert_eq!(
         worker_calls(&fixture),
         ["fresh local-thread", "resume local-thread"],
         "predecessor logs: {}; successor logs: {}",
-        String::from_utf8_lossy(&fixture.output(&["logs", &run], "finish").await.stdout),
-        String::from_utf8_lossy(&fixture.output(&["logs", successor], "finish").await.stdout)
+        String::from_utf8_lossy(
+            &fixture
+                .output(&["logs", &run, "--part", &run], "finish")
+                .await
+                .stdout
+        ),
+        String::from_utf8_lossy(
+            &fixture
+                .output(&["logs", &run, "--part", successor], "finish")
+                .await
+                .stdout
+        )
     );
     assert_private_and_discarded(&fixture, &run, successor).await;
 }
@@ -185,7 +197,9 @@ async fn suspended_local_successor_restores_conversation_from_checkpoint() {
 async fn missing_codex_usage_starts_a_new_conversation_and_logs_the_reason() {
     let mut fixture = fixture();
     let run = suspend_turn(&fixture, "missing-usage", 1).await;
-    let logs = fixture.output(&["logs", &run], "finish").await;
+    let logs = fixture
+        .output(&["logs", &run, "--part", &run], "finish")
+        .await;
     let logs = String::from_utf8_lossy(&logs.stdout);
     assert!(
         logs.contains("worker") && logs.contains("Codex cumulative usage baseline is unavailable"),
@@ -193,10 +207,12 @@ async fn missing_codex_usage_starts_a_new_conversation_and_logs_the_reason() {
     );
     new_provider_home(&mut fixture);
     let resumed = fixture.json(&["resume", &run], "finish").await;
-    let successor = resumed["runId"].as_str().assert_value();
+    let successor = resumed["currentPartId"].as_str().assert_value();
     fixture.wait_succeeded(successor, "finish").await;
     wait_for_exit(fixture.ready_pid(successor)).await;
-    let status = fixture.json(&["status", successor], "finish").await;
+    let status = fixture
+        .json(&["status", &run, "--part", successor], "finish")
+        .await;
     assert_eq!(
         status["status"]["metadata"]["tokenUsage"]["inputTokens"],
         100
@@ -205,7 +221,9 @@ async fn missing_codex_usage_starts_a_new_conversation_and_logs_the_reason() {
         worker_calls(&fixture),
         ["fresh local-thread", "fresh local-thread"]
     );
-    let logs = fixture.output(&["logs", successor], "finish").await;
+    let logs = fixture
+        .output(&["logs", &run, "--part", successor], "finish")
+        .await;
     let logs = String::from_utf8_lossy(&logs.stdout);
     assert!(
         logs.contains("node worker starts a new conversation")
@@ -283,15 +301,25 @@ async fn selected_checkpoint_conversation(replacement: Option<bool>) {
         ]);
     }
     let resumed = fixture.json(&args, "finish").await;
-    let successor = resumed["runId"].as_str().assert_value();
+    let successor = resumed["currentPartId"].as_str().assert_value();
     fixture.wait_succeeded(successor, "finish").await;
     wait_for_exit(fixture.ready_pid(successor)).await;
     assert_eq!(
         worker_calls(&fixture),
         ["fresh local-thread", "resume local-thread"],
         "predecessor logs: {}; successor logs: {}",
-        String::from_utf8_lossy(&fixture.output(&["logs", &run], "finish").await.stdout),
-        String::from_utf8_lossy(&fixture.output(&["logs", successor], "finish").await.stdout)
+        String::from_utf8_lossy(
+            &fixture
+                .output(&["logs", &run, "--part", &run], "finish")
+                .await
+                .stdout
+        ),
+        String::from_utf8_lossy(
+            &fixture
+                .output(&["logs", &run, "--part", successor], "finish")
+                .await
+                .stdout
+        )
     );
     if replacement.is_some() {
         assert_eq!(
@@ -306,7 +334,9 @@ async fn selected_checkpoint_conversation(replacement: Option<bool>) {
 async fn oversized_conversation_falls_back_and_logs_the_cap() {
     let mut fixture = fixture();
     let run = suspend_turn(&fixture, "cap", 1).await;
-    let logs = fixture.output(&["logs", &run], "finish").await;
+    let logs = fixture
+        .output(&["logs", &run, "--part", &run], "finish")
+        .await;
     assert_eq!(
         String::from_utf8_lossy(&logs.stdout)
             .matches("1 GiB cap")
@@ -315,13 +345,15 @@ async fn oversized_conversation_falls_back_and_logs_the_cap() {
     );
     new_provider_home(&mut fixture);
     let resumed = fixture.json(&["resume", &run], "finish").await;
-    let successor = resumed["runId"].as_str().assert_value();
+    let successor = resumed["currentPartId"].as_str().assert_value();
     fixture.wait_succeeded(successor, "finish").await;
     assert_eq!(
         worker_calls(&fixture),
         ["fresh local-thread", "fresh local-thread"]
     );
-    let logs = fixture.output(&["logs", successor], "finish").await;
+    let logs = fixture
+        .output(&["logs", &run, "--part", successor], "finish")
+        .await;
     assert!(
         String::from_utf8_lossy(&logs.stdout)
             .contains("node worker starts a new conversation: checkpoint has no conversation")
@@ -342,7 +374,7 @@ async fn failed_continued_turn_retries_with_a_new_conversation() {
     let run = suspend_turn(&fixture, "suspend", 1).await;
     new_provider_home(&mut fixture);
     let resumed = fixture.json(&["resume", &run], "reject-resume").await;
-    let successor = resumed["runId"].as_str().assert_value();
+    let successor = resumed["currentPartId"].as_str().assert_value();
     // Avoid repeatedly launching an instrumented status process during the retry.
     wait_for_exit(fixture.ready_pid(successor)).await;
     fixture.wait_succeeded(successor, "reject-resume").await;
@@ -377,13 +409,18 @@ async fn conversation_checkpoints_deduplicate_growth_across_suspended_successors
     );
     new_provider_home(&mut fixture);
     let resumed = fixture.json(&["resume", &run], "dedup").await;
-    let successor = resumed["runId"].as_str().assert_value();
+    let successor = resumed["currentPartId"].as_str().assert_value();
     hold_and_suspend(&fixture, successor, "dedup", 2).await;
     assert_eq!(
         worker_calls(&fixture),
         ["fresh local-thread", "resume local-thread"],
         "successor logs: {}",
-        String::from_utf8_lossy(&fixture.output(&["logs", successor], "finish").await.stdout)
+        String::from_utf8_lossy(
+            &fixture
+                .output(&["logs", &run, "--part", successor], "finish")
+                .await
+                .stdout
+        )
     );
     let growth = size(&repositories).saturating_sub(before);
     assert!(

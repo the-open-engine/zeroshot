@@ -444,6 +444,7 @@ async fn wave5_cli_contract_default_backend_bounds_recovery_and_redacts_requests
         commit_identity: None,
         commit_co_author: None,
 
+        part_id: run_id.clone(),
         run_id: run_id.clone(),
         successor_run_id: RunId::new("run-successor"),
         from: None,
@@ -457,6 +458,7 @@ async fn wave5_cli_contract_default_backend_bounds_recovery_and_redacts_requests
             .run_discard_workspace(
                 None,
                 RunDiscardWorkspaceParams {
+                    part_id: None,
                     run_id: run_id.clone()
                 }
             )
@@ -570,7 +572,7 @@ fn source() -> Value {
 
 fn status(run_id: &str, phase: &str) -> CliRunStatusResult {
     serde_json::from_value(json!({
-        "runId":run_id,
+        "partId":run_id,"currentPartId":run_id,"runId":run_id,
         "title":"Repair checkout",
         "source":source(),
         "size":"medium",

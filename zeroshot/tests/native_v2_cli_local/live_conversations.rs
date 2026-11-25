@@ -240,7 +240,7 @@ async fn live_suspended_conversation() {
     }
     absent(&storage, &word);
     absent(&fixture.repository, &word);
-    let successor = json(&fixture, &["resume", &run]).await["runId"]
+    let successor = json(&fixture, &["resume", &run]).await["currentPartId"]
         .as_str()
         .assert_value()
         .to_owned();

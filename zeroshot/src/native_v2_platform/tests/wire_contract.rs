@@ -21,9 +21,7 @@ async fn mixed_runs() -> (Harness, RunId) {
     harness.driver.wait_started().await;
     harness
         .controller
-        .force(RunForceParams {
-            run_id: finished.run_id.clone(),
-        })
+        .force(RunForceParams::new(finished.run_id.clone()))
         .await
         .assert_value();
     terminal(&harness.controller, &finished.run_id).await;
@@ -37,9 +35,7 @@ async fn mixed_runs() -> (Harness, RunId) {
         loop {
             let status = harness
                 .controller
-                .status(RunStatusParams {
-                    run_id: active.run_id.clone(),
-                })
+                .status(RunStatusParams::new(active.run_id.clone()))
                 .await
                 .assert_value();
             if !serde_json::to_value(status).assert_value()["status"]["activeExecutions"]
@@ -94,9 +90,7 @@ async fn matching_contract<T: SubscriptionTransport>(
     let client = ClusterClient::new(transport);
     client.initialize().await.assert_value();
     let status = client
-        .run_status(RunStatusParams {
-            run_id: run_id.clone(),
-        })
+        .run_status(RunStatusParams::new(run_id.clone()))
         .await
         .assert_value();
     let serialized = serde_json::to_value(&status).assert_value();
@@ -140,6 +134,7 @@ async fn matching_contract<T: SubscriptionTransport>(
     let subscriptions = RunSubscriptionClient::new(transport);
     let (_, mut watch) = subscriptions
         .run_watch(RunWatchParams {
+            part_id: None,
             run_id: run_id.clone(),
             from_cursor: None,
         })
@@ -158,9 +153,7 @@ async fn matching_contract<T: SubscriptionTransport>(
     }
     harness
         .controller
-        .force(RunForceParams {
-            run_id: run_id.clone(),
-        })
+        .force(RunForceParams::new(run_id.clone()))
         .await
         .assert_value();
     terminal(&harness.controller, &run_id).await;
@@ -176,14 +169,17 @@ async fn matching_contract<T: SubscriptionTransport>(
 }
 
 async fn assert_recorded_at(event: &RunWatchEventNotification, ledger: &FakeRunLedger) {
+    let (part_id, cursor) =
+        crate::native_v2_observability::lineage::split_cursor(&event.cursor).assert_value();
+    assert_eq!(part_id, event.part_id);
     let tail = ledger
-        .snapshot_and_tail(&event.run_id, None)
+        .snapshot_and_tail(&part_id, None)
         .await
         .assert_value();
     let stored = tail
         .events
         .iter()
-        .find(|stored| stored.cursor == event.cursor)
+        .find(|stored| stored.cursor == cursor)
         .assert_value();
     assert_eq!(event.recorded_at, stored.recorded_at);
     assert!(event.recorded_at.is_some());

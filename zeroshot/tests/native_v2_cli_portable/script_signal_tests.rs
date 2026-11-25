@@ -292,6 +292,25 @@ fn script_verifier_signals_route_and_persist_without_model_calls() {
             assert_eq!(evidence["execution"]["node"], "probe");
             assert_eq!(evidence["execution"]["execution"], reports[0]["execution"]);
             assert_eq!(evidence["cursor"], reports[0]["cursor"]);
+            let pinned = fixture.json(&["status", id, "--part", id]);
+            let raw = pinned["status"]["terminalResult"]["context"]["verifiers"][0]["cursor"]
+                .as_str()
+                .unwrap();
+            assert_eq!(evidence["cursor"], format!("{id}@{raw}"));
+            let replay = fixture.command(&["watch", id]).output().unwrap();
+            assert_eq!(replay.status.code(), Some(1));
+            let terminal_event: Value = serde_json::from_slice(
+                replay
+                    .stdout
+                    .split(|byte| *byte == b'\n')
+                    .rfind(|line| !line.is_empty())
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                terminal_event["status"]["terminalResult"]["context"]["verifiers"][0]["cursor"],
+                evidence["cursor"]
+            );
             assert!(context["primary"].is_null());
             assert!(context["recorded"].as_array().unwrap().is_empty());
         }

@@ -34,9 +34,9 @@ pub const TARGET_SESSION_PATH: &str = "/native-v2/oecp-session";
 pub const TARGET_OECP_PATH: &str = "/native-v2/oecp";
 pub const TARGET_PRIVATE_BOOTSTRAP_PATH: &str = "/native-v2/private-bootstrap";
 pub const TARGET_OPERATOR_DIAGNOSTICS_PATH_PREFIX: &str = "/native-v2/operator-diagnostics/";
-pub const TARGET_DISCOVERY_KIND: &str = "zeroshot.native-v2-target/v3";
+pub const TARGET_DISCOVERY_KIND: &str = "zeroshot.native-v2-target/v4";
 pub const TARGET_CONTROLLER_AUDIENCE: &str = "controller";
-pub const HOSTED_RUNS_KIND: &str = "zeroshot.hosted-runs/v2";
+pub const HOSTED_RUNS_KIND: &str = "zeroshot.hosted-runs/v3";
 pub const RUN_HISTORY_KIND: &str = "zeroshot.run-history/v1";
 pub const CONNECTIONS_KIND: &str = "zeroshot.connections/v1";
 pub const STATIC_CONNECTION_KIND: &str = "static";
@@ -376,6 +376,8 @@ fn redacted(secret: &Option<String>) -> Option<&'static str> {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct TargetRunReceipt {
     pub run_id: RunId,
+    /// Physical identity of the current part of the run.
+    pub current_part_id: RunId,
 }
 
 /// One bounded, sanitized platform diagnostic retained outside public run observation.

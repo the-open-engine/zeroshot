@@ -164,6 +164,7 @@ impl TargetControllerFactory for FakeFactory {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push((request.commit_identity, request.commit_co_author));
         Ok(TargetRunReceipt {
+            current_part_id: request.run_id.clone(),
             run_id: request.run_id,
         })
     }
@@ -194,6 +195,7 @@ async fn direct_target_advertises_suspension_and_routes_vector_reads() {
     for error in [
         client
             .run_vectors(RunVectorsParams {
+                part_id: None,
                 run_id: run_id(),
                 after: None,
                 limit: Some(1),
@@ -202,6 +204,7 @@ async fn direct_target_advertises_suspension_and_routes_vector_reads() {
             .unwrap_err(),
         client
             .run_vector(RunVectorParams {
+                part_id: None,
                 run_id: run_id(),
                 id: VectorId::new("entry").assert_value(),
             })
@@ -214,7 +217,7 @@ async fn direct_target_advertises_suspension_and_routes_vector_reads() {
         assert_eq!(error.data.assert_value().code, NOT_FOUND);
     }
     let error = client
-        .run_suspend(openengine_cluster_protocol::RunSuspendParams { run_id: run_id() })
+        .run_suspend(openengine_cluster_protocol::RunSuspendParams::new(run_id()))
         .await
         .unwrap_err();
     let ClientError::Rpc(error) = error else {
@@ -424,7 +427,10 @@ async fn hosted_sessions_are_authenticated_and_run_scoped() {
     .await;
     assert_eq!(accepted.status, 200);
     let receipt: TargetRunReceipt = serde_json::from_slice(&accepted.body).assert_value();
-    assert_eq!(receipt.run_id, run_id());
+    assert_eq!(
+        (receipt.run_id, receipt.current_part_id),
+        (run_id(), run_id())
+    );
 
     let session_body = serde_json::to_vec(&TargetOecpSessionRequest {
         run_id: Some(run_id()),
@@ -590,6 +596,7 @@ async fn target_oecp_checkpoint_capability_enables_bounded_query_routing() {
     let client = connect_client(&endpoint, None).await;
     let error = client
         .run_checkpoints(RunCheckpointsParams {
+            part_id: None,
             run_id: run_id(),
             after: None,
             limit: Some(1),
@@ -605,6 +612,7 @@ async fn target_oecp_checkpoint_capability_enables_bounded_query_routing() {
     );
     let error = client
         .run_checkpoints(RunCheckpointsParams {
+            part_id: None,
             run_id: RunId::new("not-a-run-id"),
             after: None,
             limit: Some(1),
@@ -626,6 +634,7 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
     let errors = [
         client
             .run_checkpoints(RunCheckpointsParams {
+                part_id: None,
                 run_id: run_id(),
                 after: None,
                 limit: None,
@@ -635,6 +644,7 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
         client
             .run_resume(RunResumeParams {
                 runtime: None,
+                part_id: run_id(),
                 run_id: run_id(),
                 successor_run_id: other_run_id(),
                 from: Some(RunResumeFrom::Checkpoint {
@@ -662,6 +672,7 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
         let error = client
             .run_resume(RunResumeParams {
                 runtime: None,
+                part_id: run_id(),
                 run_id: run_id(),
                 successor_run_id: RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c992"),
                 from,
@@ -677,7 +688,10 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
         assert!(!error.to_string().contains("does not support"));
     }
     let error = client
-        .run_discard_workspace(RunDiscardWorkspaceParams { run_id: run_id() })
+        .run_discard_workspace(RunDiscardWorkspaceParams {
+            part_id: None,
+            run_id: run_id(),
+        })
         .await
         .expect_err("missing run must be rejected by controller");
     assert!(!error.to_string().contains("does not support"));
@@ -685,6 +699,7 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
     for params in [
         RunResumeParams {
             runtime: None,
+            part_id: RunId::new("not-a-run-id"),
             run_id: RunId::new("not-a-run-id"),
             successor_run_id: RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c992"),
             from: None,
@@ -697,6 +712,7 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
         },
         RunResumeParams {
             runtime: None,
+            part_id: run_id(),
             run_id: run_id(),
             successor_run_id: RunId::new("not-a-run-id"),
             from: None,
@@ -716,6 +732,7 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
     }
     let error = client
         .run_discard_workspace(RunDiscardWorkspaceParams {
+            part_id: None,
             run_id: RunId::new("not-a-run-id"),
         })
         .await
@@ -1038,6 +1055,7 @@ async fn assert_workspace_recovery(endpoint: &str, bearer: Option<&str>, adverti
         client
             .run_resume(RunResumeParams {
                 runtime: None,
+                part_id: run_id(),
                 run_id: run_id(),
                 successor_run_id: other_run_id(),
                 from: None,
@@ -1051,7 +1069,10 @@ async fn assert_workspace_recovery(endpoint: &str, bearer: Option<&str>, adverti
             .await
             .expect_err("missing run must be rejected"),
         client
-            .run_discard_workspace(RunDiscardWorkspaceParams { run_id: run_id() })
+            .run_discard_workspace(RunDiscardWorkspaceParams {
+                part_id: None,
+                run_id: run_id(),
+            })
             .await
             .expect_err("missing run must be rejected"),
     ];
@@ -1229,6 +1250,7 @@ async fn steer_direct_target_routes_running_suspended_and_finished_records() {
             .run_steer(RunSteerParams {
                 node: None,
                 mode: Default::default(),
+                part_id: None,
                 run_id: id.clone(),
                 text: text.clone(),
             })
@@ -1236,7 +1258,7 @@ async fn steer_direct_target_routes_running_suspended_and_finished_records() {
             .assert_value();
         assert_eq!(recorded.steer.received_executions, 0);
         let status = client
-            .run_status(RunStatusParams { run_id: id.clone() })
+            .run_status(RunStatusParams::new(id.clone()))
             .await
             .assert_value();
         assert_eq!(status.steering.steers, vec![recorded.steer.clone()]);
@@ -1249,6 +1271,7 @@ async fn steer_direct_target_routes_running_suspended_and_finished_records() {
         assert_eq!(
             client
                 .run_vector(RunVectorParams {
+                    part_id: None,
                     run_id: id,
                     id: recorded.steer.id
                 })
@@ -1266,6 +1289,7 @@ async fn steer_direct_target_routes_running_suspended_and_finished_records() {
     assert!(
         client
             .run_steer(RunSteerParams {
+                part_id: None,
                 node: None,
                 mode: Default::default(),
                 run_id: RunId::new("finished"),

@@ -357,9 +357,7 @@ pub(super) async fn assert_inbox_show_during_successor_startup() {
             .backend
             .claim_recovery_workspace(&fixture.run_id)
             .assert_value();
-        let params = RunStatusParams {
-            run_id: fixture.run_id.clone(),
-        };
+        let params = RunStatusParams::new(fixture.run_id.clone());
         let mut expected = crate::v2_run_ledger::inbox::show(
             &ledger,
             &fixture.run_id,
@@ -367,7 +365,6 @@ pub(super) async fn assert_inbox_show_during_successor_startup() {
         )
         .await
         .assert_value();
-        expected.successor_run_id = Some(fixture.successor_run_id.clone());
         assert_eq!(
             fixture
                 .backend
@@ -414,6 +411,17 @@ pub(super) async fn assert_inbox_show_during_successor_startup() {
                 .assert_value(),
             expected,
         );
+        let mut handoff = fixture
+            .backend
+            .read_recovery_document(&fixture.run_id)
+            .assert_value();
+        handoff.successor_run_id = None;
+        handoff.resumed_from = Some(fixture.run_id.clone());
+        fixture
+            .backend
+            .write_recovery_document(&fixture.successor_run_id, &handoff)
+            .assert_value();
+        expected.successor_run_id = Some(fixture.successor_run_id.clone());
         let resolution = if expired {
             RunVectorContent::Expiry {
                 request_id: request.id,

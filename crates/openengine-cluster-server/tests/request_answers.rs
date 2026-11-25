@@ -45,15 +45,16 @@ impl ClusterBackend for AnswerBackend {
         assert_eq!(output["feedback"].as_str().assert_value().len(), 1_048_000);
         assert!(params.github_token.assert_value().len() >= 4096);
         Ok(RunResumeResult {
-            run_id: params.successor_run_id,
-            resumed_from: params.run_id,
+            current_part_id: params.successor_run_id,
+            run_id: params.run_id,
+            resumed_from: params.part_id,
         })
     }
 }
 
 fn answer_frame(fill_allowance: bool) -> String {
     let mut request = json!({"jsonrpc":"2.0","id":1,"method":"run/resume","params":{
-        "runId":"prior","successorRunId":"successor",
+        "runId":"prior","partId":"prior","successorPartId":"successor",
         "from":{"kind":"answer","signals":{"decision":"approved"},"output":{"feedback":"x".repeat(1_048_000)}},
         "githubToken":"x".repeat(4096)
     }});
@@ -71,7 +72,7 @@ fn assert_success(response: &str) {
     let response: Value = serde_json::from_str(response).assert_value();
     assert_eq!(
         response["result"],
-        json!({"runId":"successor","resumedFrom":"prior"})
+        json!({"runId":"prior","currentPartId":"successor","resumedFromPartId":"prior"})
     );
 }
 

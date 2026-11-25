@@ -303,6 +303,7 @@ pub(crate) async fn submit_test_run(
         .await
         .map_err(|error| TargetAuthorityError::unavailable(error.to_string()))?;
     Ok(TargetRunReceipt {
+        current_part_id: receipt.run_id.clone(),
         run_id: receipt.run_id,
     })
 }

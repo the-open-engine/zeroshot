@@ -113,6 +113,7 @@ async fn machine_auth_uses_key_for_all_target_transports_without_oauth_or_keyrin
         .hosted_run_checkpoints(
             &target,
             openengine_cluster_protocol::RunCheckpointsParams {
+                part_id: None,
                 run_id: RunId::new("run-recoverable"),
                 after: None,
                 limit: None,

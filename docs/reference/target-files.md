@@ -21,7 +21,8 @@ Use portable ASCII names; absolute paths, traversal, Windows reserved names, cas
 links and special files are rejected. Permissions and executable bits are not transferred.
 
 `file list --run RUN_ID` lists host-managed publications. `file download PATH OUTPUT --run RUN_ID`
-reads one. Clients cannot write or remove run publications. The host separately owns staged inputs,
+reads one. After a resume, pass the producing part ID from the receipt’s `address.scope.runId`
+to `--run`. Clients cannot write or remove run publications. The host separately owns staged inputs,
 private pins, request publications and final publications. References to files in a live local
 workspace are not managed publications and do not appear in this tree.
 

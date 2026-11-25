@@ -258,7 +258,7 @@ async fn default_backend_fails_closed_for_every_supported_unary_extension() {
         ),
         (
             "run/resume",
-            json!({"runId": "run-1", "successorRunId": "run-2"}),
+            json!({"runId": "run-1", "partId":"run-1", "successorPartId": "run-2"}),
         ),
         ("run/discard_workspace", json!({"runId": "run-1"})),
     ];

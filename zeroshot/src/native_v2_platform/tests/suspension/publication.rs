@@ -3,6 +3,7 @@ use openengine_cluster_protocol::{RunSteerParams, SteeringMode};
 
 fn steer(run_id: &RunId, text: &str) -> RunSteerParams {
     RunSteerParams {
+        part_id: None,
         run_id: run_id.clone(),
         node: None,
         text: text.to_owned(),
@@ -58,7 +59,7 @@ async fn hosted() -> (
             publication: Some(store.clone()),
             ..Default::default()
         }),
-        successor: StdMutex::new(None),
+        successors: StdMutex::default(),
         preparation_gate: None,
     });
     let controller = NativeV2PlatformController::new_with_delivery_policy(
@@ -72,7 +73,7 @@ async fn hosted() -> (
         .await
         .assert_value()
         .run_id;
-    while !matches!(controller.status(RunStatusParams { run_id: run.clone() }).await.assert_value().status,
+    while !matches!(controller.status(RunStatusParams::new(run.clone())).await.assert_value().status,
         RunStatus::Running { ref active_executions, .. } if active_executions.iter().any(|e| e.node.as_str() == "wait"))
     {
         tokio::task::yield_now().await;
@@ -88,7 +89,7 @@ async fn host_publication_refuses_steers_during_save_disposal_and_after_engine_r
         // In-place waits leave admission open until the suspension handoff starts.
         let first = controller.steer(steer(&run, "  first\t方向\r\n")).await.assert_value();
         let second = controller.steer(steer(&run, "second")).await.assert_value();
-        controller.suspend(RunSuspendParams { run_id: run.clone() }).await.assert_value();
+        controller.suspend(RunSuspendParams::new(run.clone())).await.assert_value();
         store.published.notified().await;
         refused(&controller, &run).await;
         let published = store.vectors.lock().assert_value().clone();
@@ -107,6 +108,7 @@ async fn host_publication_refuses_steers_during_save_disposal_and_after_engine_r
         }
         refused(&controller, &run).await;
         let durable = crate::v2_run_ledger::vectors::list_full(ledger.as_ref(), RunVectorsParams {
+            part_id: None,
             run_id: run.clone(), after: None, limit: None,
         }).await.assert_value().vectors;
         assert_eq!(durable, published);
@@ -124,13 +126,13 @@ async fn failed_host_publication_does_not_acknowledge_a_late_steer() {
     tokio::time::timeout(Duration::from_secs(10), async {
         let (controller, _, store, run) = hosted().await;
         let accepted = controller.steer(steer(&run, "before handoff")).await.assert_value();
-        controller.suspend(RunSuspendParams { run_id: run.clone() }).await.assert_value();
+        controller.suspend(RunSuspendParams::new(run.clone())).await.assert_value();
         store.published.notified().await;
         refused(&controller, &run).await;
         store.reject.store(true, Ordering::SeqCst);
         store.publish_release.notify_one();
         controller.wait_runtime_settled(&run).await;
-        assert!(matches!(controller.status(RunStatusParams { run_id: run.clone() }).await.assert_value().status,
+        assert!(matches!(controller.status(RunStatusParams::new(run.clone())).await.assert_value().status,
             RunStatus::Finished { terminal_result: TerminalResult::Failed { reason, .. }, .. } if reason.as_str() == "runtime_failed"));
         assert!(!store.exits.lock().assert_value().contains(&RunRuntimeExit::Suspended));
         let directions = crate::v2_run_ledger::steering::all(controller.ledger.as_ref(), &run).await.assert_value();
@@ -192,7 +194,7 @@ async fn retained_ledger_accepts_suspended_steers_and_delivers_them_in_order_to_
                 retained_ledger: true,
                 ..Default::default()
             }),
-            successor: StdMutex::new(None),
+            successors: StdMutex::default(),
             preparation_gate: None,
         });
         let controller = NativeV2PlatformController::new_with_delivery_policy(
@@ -208,9 +210,7 @@ async fn retained_ledger_accepts_suspended_steers_and_delivers_them_in_order_to_
             .run_id;
         while !matches!(
             controller
-                .status(RunStatusParams {
-                    run_id: run.clone()
-                })
+                .status(RunStatusParams::new(run.clone()))
                 .await
                 .assert_value()
                 .status,

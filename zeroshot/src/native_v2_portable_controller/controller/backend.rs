@@ -110,27 +110,33 @@ impl ClusterBackend for PortableRunController {
     async fn run_status(
         &self,
         context: &ConnectionContext,
-        params: RunStatusParams,
+        mut params: RunStatusParams,
     ) -> Result<RunStatusResult, BackendError> {
         self.require_run(&params.run_id)?;
+        // This socket owns one ledger. The local CLI follows accepted handoffs across sockets.
+        params.part_id.get_or_insert_with(|| params.run_id.clone());
         ClusterBackend::run_status(self.inner.as_ref(), context, params).await
     }
 
     async fn run_watch(
         &self,
         context: &ConnectionContext,
-        params: RunWatchParams,
+        mut params: RunWatchParams,
     ) -> Result<(RunWatchResult, RunWatchEventStream), BackendError> {
         self.require_run(&params.run_id)?;
+        // This socket owns one ledger. The local CLI follows accepted handoffs across sockets.
+        params.part_id.get_or_insert_with(|| params.run_id.clone());
         ClusterBackend::run_watch(self.inner.as_ref(), context, params).await
     }
 
     async fn run_logs(
         &self,
         context: &ConnectionContext,
-        params: RunLogsParams,
+        mut params: RunLogsParams,
     ) -> Result<(RunLogsResult, RunLogEventStream), BackendError> {
         self.require_run(&params.run_id)?;
+        // This socket owns one ledger. The local CLI follows accepted handoffs across sockets.
+        params.part_id.get_or_insert_with(|| params.run_id.clone());
         ClusterBackend::run_logs(self.inner.as_ref(), context, params).await
     }
 

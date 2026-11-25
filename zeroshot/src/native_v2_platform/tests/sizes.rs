@@ -43,9 +43,7 @@ async fn default_size_is_pinned_and_original_request_replays_after_catalog_remov
     assert_eq!(replay.run_id, first.run_id);
     assert_eq!(harness.allocator.allocation_count(), 1);
     controller
-        .force(RunForceParams {
-            run_id: first.run_id,
-        })
+        .force(RunForceParams::new(first.run_id))
         .await
         .assert_value();
 }

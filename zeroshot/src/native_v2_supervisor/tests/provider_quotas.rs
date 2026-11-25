@@ -85,9 +85,7 @@ async fn builtin_review_failure_preserves_quota_node_reset_and_resume_guidance_i
             Some(&WorkerOutcome::declared_failure(WorkerErrorCode::Refusal))
         );
         let status = NativeV2Observability::new(harness.ledger.clone())
-            .status(RunStatusParams {
-                run_id: stored.snapshot.run_id.clone(),
-            })
+            .status(RunStatusParams::new(stored.snapshot.run_id.clone()))
             .await
             .assert_value();
         assert!(

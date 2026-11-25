@@ -85,9 +85,18 @@ fn router(state: UiState, target_history: bool) -> Router {
         .route("/ui/{*asset}", get(server::asset));
     let router = if target_history {
         router
-            .route(server::TARGET_RUN_HISTORY_LIST_PATH, get(runs::list))
-            .route(server::TARGET_RUN_HISTORY_DETAIL_PATH, get(runs::show))
-            .route(server::TARGET_RUN_HISTORY_PAGE_PATH, get(runs::history))
+            .route(
+                server::TARGET_RUN_HISTORY_LIST_PATH,
+                get(runs::archive_list),
+            )
+            .route(
+                server::TARGET_RUN_HISTORY_DETAIL_PATH,
+                get(runs::archive_show),
+            )
+            .route(
+                server::TARGET_RUN_HISTORY_PAGE_PATH,
+                get(runs::archive_history),
+            )
     } else {
         router
     };

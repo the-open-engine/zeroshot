@@ -11,6 +11,7 @@ from zeroshot.errors import ProtocolError
 def log_event(*, timestamp: object = 1_725_000_000_123) -> dict[str, object]:
     return {
         "runId": "run-1",
+        "partId": "part-2",
         "cursor": "v2:3",
         "timestamp": timestamp,
         "record": {"level": "info", "target": "agent", "message": "done"},
@@ -96,6 +97,8 @@ def test_stack_projection_rejects_omitted_nullable_fields(field: str) -> None:
 def local_status() -> dict[str, object]:
     return {
         "runId": "folder-run",
+        "partId": "part-1",
+        "currentPartId": "part-1",
         "title": "Ordinary folder",
         "size": "small",
         "atCursor": "v2:0",
@@ -237,6 +240,7 @@ def test_failed_status_retains_immutable_structured_evidence_without_inventing_a
             {
                 "message": "GitHub API request failed: HTTP 404 — base branch not found",
                 "execution": {"execution": "opaque:execution:1", "node": "deliver"},
+                "partId": "part-2",
                 "cursor": "v2:3",
             }
         ],
@@ -500,3 +504,17 @@ def test_steer_rejects_nonobject_network_metadata(network: object) -> None:
     value["network"] = network
     with pytest.raises(ProtocolError, match=r"steer\.network"):
         _steer(value)
+
+
+@pytest.mark.parametrize("missing", ["partId", "currentPartId"])
+def test_status_requires_part_identity_and_watch_requires_only_its_event_part(missing: str) -> None:
+    value = local_status()
+    del value[missing]
+    with pytest.raises(ProtocolError, match=missing):
+        _status(value)
+    if missing == "currentPartId":
+        event = _status(value, watch=True)
+        assert event.part_id == "part-1" and event.current_part_id is None
+    else:
+        with pytest.raises(ProtocolError, match="partId"):
+            _status(value, watch=True)

@@ -80,7 +80,7 @@ async fn forcing_a_suspended_observer_discards_its_recorded_checkpoint_lineage()
         .assert_value();
     let forced = controller
         .inner
-        .force(RunForceParams { run_id })
+        .force(RunForceParams::new(run_id))
         .await
         .assert_value();
     assert!(matches!(forced.status, RunStatus::Finished {
@@ -164,12 +164,7 @@ async fn local_force_confirms_cleanup_despite_an_unpersisted_runtime_failure() {
         "git".into(),
     );
     let before = backend
-        .run_status(
-            None,
-            RunStatusParams {
-                run_id: run_id.clone(),
-            },
-        )
+        .run_status(None, RunStatusParams::new(run_id.clone()))
         .await
         .assert_value();
     assert!(
@@ -179,24 +174,14 @@ async fn local_force_confirms_cleanup_despite_an_unpersisted_runtime_failure() {
     );
     assert!(
         backend
-            .run_resume_status(
-                None,
-                RunStatusParams {
-                    run_id: run_id.clone()
-                }
-            )
+            .run_resume_status(None, RunStatusParams::new(run_id.clone()))
             .await
             .is_err(),
         "a live failure projection cannot authorize resume"
     );
     let forced = tokio::time::timeout(
         Duration::from_secs(20),
-        backend.run_force(
-            None,
-            RunForceParams {
-                run_id: run_id.clone(),
-            },
-        ),
+        backend.run_force(None, RunForceParams::new(run_id.clone())),
     )
     .await;
     serving.abort();
@@ -542,6 +527,7 @@ async fn boundary_contract_single_run_allocator_refuses_foreign_runs_and_confirm
 
     let empty = allocator
         .checkpoints(openengine_cluster_protocol::RunCheckpointsParams {
+            part_id: None,
             run_id: run_id.clone(),
             after: None,
             limit: None,
@@ -554,6 +540,7 @@ async fn boundary_contract_single_run_allocator_refuses_foreign_runs_and_confirm
     assert!(
         allocator
             .checkpoints(openengine_cluster_protocol::RunCheckpointsParams {
+                part_id: None,
                 run_id: run_id.clone(),
                 after: Some(
                     openengine_cluster_protocol::CheckpointId::new("unknown-checkpoint")
@@ -683,6 +670,7 @@ async fn assert_exact_backend_delegation(
         controller,
         context,
         RunCheckpointsParams {
+            part_id: None,
             run_id: run_id.clone(),
             after: None,
             limit: None,
@@ -693,20 +681,16 @@ async fn assert_exact_backend_delegation(
     assert_eq!(&checkpoints.run_id, run_id);
     assert!(checkpoints.checkpoints.is_empty());
 
-    let status = ClusterBackend::run_status(
-        controller,
-        context,
-        RunStatusParams {
-            run_id: run_id.clone(),
-        },
-    )
-    .await
-    .assert_value();
+    let status =
+        ClusterBackend::run_status(controller, context, RunStatusParams::new(run_id.clone()))
+            .await
+            .assert_value();
     assert!(matches!(status.status, RunStatus::Finished { .. }));
     let (watch, watch_stream) = ClusterBackend::run_watch(
         controller,
         context,
         RunWatchParams {
+            part_id: None,
             run_id: run_id.clone(),
             from_cursor: None,
         },
@@ -719,6 +703,7 @@ async fn assert_exact_backend_delegation(
         controller,
         context,
         RunLogsParams {
+            part_id: None,
             run_id: run_id.clone(),
             from_cursor: None,
             execution: None,
@@ -734,6 +719,7 @@ async fn assert_exact_backend_delegation(
         controller,
         context,
         RunAttachParams {
+            part_id: None,
             run_id: run_id.clone(),
             execution: missing_execution,
         },
@@ -745,15 +731,10 @@ async fn assert_exact_backend_delegation(
     assert_eq!(attach_error.code, NOT_FOUND);
     assert_eq!(attach_error.message, "execution was not found");
 
-    let forced = ClusterBackend::run_force(
-        controller,
-        context,
-        RunForceParams {
-            run_id: run_id.clone(),
-        },
-    )
-    .await
-    .assert_value();
+    let forced =
+        ClusterBackend::run_force(controller, context, RunForceParams::new(run_id.clone()))
+            .await
+            .assert_value();
     assert_eq!(&forced.run_id, run_id);
     assert!(matches!(forced.status, RunStatus::Finished { .. }));
 }
@@ -769,9 +750,7 @@ async fn portable_backend_delegates_exact_run_operations_and_fences_foreign_ids(
     let Err(error) = ClusterBackend::run_status(
         &controller,
         &context,
-        RunStatusParams {
-            run_id: RunId::new("portable-backend-foreign"),
-        },
+        RunStatusParams::new(RunId::new("portable-backend-foreign")),
     )
     .await
     else {

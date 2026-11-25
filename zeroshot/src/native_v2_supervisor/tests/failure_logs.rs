@@ -8,6 +8,7 @@ pub(super) async fn public_subscription(
     let service = NativeV2Observability::new(harness.ledger.clone());
     let (_, logs) = service
         .logs(RunLogsParams {
+            part_id: None,
             run_id: harness.supervisor.run_id.clone(),
             from_cursor: None,
             execution: None,
@@ -82,9 +83,9 @@ async fn unhandled_step_and_verifier_errors_retain_the_primary_cause_and_public_
             let stored = stored_run(&harness.ledger).await;
             assert_eq!(stored.snapshot.terminal, Some(result.clone()));
             let status = NativeV2Observability::new(harness.ledger.clone())
-                .status(openengine_cluster_protocol::RunStatusParams {
-                    run_id: stored.snapshot.run_id,
-                })
+                .status(openengine_cluster_protocol::RunStatusParams::new(
+                    stored.snapshot.run_id,
+                ))
                 .await
                 .assert_value();
             assert!(

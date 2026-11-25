@@ -15,7 +15,7 @@ import {
   type RunTerminal,
   type RunSummary,
 } from './run-history';
-import { projectOutcome } from './run-story';
+import { projectOutcome, type PendingHandoff } from './run-story';
 import './run-story.css';
 
 /** What the Steps view needs about the run itself, beyond its executions. */
@@ -37,6 +37,7 @@ export type RunContext = {
   open: boolean;
   /** The view follows the latest event, so new output streams into open transcripts. */
   following: boolean;
+  pendingHandoff?: PendingHandoff;
   /** The question is unresolved at this position. */
   waiting: boolean;
   answerable: boolean;
@@ -44,7 +45,7 @@ export type RunContext = {
   suspension?: RunSummary['suspension'];
   /** The run that took over this one, once the replay reaches the end of this run's history. */
   successor?: string;
-  runHref?: (id: string) => string;
+  partHref?: (id: string) => string;
 };
 
 /** The canvas toolbar for the Steps view. Details open in place there, so it has no inspector. */
@@ -58,15 +59,37 @@ export function RunViewToolbar({ toolbarStart }: { toolbarStart: ReactNode }) {
 
 /** Where the run stands at the replay position, then what history recorded so far. */
 export function RunOutcomeBar({ run }: { run: RunContext }) {
-  const { document, invocations, terminal, open, clock, successor, controls, suspension, now } =
-    run;
+  const {
+    document,
+    invocations,
+    terminal,
+    open,
+    clock,
+    successor,
+    controls,
+    suspension,
+    now,
+    pendingHandoff,
+  } = run;
   const outcome = useMemo(
     () =>
       projectOutcome(document, invocations, terminal, open, clock, successor, controls, {
         suspension,
         now,
+        pendingHandoff,
       }),
-    [document, invocations, terminal, open, clock, successor, controls, suspension, now]
+    [
+      document,
+      invocations,
+      terminal,
+      open,
+      clock,
+      successor,
+      controls,
+      suspension,
+      now,
+      pendingHandoff,
+    ]
   );
   // Only the run's state is announced, and only while following it live: replay and its
   // running counts would otherwise re-announce on every step.
@@ -168,7 +191,7 @@ export function StepDetail({
           request={invocation.request}
           runId={invocation.request.runId ?? run.runId}
           context={run}
-          runHref={run.runHref}
+          partHref={run.partHref}
         />
       ) : (
         hasValue(invocation.input) && (
@@ -369,9 +392,9 @@ export function useOpenSteps(execution: string) {
 /** The next run an answer or resume started, linked at the end of the list. */
 export function SuccessorLink({ run }: { run: RunContext }) {
   if (!run.successor) return null;
-  const label = `Continued in run ${run.successor}`;
-  return run.runHref ? (
-    <a className="run-handoff" href={run.runHref(run.successor)}>
+  const label = `Continued in part ${run.successor}`;
+  return run.partHref ? (
+    <a className="run-handoff" href={run.partHref(run.successor)}>
       {label}
       <ChevronRight size={14} />
     </a>

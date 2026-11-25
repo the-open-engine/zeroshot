@@ -143,6 +143,7 @@ async fn live_attach_fixture(run: &str) -> LiveAttachFixture {
 
 async fn attach_working(fixture: &LiveAttachFixture) -> (RunAttachParams, RunAttachSubscription) {
     let params = RunAttachParams {
+        part_id: None,
         run_id: fixture.run_id.clone(),
         execution: fixture.registration.public_execution().clone(),
     };

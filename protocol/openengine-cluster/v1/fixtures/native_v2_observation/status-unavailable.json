@@ -4,6 +4,8 @@
     "observedAt": 1794470707000,
     "state": "lost"
   },
+  "currentPartId": "run-1",
+  "partId": "run-1",
   "runId": "run-1",
   "size": "medium",
   "source": {

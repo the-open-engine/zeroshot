@@ -13,6 +13,7 @@ impl NativeV2PlatformController {
             from,
             run_id,
             successor_run_id,
+            part_id,
             connections,
             connection_resolver,
             github_token,
@@ -20,6 +21,11 @@ impl NativeV2PlatformController {
             commit_identity,
             commit_co_author,
         } = params;
+        if part_id != run_id {
+            return Err(NativeV2PlatformError::InvalidRequest(
+                "partId does not match the physical resume source".into(),
+            ));
+        }
         if matches!(
             from,
             Some(
@@ -168,6 +174,7 @@ impl NativeV2PlatformController {
             )));
         }
         Ok(RunResumeResult {
+            current_part_id: successor_run_id.clone(),
             run_id: successor_run_id,
             resumed_from: run_id,
         })
@@ -188,6 +195,7 @@ impl NativeV2PlatformController {
         );
         let recovery = self.allocator.workspace_recovery(run_id).await;
         if let Some(successor) = &recovery.successor_run_id {
+            self.ensure_current_part(Some(run_id)).await?;
             return Err(NativeV2PlatformError::InvalidRequest(format!(
                 "retained workspace was already claimed by {}",
                 successor.as_str()

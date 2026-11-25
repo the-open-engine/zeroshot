@@ -8,12 +8,12 @@ use openengine_cluster_client::{
 };
 use openengine_cluster_protocol::{
     ConnectionDeleteRequest, ConnectionDeleteResult, ConnectionListRequest, ConnectionListResult,
-    ConnectionMutationResult, ConnectionSetRequest, Cursor, Stack, StackId,
-    RunAttachEventNotification, RunAttachParams, RunForceParams, RunListParams,
-    RunConnectionRequirements, RunLogEventNotification, RunLogsParams, RunProfile,
-    RunProfileDefaultRequest, RunProfileDefaultResult, RunProfileDeleteResult,
-    RunProfileListRequest, RunProfileListResult, RunProfileMutationResult, RunProfileSelector,
-    RunProfileSetRequest, RunStatus, RunStatusParams, RunSubmitResult, RunWatchParams,
+    ConnectionMutationResult, ConnectionSetRequest, Stack, StackId, RunAttachEventNotification,
+    RunAttachParams, RunForceParams, RunListParams, RunConnectionRequirements,
+    RunLogEventNotification, RunLogsParams, RunProfile, RunProfileDefaultRequest,
+    RunProfileDefaultResult, RunProfileDeleteResult, RunProfileListRequest, RunProfileListResult,
+    RunProfileMutationResult, RunProfileSelector, RunProfileSetRequest, RunStatus, RunStatusParams,
+    RunSubmitResult, RunWatchParams,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -64,36 +64,26 @@ impl<C> NamedTargetCliBackend<C> {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum RunLocation {
-    Direct,
-    Platform,
-    Task,
-}
-
-impl<C> NamedTargetCliBackend<C>
-where
-    C: TargetConnector,
-{
-    async fn run_location(
+impl<C: TargetConnector> NamedTargetCliBackend<C> {
+    async fn capsule_status(
         &self,
         target: &str,
         run_id: &openengine_cluster_protocol::RunId,
-    ) -> Result<RunLocation, NativeV2CliError> {
-        let status = self
-            .connector
-            .hosted_run_status(
-                target,
-                RunStatusParams {
-                    run_id: run_id.clone(),
-                },
-            )
-            .await?;
-        Ok(match status {
-            None => RunLocation::Direct,
-            Some(status) if task_is_active(&status.status) => RunLocation::Task,
-            Some(_) => RunLocation::Platform,
-        })
+        part_id: Option<&openengine_cluster_protocol::RunId>,
+    ) -> Result<Option<CliRunStatusResult>, NativeV2CliError> {
+        let selected = RunStatusParams {
+            run_id: run_id.clone(),
+            part_id: part_id.cloned(),
+        };
+        let status = self.connector.hosted_run_status(target, selected).await?;
+        if let Some(status) = &status
+            && part_id.is_some_and(|part| part != &status.part_id)
+        {
+            return Err(NativeV2CliError::Protocol(
+                "hosted status returned a different part".to_owned(),
+            ));
+        }
+        Ok(status)
     }
 }
 
@@ -372,9 +362,7 @@ where
             .hosted_run_status(target, params.clone())
             .await?
         {
-            if !task_is_active(&result.status) {
-                return Ok(result);
-            }
+            return Ok(result);
         }
         let transport = self
             .connector
@@ -393,24 +381,13 @@ where
         params: RunWatchParams,
     ) -> Result<Self::Watch, NativeV2CliError> {
         let target = require_named_target(target)?;
-        let params = match self.run_location(target, &params.run_id).await? {
-            RunLocation::Platform => {
-                return self
-                    .connector
-                    .hosted_run_watch(target, params)
-                    .await?
-                    .ok_or_else(|| {
-                        NativeV2CliError::Target(
-                            "hosted target did not provide its run watch".to_owned(),
-                        )
-                    });
-            }
-            RunLocation::Task => RunWatchParams {
-                run_id: params.run_id,
-                from_cursor: task_cursor(params.from_cursor),
-            },
-            RunLocation::Direct => params,
-        };
+        if let Some(result) = self
+            .connector
+            .hosted_run_watch(target, params.clone())
+            .await?
+        {
+            return Ok(result);
+        }
         let transport = self
             .connector
             .connect(target, Some(params.run_id.clone()))
@@ -426,25 +403,13 @@ where
         params: RunLogsParams,
     ) -> Result<Self::Logs, NativeV2CliError> {
         let target = require_named_target(target)?;
-        let params = match self.run_location(target, &params.run_id).await? {
-            RunLocation::Platform => {
-                return self
-                    .connector
-                    .hosted_run_logs(target, params)
-                    .await?
-                    .ok_or_else(|| {
-                        NativeV2CliError::Target(
-                            "hosted target did not provide its retained logs".to_owned(),
-                        )
-                    });
-            }
-            RunLocation::Task => RunLogsParams {
-                run_id: params.run_id,
-                from_cursor: task_cursor(params.from_cursor),
-                execution: params.execution,
-            },
-            RunLocation::Direct => params,
-        };
+        if let Some(result) = self
+            .connector
+            .hosted_run_logs(target, params.clone())
+            .await?
+        {
+            return Ok(result);
+        }
         let transport = self
             .connector
             .connect(target, Some(params.run_id.clone()))
@@ -457,14 +422,25 @@ where
     async fn run_attach(
         &self,
         target: Option<&str>,
-        params: RunAttachParams,
+        mut params: RunAttachParams,
     ) -> Result<Self::Attach, NativeV2CliError> {
+        let target = require_named_target(target)?;
+        let status = self
+            .capsule_status(target, &params.run_id, params.part_id.as_ref())
+            .await?;
+        let logical_run = status.map(|status| {
+            params.run_id = status.part_id.clone();
+            params.part_id = Some(status.part_id);
+            status.run_id
+        });
         let transport = self
             .connector
-            .connect(require_named_target(target)?, Some(params.run_id.clone()))
+            .connect(target, Some(params.run_id.clone()))
             .await?;
         Ok(BoxedSubscription::new(
-            spawn_attach(transport, params).established().await?,
+            spawn_attach(transport, params, logical_run)
+                .established()
+                .await?,
         ))
     }
 
@@ -474,19 +450,12 @@ where
         params: RunForceParams,
     ) -> Result<CliRunForceResult, NativeV2CliError> {
         let target = require_named_target(target)?;
-        match self.run_location(target, &params.run_id).await? {
-            RunLocation::Platform => {
-                return self
-                    .connector
-                    .hosted_run_force(target, params)
-                    .await?
-                    .ok_or_else(|| {
-                        NativeV2CliError::Target(
-                            "hosted target did not provide its force operation".to_owned(),
-                        )
-                    });
-            }
-            RunLocation::Task | RunLocation::Direct => {}
+        if let Some(result) = self
+            .connector
+            .hosted_run_force(target, params.clone())
+            .await?
+        {
+            return Ok(result);
         }
         let transport = self
             .connector
@@ -549,16 +518,36 @@ where
     async fn run_steer(
         &self,
         target: Option<&str>,
-        params: openengine_cluster_protocol::RunSteerParams,
+        mut params: openengine_cluster_protocol::RunSteerParams,
     ) -> Result<openengine_cluster_protocol::RunSteerResult, NativeV2CliError> {
+        let target = require_named_target(target)?;
+        let status = self
+            .capsule_status(target, &params.run_id, params.part_id.as_ref())
+            .await?;
+        if let Some(status) = &status {
+            if status.part_id != status.current_part_id {
+                return Err(super::execution::stale_part(&status.current_part_id));
+            }
+            params.run_id = status.part_id.clone();
+            params.part_id = Some(status.part_id.clone());
+        }
         let transport = self
             .connector
-            .connect_steering(require_named_target(target)?, params.run_id.clone())
+            .connect_steering(target, params.run_id.clone())
             .await?;
-        ClusterClient::new(transport.as_ref())
+        let mut result = ClusterClient::new(transport.as_ref())
             .run_steer(params)
             .await
-            .map_err(protocol_error)
+            .map_err(protocol_error)?;
+        if let Some(status) = status {
+            if result.part_id != status.part_id {
+                return Err(NativeV2CliError::Protocol(
+                    "hosted steer returned a different part".to_owned(),
+                ));
+            }
+            result.run_id = status.run_id;
+        }
+        Ok(result)
     }
 
     async fn run_suspend(
@@ -792,27 +781,21 @@ where
                 .await
                 .map_err(protocol_error)?
         };
-        if result.run_id != run_id {
+        if result.run_id != run_id
+            && self
+                .run_status(Some(target), RunStatusParams::new(run_id))
+                .await?
+                .run_id
+                != result.run_id
+        {
             return Err(NativeV2CliError::Protocol(
                 "workspace discard returned a different run ID".to_owned(),
             ));
         }
-        self.connector.revoke_workspace_recovery(target, &run_id)?;
+        self.connector
+            .revoke_workspace_recovery(target, &result.part_id)?;
         Ok(result)
     }
-}
-
-fn task_is_active(status: &CliRunStatus) -> bool {
-    matches!(
-        status,
-        CliRunStatus::Target(
-            RunStatus::Admitted {} | RunStatus::Running { .. } | RunStatus::Stopping { .. }
-        )
-    )
-}
-
-fn task_cursor(cursor: Option<Cursor>) -> Option<Cursor> {
-    cursor.filter(|cursor| cursor.as_str().starts_with("v2:"))
 }
 
 pub(super) fn spawn_watch<T>(
@@ -831,7 +814,7 @@ where
         {
             Ok((_result, mut stream)) => {
                 let _ = ready.send(());
-                forward(&mut stream, sender).await;
+                forward(&mut stream, sender, |event| Ok(event.into())).await;
             }
             Err(error) => {
                 let _ = sender.send(Err(subscription_error(error))).await;
@@ -861,7 +844,7 @@ where
         {
             Ok((_result, mut stream)) => {
                 let _ = ready.send(());
-                forward(&mut stream, sender).await;
+                forward(&mut stream, sender, Ok).await;
             }
             Err(error) => {
                 let _ = sender.send(Err(subscription_error(error))).await;
@@ -878,6 +861,7 @@ where
 pub(super) fn spawn_attach<T>(
     transport: Arc<T>,
     params: RunAttachParams,
+    logical_run: Option<openengine_cluster_protocol::RunId>,
 ) -> ChannelSubscription<RunAttachEventNotification>
 where
     T: SubscriptionTransport + Send + Sync + 'static,
@@ -886,12 +870,38 @@ where
     let (ready, established) = oneshot::channel();
     let task = tokio::spawn(async move {
         match RunSubscriptionClient::new(transport.as_ref())
-            .run_attach(params)
+            .run_attach(params.clone())
             .await
         {
-            Ok((_result, mut stream)) => {
+            Ok((result, mut stream)) => {
+                if logical_run.is_some()
+                    && (result.part_id != params.run_id || result.execution != params.execution)
+                {
+                    let _ = sender
+                        .send(Err(NativeV2CliError::Protocol(
+                            "unexpected hosted attachment identity".to_owned(),
+                        )))
+                        .await;
+                    return;
+                }
                 let _ = ready.send(());
-                forward(&mut stream, sender).await;
+                forward(
+                    &mut stream,
+                    sender,
+                    move |mut event: RunAttachEventNotification| {
+                        if let Some(run_id) = &logical_run {
+                            if event.part_id != params.run_id || event.execution != params.execution
+                            {
+                                return Err(NativeV2CliError::Protocol(
+                                    "unexpected hosted attachment identity".to_owned(),
+                                ));
+                            }
+                            event.run_id = run_id.clone();
+                        }
+                        Ok(event)
+                    },
+                )
+                .await;
             }
             Err(error) => {
                 let _ = sender.send(Err(subscription_error(error))).await;
@@ -908,25 +918,23 @@ where
 async fn forward<T, E, O>(
     stream: &mut openengine_cluster_client::RunSubscriptionEventStream<'_, T, E>,
     sender: mpsc::Sender<Result<CliSubscriptionItem<O>, NativeV2CliError>>,
+    project: impl Fn(E) -> Result<O, NativeV2CliError>,
 ) where
     T: SubscriptionTransport,
     E: serde::de::DeserializeOwned + Send,
-    O: From<E> + Send,
 {
     while let Some(item) = stream.next().await {
         let item = match item {
-            Ok(RunSubscriptionEvent::Event(event)) => Ok(CliSubscriptionItem::Event(event.into())),
+            Ok(RunSubscriptionEvent::Event(event)) => {
+                project(event).map(CliSubscriptionItem::Event)
+            }
             Ok(RunSubscriptionEvent::Closed { reason, .. }) => {
-                let closed = CliSubscriptionItem::Closed { reason };
-                let _ = sender.send(Ok(closed)).await;
-                return;
+                Ok(CliSubscriptionItem::Closed { reason })
             }
-            Err(error) => {
-                let _ = sender.send(Err(subscription_error(error))).await;
-                return;
-            }
+            Err(error) => Err(subscription_error(error)),
         };
-        if sender.send(item).await.is_err() {
+        let closed = !matches!(&item, Ok(CliSubscriptionItem::Event(_)));
+        if sender.send(item).await.is_err() || closed {
             return;
         }
     }

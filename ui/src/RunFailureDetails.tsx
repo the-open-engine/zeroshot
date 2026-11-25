@@ -21,8 +21,8 @@ export function RunFailureDetails({
       )}
       <p>{entry.message}</p>
       {entry.cursor &&
-        (hasLog(entry.cursor) ? (
-          <button className="text-button" onClick={() => openLog(entry.cursor!)}>
+        (hasLog(entry.runCursor ?? entry.cursor) ? (
+          <button className="text-button" onClick={() => openLog(entry.runCursor ?? entry.cursor!)}>
             View log · {entry.cursor}
           </button>
         ) : (

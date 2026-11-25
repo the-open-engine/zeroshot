@@ -368,7 +368,7 @@ fn unix_controller_sigterm_worktree_resume_restores_files_without_rewinding_the_
         .unwrap();
     success(&output);
     let resumed: Value = serde_json::from_slice(&output.stdout).unwrap();
-    let successor = resumed["runId"].as_str().unwrap();
+    let successor = resumed["currentPartId"].as_str().unwrap();
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let status = run.fixture.json(&["status", successor]);

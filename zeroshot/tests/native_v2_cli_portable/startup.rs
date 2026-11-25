@@ -312,7 +312,7 @@ fn contained_local_policy_reaches_submission_and_resume() {
         .unwrap();
     success(&resumed);
     let receipt: Value = serde_json::from_slice(&resumed.stdout).unwrap();
-    let successor = receipt["runId"].as_str().unwrap();
+    let successor = receipt["currentPartId"].as_str().unwrap();
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let status = fixture.json(&["status", successor]);
@@ -362,9 +362,9 @@ pub(super) fn assert_terminal_restart(fixture: &Fixture, id: &str, worker: u32, 
         .unwrap();
     success(&resumed);
     let receipt: Value = serde_json::from_slice(&resumed.stdout).unwrap();
-    let successor = receipt["runId"].as_str().unwrap();
+    let successor = receipt["currentPartId"].as_str().unwrap();
     assert_ne!(successor, id);
-    assert_eq!(receipt["resumedFrom"], id);
+    assert_eq!(receipt["resumedFromPartId"], id);
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let status = fixture.json(&["status", successor]);
@@ -383,7 +383,7 @@ pub(super) fn assert_terminal_restart(fixture: &Fixture, id: &str, worker: u32, 
         "native worker ran"
     );
     assert_eq!(
-        fixture.json(&["status", id])["status"]["terminalResult"],
+        fixture.json(&["status", id, "--part", id])["status"]["terminalResult"],
         terminal["status"]["terminalResult"]
     );
     assert!(

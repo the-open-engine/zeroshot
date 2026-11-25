@@ -17,7 +17,7 @@ fn foreground_follow_prints_graph_result_and_only_settles_on_the_final_result() 
             let event = |cursor: &str, status: serde_json::Value| {
                 DurableItem::Watch(Box::new(
                     serde_json::from_value(serde_json::json!({
-                        "subscriptionId":"watch-1", "runId":"run-local", "title":"Task",
+                        "subscriptionId":"watch-1", "partId":"run-local","runId":"run-local", "title":"Task",
                         "size":"small", "cursor":cursor, "status":status
                     }))
                     .expect("valid watch event"),
@@ -73,7 +73,7 @@ async fn error_log_read_ends_at_its_deadline_or_ctrl_c() {
         let failure = RunFailure::read(
             &backend,
             Some("cloud"),
-            RunId::new("run-local"),
+            RunStatusParams::new(RunId::new("run-local")),
             detach.as_mut(),
         )
         .await;
@@ -131,7 +131,7 @@ fn foreground_failure_uses_structured_evidence_without_attributing_recorded_erro
 fn foreground_watch_keeps_the_terminal_context_and_ordinary_json_output() {
     let event: crate::native_v2_cli::CliRunWatchEventNotification =
         serde_json::from_value(serde_json::json!({
-            "runId": "run-local",
+            "partId":"run-local","runId": "run-local",
             "title": "Delivery failure",
             "size": "small",
             "subscriptionId": "sub-1",
@@ -172,7 +172,7 @@ fn foreground_watch_keeps_the_terminal_context_and_ordinary_json_output() {
 fn error_log(cursor: &str, level: &str, message: &str) -> RunLogEventNotification {
     serde_json::from_value(serde_json::json!({
         "subscriptionId": "sub-logs",
-        "runId": "run-local",
+        "partId":"run-local","runId": "run-local",
         "cursor": cursor,
         "timestamp": 1_700_000_000_000_u64,
         "record": {
@@ -281,6 +281,12 @@ async fn completed_memory_log_reads_do_not_warn() {
     let backend = FakeBackend::default();
     let detach = std::future::pending();
     tokio::pin!(detach);
-    let logs = RunFailure::read(&backend, None, RunId::new("run-local"), detach.as_mut()).await;
+    let logs = RunFailure::read(
+        &backend,
+        None,
+        RunStatusParams::new(RunId::new("run-local")),
+        detach.as_mut(),
+    )
+    .await;
     assert!(logs.incomplete_memory_notice(true).is_none());
 }

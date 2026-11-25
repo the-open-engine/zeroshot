@@ -54,6 +54,7 @@ impl TargetControllerFactory for TaskFactory {
         request: TargetRunRequest,
     ) -> Result<TargetRunReceipt, TargetAuthorityError> {
         Ok(TargetRunReceipt {
+            current_part_id: request.run_id.clone(),
             run_id: request.run_id,
         })
     }

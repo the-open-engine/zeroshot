@@ -1,6 +1,7 @@
 {
   "createdAt": 1762905600000,
   "node": "approval",
+  "partId": "run-2",
   "request": {
     "artifacts": {
       "report": {
@@ -8,7 +9,7 @@
           "path": "requests/request-1/report/report",
           "scope": {
             "kind": "run",
-            "runId": "run-1"
+            "runId": "run-2"
           }
         },
         "kind": "managed",

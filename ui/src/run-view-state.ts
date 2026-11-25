@@ -34,7 +34,7 @@ function validView(value: RunViewState) {
     typeof value.inspector === 'boolean' &&
     typeof value.following === 'boolean' &&
     typeof value.cursor === 'string' &&
-    /^v2:[0-9]+$/.test(value.cursor) &&
+    /^(?:[0-9a-f-]{36}@)?v2:[0-9]+$/.test(value.cursor) &&
     (value.layout === undefined || ['graph', 'story'].includes(value.layout))
   );
 }
@@ -93,7 +93,14 @@ export function restoredHistoryPosition(
   events: HistoryEvent[],
   complete: boolean
 ) {
-  const restored = cursor === 'v2:0' ? -1 : events.findIndex((event) => event.cursor === cursor);
+  const restored =
+    cursor === 'v2:0'
+      ? -1
+      : events.findIndex(
+          (event) =>
+            event.cursor === cursor ||
+            (event.partId === events[0]?.partId && event.partCursor === cursor)
+        );
   const found = restored >= 0 || cursor === 'v2:0';
   if (!cursor || found || complete) return cursor && found ? restored : events.length - 1;
 }

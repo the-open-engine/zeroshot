@@ -223,6 +223,7 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
                 .await
                 .map_err(TargetAuthorityError::submission)?;
         Ok(RunSubmitResult {
+            current_part_id: receipt.current_part_id,
             run_id: receipt.run_id,
         })
     }

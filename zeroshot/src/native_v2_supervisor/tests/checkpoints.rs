@@ -497,6 +497,7 @@ async fn repeated_group_entry_keeps_one_catalog_point_and_its_original_workspace
     let points = crate::native_v2_supervisor::checkpoints::list(
         &directory,
         RunCheckpointsParams {
+            part_id: None,
             run_id: RunId::new("catalog-test"),
             after: None,
             limit: None,

@@ -521,6 +521,7 @@ async fn assert_direct_continuation_authorization(
     .assert_value();
     let params = RunResumeParams {
         runtime: None,
+        part_id: fixture.run_id.clone(),
         run_id: fixture.run_id.clone(),
         successor_run_id: successor_run_id.clone(),
         connections: BTreeMap::from([(fixture.key.clone(), untrusted_values)]),
@@ -542,34 +543,7 @@ async fn assert_direct_continuation_authorization(
     );
     assert_recovery_unavailable(&fixture, &successor_run_id);
 
-    let resolver_successor = RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c993");
-    let resolver_params = RunResumeParams {
-        runtime: None,
-        run_id: fixture.run_id.clone(),
-        successor_run_id: resolver_successor.clone(),
-        connections: BTreeMap::new(),
-        connection_resolver: Some(openengine_cluster_protocol::TargetConnectionResolver {
-            endpoint: "https://resolver.example".to_owned(),
-            bearer_token: "resolver-token".to_owned(),
-            keys: vec![fixture.key.clone()],
-            source_connection: None,
-        }),
-        github_token: None,
-        git_credentials: None,
-        commit_identity: None,
-        commit_co_author: None,
-        from,
-    };
-    assert!(
-        fixture
-            .connector
-            .prepare_workspace_recovery_resume("vm", &resolver_params)
-            .await
-            .assert_error()
-            .to_string()
-            .contains("do not match the original run")
-    );
-    assert_recovery_unavailable(&fixture, &resolver_successor);
+    assert_direct_recovery_rejects_resolver(&fixture, from).await;
 
     let trusted_values = openengine_cluster_protocol::StaticConnectionValues::new(BTreeMap::from(
         [(fixture.field.clone(), "fresh".to_owned())],
@@ -610,6 +584,41 @@ async fn assert_direct_continuation_authorization(
     assert_recovery_unavailable(&fixture, &successor_run_id);
 }
 
+async fn assert_direct_recovery_rejects_resolver(
+    fixture: &DirectRecoveryFixture,
+    from: Option<openengine_cluster_protocol::RunResumeFrom>,
+) {
+    let resolver_successor = RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c993");
+    let resolver_params = RunResumeParams {
+        runtime: None,
+        part_id: fixture.run_id.clone(),
+        run_id: fixture.run_id.clone(),
+        successor_run_id: resolver_successor.clone(),
+        connections: BTreeMap::new(),
+        connection_resolver: Some(openengine_cluster_protocol::TargetConnectionResolver {
+            endpoint: "https://resolver.example".to_owned(),
+            bearer_token: "resolver-token".to_owned(),
+            keys: vec![fixture.key.clone()],
+            source_connection: None,
+        }),
+        github_token: None,
+        git_credentials: None,
+        commit_identity: None,
+        commit_co_author: None,
+        from,
+    };
+    assert!(
+        fixture
+            .connector
+            .prepare_workspace_recovery_resume("vm", &resolver_params)
+            .await
+            .assert_error()
+            .to_string()
+            .contains("do not match the original run")
+    );
+    assert_recovery_unavailable(fixture, &resolver_successor);
+}
+
 fn assert_recovery_unavailable(fixture: &DirectRecoveryFixture, run_id: &RunId) {
     assert!(matches!(
         fixture
@@ -638,6 +647,7 @@ async fn named_target_recovery_and_checkpoints_require_advertisement_before_dial
                 Some("prod"),
                 RunResumeParams {
                     runtime: None,
+                    part_id: source_run_id.clone(),
                     run_id: source_run_id.clone(),
                     successor_run_id: RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c992"),
                     connections: BTreeMap::new(),
@@ -656,6 +666,7 @@ async fn named_target_recovery_and_checkpoints_require_advertisement_before_dial
             .run_discard_workspace(
                 Some("prod"),
                 RunDiscardWorkspaceParams {
+                    part_id: None,
                     run_id: source_run_id.clone(),
                 },
             )
@@ -672,6 +683,7 @@ async fn named_target_recovery_and_checkpoints_require_advertisement_before_dial
         .run_checkpoints(
             Some("prod"),
             RunCheckpointsParams {
+                part_id: None,
                 run_id: source_run_id,
                 after: None,
                 limit: None,
@@ -702,12 +714,7 @@ async fn suspension_and_both_vector_reads_require_markers_before_dialing() {
     ));
     let run_id = run_request().run_id;
     let error = backend
-        .run_suspend(
-            Some("prod"),
-            RunStatusParams {
-                run_id: run_id.clone(),
-            },
-        )
+        .run_suspend(Some("prod"), RunStatusParams::new(run_id.clone()))
         .await
         .assert_error();
     assert!(error.to_string().contains("openengine.run-suspension/v1"));
@@ -716,6 +723,7 @@ async fn suspension_and_both_vector_reads_require_markers_before_dialing() {
             .run_vectors(
                 Some("prod"),
                 RunVectorsParams {
+                    part_id: None,
                     run_id: run_id.clone(),
                     after: None,
                     limit: None,
@@ -727,6 +735,7 @@ async fn suspension_and_both_vector_reads_require_markers_before_dialing() {
             .run_vector(
                 Some("prod"),
                 RunVectorParams {
+                    part_id: None,
                     run_id,
                     id: VectorId::new("entry").assert_value(),
                 },
@@ -1121,7 +1130,7 @@ async fn direct_websocket_inventory_above_default_wire_limits_keeps_pending_call
         }
         requests.sort_by_key(|request| request["method"].as_str().assert_value().to_owned());
         let status = json!({
-            "runId":"run-1","title":"Approval",
+            "runId":"run-1","partId":"run-1","currentPartId":"run-1","title":"Approval",
             "source":{"repository":"open-engine/zeroshot","branch":"main",
                 "revision":"0123456789abcdef0123456789abcdef01234567"},
             "size":"small","atCursor":"v2:1","status":{"phase":"admitted"}
@@ -1131,7 +1140,10 @@ async fn direct_websocket_inventory_above_default_wire_limits_keeps_pending_call
                 let runs: Vec<_> = (0..96)
                     .map(|index| {
                         let mut row = status.clone();
-                        row["runId"] = json!(format!("run-{index}"));
+                        let id = format!("run-{index}");
+                        row["runId"] = json!(id);
+                        row["partId"] = json!(id);
+                        row["currentPartId"] = json!(id);
                         row["status"] = json!({"phase":"suspended","reason":"request",
                             "node":"approval","createdAt":1000,"metadata":{},
                             "request":{"id":format!("question-{index}"),"text":"x".repeat(750_000),
@@ -1162,9 +1174,7 @@ async fn direct_websocket_inventory_above_default_wire_limits_keeps_pending_call
     let (listed, status) = tokio::time::timeout(std::time::Duration::from_secs(60), async {
         tokio::join!(
             client.run_list(RunListParams::default()),
-            client.run_status(RunStatusParams {
-                run_id: RunId::new("run-1")
-            })
+            client.run_status(RunStatusParams::new(RunId::new("run-1")))
         )
     })
     .await
@@ -1343,18 +1353,14 @@ async fn suspend_and_both_vector_reads_reach_the_direct_runs_oecp_session() {
     ));
     let run_id = RunId::new("run-suspended");
     backend
-        .run_suspend(
-            Some("vm"),
-            RunSuspendParams {
-                run_id: run_id.clone(),
-            },
-        )
+        .run_suspend(Some("vm"), RunSuspendParams::new(run_id.clone()))
         .await
         .assert_error();
     backend
         .run_vectors(
             Some("vm"),
             RunVectorsParams {
+                part_id: None,
                 run_id: run_id.clone(),
                 after: None,
                 limit: Some(2),
@@ -1366,6 +1372,7 @@ async fn suspend_and_both_vector_reads_reach_the_direct_runs_oecp_session() {
         .run_vector(
             Some("vm"),
             RunVectorParams {
+                part_id: None,
                 run_id: run_id.clone(),
                 id: VectorId::new("entry").assert_value(),
             },
@@ -1429,9 +1436,7 @@ async fn inbox_reads_use_a_direct_targets_oecp_session() {
     backend
         .inbox_show(
             Some("vm"),
-            openengine_cluster_protocol::RunStatusParams {
-                run_id: RunId::new("question"),
-            },
+            openengine_cluster_protocol::RunStatusParams::new(RunId::new("question")),
         )
         .await
         .assert_error();

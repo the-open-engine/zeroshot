@@ -82,6 +82,9 @@ pub struct RunCheckpoint {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunCheckpointsParams {
     pub run_id: RunId,
+    /// Select one physical part of this run. Omission addresses the logical run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part_id: Option<RunId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub after: Option<CheckpointId>,
     #[serde(
@@ -110,6 +113,8 @@ impl RunCheckpointsParams {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunCheckpointsResult {
     pub run_id: RunId,
+    /// Part that owns this record.
+    pub part_id: RunId,
     /// Local controller availability, separate from retained checkpoint history.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub controller: Option<crate::ControllerObservation>,

@@ -19,6 +19,7 @@ fn suspension() -> RunSuspension {
 fn resume(from: Option<RunResumeFrom>) -> openengine_cluster_protocol::RunResumeParams {
     openengine_cluster_protocol::RunResumeParams {
         runtime: None,
+        part_id: RunId::new("0199f33f-3b44-7d21-9000-000000000001"),
         run_id: RunId::new("0199f33f-3b44-7d21-9000-000000000001"),
         successor_run_id: RunId::new("0199f33f-3b44-7d21-9000-000000000002"),
         from,
@@ -238,26 +239,19 @@ async fn force_stopped_suspension_explains_why_resume_is_unavailable() {
         .await
         .assert_value();
     let before = backend
-        .status_local(RunStatusParams {
-            run_id: run.clone(),
-        })
+        .status_local(RunStatusParams::new(run.clone()))
         .await
         .assert_value();
     assert!(!before.workspace_recovery.recoverable);
     let error = backend
-        .run_resume_status(
-            None,
-            RunStatusParams {
-                run_id: run.clone(),
-            },
-        )
+        .run_resume_status(None, RunStatusParams::new(run.clone()))
         .await
         .assert_error()
         .to_string();
     assert!(error.contains("suspension was force-stopped"), "{error}");
     assert_eq!(
         backend
-            .status_local(RunStatusParams { run_id: run })
+            .status_local(RunStatusParams::new(run))
             .await
             .assert_value(),
         before
@@ -376,12 +370,7 @@ pub(in crate::native_v2_cli::local) async fn assert_local_inbox_reads_do_not_con
         );
         assert!(page.next_after.is_none());
         let show = backend
-            .inbox_show(
-                None,
-                RunStatusParams {
-                    run_id: run.clone(),
-                },
-            )
+            .inbox_show(None, RunStatusParams::new(run.clone()))
             .await
             .assert_value();
         assert_eq!(show.state, page.requests[0].state);
@@ -418,6 +407,7 @@ pub(in crate::native_v2_cli::local) async fn assert_local_inbox_reads_do_not_con
             .run_vectors(
                 None,
                 RunVectorsParams {
+                    part_id: None,
                     run_id: run.clone(),
                     after: None,
                     limit: None,
@@ -430,6 +420,7 @@ pub(in crate::native_v2_cli::local) async fn assert_local_inbox_reads_do_not_con
             .run_vector(
                 None,
                 RunVectorParams {
+                    part_id: None,
                     run_id: run.clone(),
                     id: VectorId::new("question").assert_value(),
                 },
@@ -441,6 +432,7 @@ pub(in crate::native_v2_cli::local) async fn assert_local_inbox_reads_do_not_con
             .run_vector(
                 None,
                 RunVectorParams {
+                    part_id: None,
                     run_id: run.clone(),
                     id: VectorId::new("absent").assert_value(),
                 },

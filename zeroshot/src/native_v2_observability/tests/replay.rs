@@ -79,6 +79,7 @@ async fn assert_resumed_streams(ledger: Arc<dyn RunLedger>, run_id: RunId, log_c
     let after = cursor_for(skipped as u64 + 2);
     let (_, mut logs) = service
         .logs(RunLogsParams {
+            part_id: None,
             run_id: run_id.clone(),
             from_cursor: Some(after.clone()),
             execution: None,
@@ -101,6 +102,7 @@ async fn assert_resumed_streams(ledger: Arc<dyn RunLedger>, run_id: RunId, log_c
     assert_eq!(index, log_count);
     let (_, mut watch) = service
         .watch(RunWatchParams {
+            part_id: None,
             run_id,
             from_cursor: Some(after),
         })
@@ -147,6 +149,7 @@ async fn read_available_drains_the_buffered_page_before_loading_another() {
     let service = NativeV2Observability::new(ledger);
     let (_, mut logs) = service
         .logs(RunLogsParams {
+            part_id: None,
             run_id,
             from_cursor: None,
             execution: None,

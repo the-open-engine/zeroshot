@@ -315,13 +315,14 @@ impl SlowRestore {
         let receipt: Value =
             serde_json::from_slice(&output.stdout).assert_value_with("resume receipt JSON");
         assert_eq!(
-            receipt.assert_key("resumedFrom"),
+            receipt.assert_key("resumedFromPartId"),
             self.failed_run_id.as_str()
         );
+        assert_eq!(receipt.assert_key("runId"), self.failed_run_id.as_str());
         receipt
-            .assert_key("runId")
+            .assert_key("currentPartId")
             .as_str()
-            .assert_value_with("successor run identity")
+            .assert_value_with("successor part identity")
             .to_owned()
     }
 

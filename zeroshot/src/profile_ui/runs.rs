@@ -1,6 +1,9 @@
 //! Read-only history services. The HTTP adapter only selects a retained run and a replay cursor;
 //! immutable definitions and events come from the same native ledger used by the CLI.
 use std::convert::Infallible;
+
+mod lineage;
+pub(super) use lineage::{events, history, list, show};
 use std::path::{Path as FilePath, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -245,15 +248,22 @@ impl NativeRunHistory {
     }
 
     async fn list(&self, after: Option<RunId>) -> Result<Value, ApiError> {
-        let list = match &self.0 {
+        serde_json::to_value(self.physical_list(after).await?).map_err(|_| unavailable())
+    }
+
+    async fn physical_list(&self, after: Option<RunId>) -> Result<RunHistoryList, ApiError> {
+        match &self.0 {
             NativeRunHistorySource::Local(local) => local.list(after).await,
             NativeRunHistorySource::Remote(remote) => remote.list(after.as_ref()).await,
-        }?;
-        serde_json::to_value(list).map_err(|_| unavailable())
+        }
     }
 
     async fn detail(&self, id: &RunId) -> Result<Value, ApiError> {
-        let definition = match &self.0 {
+        serde_json::to_value(self.physical_detail(id).await?).map_err(|_| unavailable())
+    }
+
+    async fn physical_detail(&self, id: &RunId) -> Result<RunDefinition, ApiError> {
+        match &self.0 {
             NativeRunHistorySource::Local(local) => local
                 .service(id)
                 .await?
@@ -261,12 +271,19 @@ impl NativeRunHistory {
                 .await
                 .map_err(Into::into),
             NativeRunHistorySource::Remote(remote) => remote.detail(id).await,
-        }?;
-        serde_json::to_value(definition).map_err(|_| unavailable())
+        }
     }
 
     async fn page(&self, id: &RunId, after: Option<Cursor>) -> Result<Value, ApiError> {
-        let page = match &self.0 {
+        serde_json::to_value(self.physical_page(id, after).await?).map_err(|_| unavailable())
+    }
+
+    async fn physical_page(
+        &self,
+        id: &RunId,
+        after: Option<Cursor>,
+    ) -> Result<HistoryPage, ApiError> {
+        match &self.0 {
             NativeRunHistorySource::Local(local) => local
                 .service(id)
                 .await?
@@ -274,8 +291,7 @@ impl NativeRunHistory {
                 .await
                 .map_err(Into::into),
             NativeRunHistorySource::Remote(remote) => remote.page(id, after).await,
-        }?;
-        serde_json::to_value(page).map_err(|_| unavailable())
+        }
     }
 
     async fn subscribe(
@@ -642,7 +658,7 @@ pub(super) struct PageQuery {
     after: Option<String>,
 }
 
-pub(super) async fn list(
+pub(super) async fn archive_list(
     State(state): State<UiState>,
     query: Result<Query<PageQuery>, axum::extract::rejection::QueryRejection>,
 ) -> Result<Json<Value>, ApiError> {
@@ -651,14 +667,14 @@ pub(super) async fn list(
     state.runs.list(after).await.map(Json)
 }
 
-pub(super) async fn show(
+pub(super) async fn archive_show(
     State(state): State<UiState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     state.runs.detail(&parse_id(id)?).await.map(Json)
 }
 
-pub(super) async fn history(
+pub(super) async fn archive_history(
     State(state): State<UiState>,
     Path(id): Path<String>,
     query: Result<Query<PageQuery>, axum::extract::rejection::QueryRejection>,
@@ -668,52 +684,33 @@ pub(super) async fn history(
     state.runs.page(&parse_id(id)?, after).await.map(Json)
 }
 
-pub(super) async fn events(
-    State(state): State<UiState>,
-    Path(id): Path<String>,
-    query: Result<Query<PageQuery>, axum::extract::rejection::QueryRejection>,
-    headers: HeaderMap,
-) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
-    let query = query.map_err(|_| invalid_cursor())?.0;
-    let after = resume_cursor(query, &headers)?;
-    let stop = state.shutdown.clone();
-    let stream = state
-        .runs
-        .subscribe(parse_id(id)?, after)
-        .await?
-        .take_until(async move { stop.cancelled().await });
-    Ok(Sse::new(stream.map(|page| {
-        Ok(match page {
-            Ok(page) => Event::default()
-                .event("history")
-                .id(page.next_cursor.as_str())
-                .data(json!(page).to_string()),
-            Err(error) => Event::default()
-                .event("history_error")
-                .data(json!({"code":error.code,"message":error.message}).to_string()),
-        })
-    }))
-    .keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
+fn history_event(cursor: &Cursor, body: &impl serde::Serialize) -> Event {
+    Event::default()
+        .event("history")
+        .id(cursor.as_str())
+        .data(json!(body).to_string())
 }
 
-fn resume_cursor(query: PageQuery, headers: &HeaderMap) -> Result<Option<Cursor>, ApiError> {
+fn history_error_event(error: ApiError) -> Event {
+    Event::default()
+        .event("history_error")
+        .data(json!({"code":error.code,"message":error.message}).to_string())
+}
+
+fn cursor_header_or_query(
+    query: Option<String>,
+    headers: &HeaderMap,
+) -> Result<Option<String>, ApiError> {
     let mut values = headers.get_all("last-event-id").iter();
-    let after = match values.next() {
+    Ok(match values.next() {
         Some(value) => {
             if values.next().is_some() {
                 return Err(invalid_cursor());
             }
             Some(value.to_str().map_err(|_| invalid_cursor())?.to_owned())
         }
-        None => query.after,
-    };
-    after
-        .map(|value| {
-            let cursor = Cursor::new(value);
-            cursor_sequence(&cursor).map_err(ledger_error)?;
-            Ok(cursor)
-        })
-        .transpose()
+        None => query,
+    })
 }
 
 fn parse_id(value: String) -> Result<RunId, ApiError> {
