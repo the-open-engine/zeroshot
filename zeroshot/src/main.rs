@@ -46,7 +46,7 @@ enum ProcessError {
 
 fn run(runtime: &tokio::runtime::Runtime) -> Result<(), ProcessError> {
     let arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
-    if run_private_controller(runtime, &arguments)? {
+    if runtime.block_on(Box::pin(run_private_controller(&arguments)))? {
         return Ok(());
     }
     runtime.block_on(dispatch(parse_native_v2_args(arguments)?))
@@ -75,10 +75,7 @@ fn dispatch(
     }
 }
 
-fn run_private_controller(
-    runtime: &tokio::runtime::Runtime,
-    arguments: &[std::ffi::OsString],
-) -> Result<bool, ProcessError> {
+async fn run_private_controller(arguments: &[std::ffi::OsString]) -> Result<bool, ProcessError> {
     let Some(bootstrap) = private_controller_bootstrap(arguments)? else {
         return Ok(false);
     };
@@ -86,7 +83,7 @@ fn run_private_controller(
         record_unloaded_startup_failure(&bootstrap, &error);
         return Err(error.into());
     }
-    runtime.block_on(run_controller_process(&bootstrap))?;
+    run_controller_process(&bootstrap).await?;
     Ok(true)
 }
 
