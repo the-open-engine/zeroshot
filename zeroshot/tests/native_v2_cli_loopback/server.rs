@@ -86,30 +86,38 @@ impl LoopbackHost {
                 let hosted_origin = hosted_origin.clone();
                 tokio::spawn(async move {
                     let path = peek_path(&stream).await.assert_value();
-                    if is_hosted_auth_path(&path) {
-                        serve_hosted_auth(stream, &hosted_origin)
-                            .await
-                            .assert_value();
-                    } else if path.starts_with("/native-v2/runs") {
-                        if let Err(error) = serve_hosted_run(stream, authority, hosted_runs).await {
-                            assert!(
-                                matches!(
-                                    error.kind(),
-                                    io::ErrorKind::BrokenPipe
-                                        | io::ErrorKind::ConnectionReset
-                                        | io::ErrorKind::UnexpectedEof
-                                ),
-                                "hosted run route failed: {error}"
-                            );
+                    let endpoint = path.split('?').next().unwrap_or(&path);
+                    let observing = endpoint == "/native-v2/oecp"
+                        || endpoint.ends_with("/watch")
+                        || endpoint.ends_with("/logs");
+                    let serve = async {
+                        if is_hosted_auth_path(&path) {
+                            serve_hosted_auth(stream, &hosted_origin)
+                                .await
+                                .assert_value();
+                        } else if path.starts_with("/native-v2/runs") {
+                            if let Err(error) =
+                                serve_hosted_run(stream, authority, hosted_runs).await
+                            {
+                                assert!(
+                                    matches!(
+                                        error.kind(),
+                                        io::ErrorKind::BrokenPipe
+                                            | io::ErrorKind::ConnectionReset
+                                            | io::ErrorKind::UnexpectedEof
+                                    ),
+                                    "hosted run route failed: {error}"
+                                );
+                            }
+                        } else {
+                            native.serve_connection(stream).await.assert_value();
                         }
-                    } else if drop_observation && path == "/native-v2/oecp" {
-                        // Repeatedly drop an established transport while the target run stays live.
-                        tokio::select! {
-                            result = native.serve_connection(stream) => { result.assert_value(); }
-                            () = tokio::time::sleep(Duration::from_millis(250)) => {}
-                        }
+                    };
+                    if drop_observation && observing {
+                        // Cut the live HTTP or WebSocket stream without stopping the run.
+                        let _ = tokio::time::timeout(Duration::from_millis(250), serve).await;
                     } else {
-                        native.serve_connection(stream).await.assert_value();
+                        serve.await;
                     }
                 });
             }
