@@ -2671,7 +2671,7 @@ handle has the same <code>id</code> and a new <code>current_part_id</code>.</p>
 entry with <code>await run.vector(id)</code>. Both use the client's selected target.</p>
 <p><code>await run.discard_workspace()</code> returns whether retained data was deleted. For a finished local
 run it frees the recovery lineage's checkpoints, including those of failed runs, while keeping
-the checkout, ledger, logs and delivery recovery state. Plain resume still uses the current
+the checkout, ledger, logs and delivery recovery state. <code>await run.resume()</code> still uses the current
 checkout; checkpoint restore is no longer available. Named targets keep their existing retained
 workspace discard behavior.</p>
 <h2 id="answer-a-human-request">Answer a human request<a class="headerlink" href="#answer-a-human-request" title="Permanent link">&para;</a></h2>

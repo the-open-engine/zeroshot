@@ -2901,9 +2901,19 @@ atomically without overwriting a competing file. It waits for the entire HTTP tr
 its framing, even after a complete tar has arrived. Transfer failures and Ctrl-C remove temporary
 output and fail the command. The archive is never extracted and its contents are never executed.</p>
 <h2 id="restart-or-resume-a-failed-run">Restart or resume a failed run<a class="headerlink" href="#restart-or-resume-a-failed-run" title="Permanent link">&para;</a></h2>
-<p>Failed local runs and direct targets retain their workspace. Restart a failed run where it started
-with:</p>
+<p>Failed local runs and direct targets retain their workspace. By default, the CLI selects the newest
+entry checkpoint and shows its ID:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="go">zeroshot resume RUN_ID</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="gp"># </span>For<span class="w"> </span>a<span class="w"> </span><span class="nb">local</span><span class="w"> </span>run,<span class="w"> </span>consent<span class="w"> </span>to<span class="w"> </span>replacing<span class="w"> </span>the<span class="w"> </span>checkout:
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="go">zeroshot resume RUN_ID --discard-workspace-changes</span>
+</code></pre></div>
+<p>The checkpoint restores its completed prerequisites. Its selected node can run again, even if that
+node completed before the failure. For example, a three-round review loop that reaches a terminal
+directly after round 3 can still have its last entry checkpoint before review 3. Resuming from that
+entry repeats review 3 while retaining rounds 1 and 2. If there is no entry checkpoint, the CLI
+explains that and shows the explicit restart command.</p>
+<p>To restart where the failed run began, use:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="go">zeroshot resume RUN_ID --restart</span>
 </code></pre></div>
 <p>Pass <code>--runtime-config FILE</code> or <code>--uniform-runtime-config FILE</code> to replace the successor's runtime
 settings, including models, effort, harness configuration, connections and harness/provider selection.
@@ -2912,7 +2922,7 @@ and execution environment before restoring files or starting agents; the graph, 
 delivery lineage and selected checkpoint's completed prerequisites stay the same. Credentials are
 resolved freshly. Native conversation restoration continues an existing conversation when supported,
 including after a model change, with the existing fresh-session fallback when restoration fails.</p>
-<p>A run you submitted restarts at the root of its graph. A successor restarts at the point it began
+<p>With <code>--restart</code>, a run you submitted restarts at the root of its graph. A successor restarts at the point it began
 at: after the answer for the successor of an answered request, after the held node for the
 successor of a suspended run, and at the selected node for a checkpoint successor. An answered
 request therefore stays answered, also when several successors fail in a row. To run the whole
@@ -2923,13 +2933,13 @@ context. Resume after provider usage becomes available; Zeroshot does not wait o
 automatically. A clock hint without a date or timezone stays as supplied. Codex's message-only
 usage-limit errors retain their existing crash retries; see the
 <a href="../../reference/cluster/graph/#graph-contract">native failure signals</a>.</p>
-<p>A local restart uses your checkout as it is now. You can fix files after a failure and resume:
+<p>A local <code>--restart</code> uses your checkout as it is now. You can fix files after a failure and restart:
 commits, staged and unstaged edits, untracked and ignored files, the current branch, and the index
 are kept. Agents then change the checkout as in any run. Named targets restart on the latest
 snapshot of their own retained workspace.</p>
-<p>To resume at an earlier node, list its available input checkpoints and select one:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="go">zeroshot checkpoints RUN_ID</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="go">zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID --discard-workspace-changes</span>
+<p>To select a specific entry instead of the newest one, list the available input checkpoints:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="go">zeroshot checkpoints RUN_ID</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="go">zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID --discard-workspace-changes</span>
 </code></pre></div>
 <p>Restoring a local checkpoint rolls back your checkout, so it requires <code>--discard-workspace-changes</code>.
 The checkpoint replaces tracked, staged, untracked, and ignored files and the index. Without the
@@ -2937,7 +2947,8 @@ flag the resume fails before it changes anything and shows the command to opt in
 attached to its branch at the current tip while files and the index return to the checkpoint.
 Branches, tags, commits, Git configuration, and other worktrees are kept.</p>
 <p>For a named target, add <code>--target NAME</code> to both commands and omit <code>--discard-workspace-changes</code>:
-the target restores its own retained copy, never your checkout. Checkpoint listings are paginated;
+the target restores its own retained copy, never your checkout. Plain resume on a named target
+also selects its newest entry checkpoint. Checkpoint listings are paginated;
 use <code>--after CHECKPOINT_ID</code> with the returned <code>nextAfter</code> value to fetch the next page.</p>
 <p>A selected checkpoint restores the files from immediately before its node and the completed
 prerequisite outputs. The selected node runs again. Parallel and mapped groups have one checkpoint
@@ -2952,6 +2963,8 @@ delivery lineage. A selected checkpoint or the continuation of a suspended run r
 or without restoring workspace files. Restarting such a successor restores the same conversations
 again, without the turns it added before it failed. A restarted run you submitted and every
 <code>execution</code>-scoped agent start new conversations. Each part records its own token usage. Run totals include every part that performed work.</p>
+<p>The Python SDK’s <code>Run.resume()</code> keeps its existing behavior: failed runs restart where they began;
+suspended runs continue at their held boundary.</p>
 <p>Checkpoints hold raw provider transcripts and conversation files, up to 1 GiB per conversation.
 They are kept and deleted with their checkpoint, deduplicated across its lineage, and never included
 in workspace exports. Restoring replaces only that conversation's provider files, including later
@@ -2971,13 +2984,14 @@ Replacing the workspace files, once started, is allowed to finish. If it is stil
 after the deadline, the resume is stopped with an error that names the deadline. Either way the run
 stays recoverable.</p>
 <p>A restore never changes the checkout before the complete snapshot is extracted. If a crash
-interrupts it while it replaces files, the checkout can stay partially restored. A plain
-<code>zeroshot resume</code> is then refused until a restore completes, so no agent runs on a partial
+interrupts it while it replaces files, the checkout can stay partially restored. A local
+resume without restore consent is then refused until a restore completes, so no agent runs on a partial
 checkout. Repeat the interrupted command, or select another checkpoint with
 <code>--discard-workspace-changes</code>. That resume removes the interrupted staging copy beside the
 workspace and finishes the restore before any agent runs. Earlier releases also restored the latest
 snapshot on a plain resume; complete such an interrupted restore with
-<code>zeroshot resume RUN_ID --discard-workspace-changes</code>, which installs the same snapshot again.</p>
+<code>zeroshot resume RUN_ID --restart --discard-workspace-changes</code>, which installs the same pinned
+snapshot again.</p>
 <p>Local and Docker targets deduplicate checkpoints in a private Restic repository beside their run
 storage and advertise <code>openengine.workspace-checkpoints/v1</code>. Run logs mark the start and completion
 of each new workspace capture; reusing an unchanged snapshot adds no capture messages. Restic
@@ -2993,7 +3007,7 @@ so neither the original run nor its successors list checkpoints that can no long
 Local checkpoints never expire automatically. To free the space kept by a finished failed local
 run, use <code>zeroshot discard-workspace RUN_ID</code>. It deletes checkpoint data and lists for the whole
 recovery lineage while keeping the checkout, run directory, ledger, logs and delivery recovery
-state. A second call reports <code>discarded: false</code>. Plain resume still uses the current checkout,
+state. A second call reports <code>discarded: false</code>. <code>zeroshot resume RUN_ID --restart</code> uses the current checkout,
 with workspace checkpoints disabled; checkpoint selection and <code>--discard-workspace-changes</code>
 are refused. A running or resuming lineage must be force-stopped first. An uncontinued suspension
 must also be force-stopped, and an interrupted restore must be completed by repeating its resume.
@@ -3005,7 +3019,7 @@ export <code>GH_TOKEN</code> again and pass <code>--forward-gh-token</code> when
 instead of the target's stored <code>github</code> connection.</p>
 <h2 id="stop-only-with-explicit-intent">Stop only with explicit intent<a class="headerlink" href="#stop-only-with-explicit-intent" title="Permanent link">&para;</a></h2>
 <p><code>force-stop</code> is the destructive run-lifetime command:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="go">zeroshot force-stop RUN_ID</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="go">zeroshot force-stop RUN_ID</span>
 </code></pre></div>
 <p>The command asks the controller to stop active work and writes the resulting status as JSON. Read
 status first if another operator may already have stopped the run, or if it may have completed.</p>
@@ -3039,9 +3053,9 @@ target. Hosts advertise suspension with <code>openengine.run-suspension/v1</code
 <p>Every run has an ordered, durable vector record. All resume successors inherit their predecessor's
 entries unchanged. Suspension writes <code>suspend_request</code>, <code>suspension</code>, then the successor's
 <code>continuation</code>; wait nodes also write <code>wait</code> with their due time.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="go">zeroshot vectors RUN_ID --limit 50</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="go">zeroshot vectors RUN_ID --after ENTRY_ID --limit 100</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="go">zeroshot vectors show RUN_ID ENTRY_ID</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="go">zeroshot vectors RUN_ID --limit 50</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="go">zeroshot vectors RUN_ID --after ENTRY_ID --limit 100</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="go">zeroshot vectors show RUN_ID ENTRY_ID</span>
 </code></pre></div>
 <p>A page contains <code>runId</code>, <code>vectors</code> and an optional <code>nextAfter</code> cursor. Limits are 1 through 100.
 <code>show</code> reads the complete entry; unknown IDs fail as not found. Both commands are read-only and
@@ -3063,10 +3077,10 @@ In the live run view, the same URL follows the answer into the next part. Replay
 selected moment. A second question appears in order after the first answer. Earlier work keeps
 its original logs and usage, and a checkpoint retry marks where the graph started again.</p>
 <h2 id="steer-a-run">Steer a run<a class="headerlink" href="#steer-a-run" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="go">zeroshot steer RUN_ID "Prioritize the parser regression."</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="go">zeroshot steer RUN_ID --node e2e_tester "Use the E2E service on port 3000."</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="go">zeroshot steer RUN_ID --text-file direction.txt --target NAME</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="go">printf '%s' 'Check the Windows path too.' | zeroshot steer RUN_ID --text-stdin</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="go">zeroshot steer RUN_ID "Prioritize the parser regression."</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="go">zeroshot steer RUN_ID --node e2e_tester "Use the E2E service on port 3000."</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="go">zeroshot steer RUN_ID --text-file direction.txt --target NAME</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="go">printf '%s' 'Check the Windows path too.' | zeroshot steer RUN_ID --text-stdin</span>
 </code></pre></div>
 <p>Supply exactly one text source. An admitted, running or suspended run accepts direction.
 Use the original run ID to steer the current part, including after a resume or answer. Steering
@@ -3107,17 +3121,17 @@ the message, OpenCode storing it, Codex returning hook context, or Hermes confir
 notice. Receipts track delivery.
 The bounded listing reports omitted directions or older execution references. Read the complete
 record and full text with:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="go">zeroshot vectors RUN_ID</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="go">zeroshot vectors show RUN_ID STEER_ID</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="go">zeroshot vectors RUN_ID</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="go">zeroshot vectors show RUN_ID STEER_ID</span>
 </code></pre></div>
 <p>The record includes <code>steer</code> and <code>steer_receipt</code> entries in event order. Add <code>--target NAME</code> to these
 commands for a direct target advertising steering and run vectors.</p>
 <h3 id="send-a-peer-message">Send a peer message<a class="headerlink" href="#send-a-peer-message" title="Permanent link">&para;</a></h3>
 <p>A graph can declare <a href="../../reference/cluster/graph/#peer-networks">networks</a> for selected agents.
 An authorized publisher sends a message from its own running local execution:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="go">zeroshot steer "$ZEROSHOT_RUN_ID" --network review "The parser fix is ready for review."</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="go">zeroshot steer "$ZEROSHOT_RUN_ID" --network review --network implementers --mode standing \</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="go">  "Keep the Windows path in scope."</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="go">zeroshot steer "$ZEROSHOT_RUN_ID" --network review "The parser fix is ready for review."</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="go">zeroshot steer "$ZEROSHOT_RUN_ID" --network review --network implementers --mode standing \</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="go">  "Keep the Windows path in scope."</span>
 </code></pre></div>
 <p>Repeat <code>--network</code> to address several networks. The command accepts the same text, file and stdin
 sources as human steering. Each recipient receives the message once even when it belongs to

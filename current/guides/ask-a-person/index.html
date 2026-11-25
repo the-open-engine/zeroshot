@@ -2605,7 +2605,7 @@ are refused as <code>invalid_request</code>, naming the path, without consuming 
 question you inspected, pass its <code>partId</code> to <code>zeroshot answer RUN_ID --part PART_ID --input answer.json</code>.
 If the run has advanced, the command reports the stale part. While a question is pending,
 <code>resume</code> directs you to <code>answer</code> even if you selected a checkpoint.</p>
-<p>If the next part fails or is lost, <code>zeroshot resume RUN_ID</code> restarts right after the answer.
+<p>If the next part fails or is lost, <code>zeroshot resume RUN_ID --restart</code> restarts right after the answer.
 The request stays answered, and <code>node_instance</code> agents continue their conversations from when
 the question was asked. A part lost before its starting point was recorded restarts at the root
 with new conversations and asks again.</p>

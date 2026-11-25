@@ -2338,8 +2338,8 @@ sets and discardable checkpoint lineages at least 60 days after their latest ter
 protected. Cleanup reuses resume/discard locks and reports <code>publications</code> and <code>checkpointLineages</code>
 removed; repeating it reports zero. Library files, live local outputs, logs and ledgers are outside
 its selection. Physical bytes are released only when their final retained reference is gone.
-Discarding a failed local run's checkpoints still allows plain resume in its current checkout;
-restoring a discarded snapshot is unavailable.</p>
+Discarding a failed local run's checkpoints still allows <code>zeroshot resume RUN_ID --restart</code> in its
+current checkout; restoring a discarded snapshot is unavailable.</p>
 <h2 id="transport-and-host-contract">Transport and host contract<a class="headerlink" href="#transport-and-host-contract" title="Permanent link">&para;</a></h2>
 <p>The Rust protocol crate's <code>target_files</code> module owns the binary contract and constants. Its
 generated <code>protocol/openengine-cluster/v1/target-files.schema.json</code> describes metadata.

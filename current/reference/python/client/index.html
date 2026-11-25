@@ -4540,7 +4540,7 @@ completes before local controller startup or direct-target contact.</p>
 
     <div class="doc doc-contents ">
 
-        <p>Continue this attempt, optionally replacing its runtime configuration.</p>
+        <p>Continue a suspension or restart a failed attempt, optionally replacing its runtime.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -5011,8 +5011,8 @@ Native conversations use the harness's restoration and fresh-session fallback.</
         <p>Delete this run's retained workspace or local recovery-lineage checkpoints.</p>
 <p>Local runs keep their checkout, ledger, logs and delivery recovery state. Running or
 resuming lineage members refuse deletion; an uncontinued suspension must be
-force-stopped first, and an interrupted restore must be completed. A plain local
-resume still uses the current checkout.</p>
+force-stopped first, and an interrupted restore must be completed. Restarting a local
+failed run through resume() still uses the current checkout.</p>
 
 
 <p><span class="doc-section-title">Returns:</span></p>
