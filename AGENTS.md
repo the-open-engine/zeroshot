@@ -1222,6 +1222,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   failed runs restart and suspended runs continue. Native resume owns eligibility and
   reconciliation, including controller loss and interrupted-ledger recovery. Do not select SDK
   resume behavior from read-only observation, which can be unavailable or stale.
+  Python makes an explicit local state directory absolute without resolving aliases; native
+  controller endpoint identity follows the CLI's state-directory path spelling.
   Checkpoint resume restores
   a private input snapshot and settled prerequisite executions; its selected node can run again. Checkpoint
   continuations, including request and other suspended successors, restore captured `node_instance`

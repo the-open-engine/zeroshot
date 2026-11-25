@@ -197,6 +197,24 @@ fn python_suspended_resume_recovers_an_interrupted_ledger_without_a_temporary_im
     assert_suspended_resume(true, true);
 }
 
+#[cfg(unix)]
+#[test]
+fn python_suspended_ledger_recovery_preserves_state_directory_alias() {
+    let root = tempfile::tempdir().unwrap();
+    let alias = root.path().join("alias");
+    std::os::unix::fs::symlink(root.path(), &alias).unwrap();
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "startup::resume_checkpoint::python_suspended_resume_recovers_an_interrupted_ledger_without_a_temporary_image",
+            "--exact",
+        ])
+        .env("TMPDIR", alias)
+        .output()
+        .unwrap();
+    success(&output);
+    assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed; 0 failed"));
+}
+
 fn assert_suspended_resume(sdk: bool, interrupted: bool) {
     let fixture = Fixture::new().outside_workspace();
     let mut graph: Value =

@@ -576,7 +576,7 @@ class Client:
             secrets = tuple(self._provided_environment.values())
         if isinstance(self.target, LocalTarget) and self.target.state_dir is not None:
             environment["ZEROSHOT_STATE_DIR"] = str(
-                Path(self.target.state_dir).expanduser().resolve()
+                Path(self.target.state_dir).expanduser().absolute()
             )
         if (
             not local_registry
