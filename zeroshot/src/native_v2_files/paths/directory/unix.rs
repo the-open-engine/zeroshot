@@ -162,14 +162,16 @@ fn rename(source: (RawFd, &OsStr), destination: (RawFd, &OsStr), exclusive: bool
     let source_name = component(source.1)?;
     let destination_name = component(destination.1)?;
     #[cfg(target_os = "linux")]
+    // Use the Linux syscall directly because libc does not expose renameat2 on musl.
     let result = unsafe {
-        libc::renameat2(
+        libc::syscall(
+            libc::SYS_renameat2,
             source.0,
             source_name.as_ptr(),
             destination.0,
             destination_name.as_ptr(),
             if exclusive { libc::RENAME_NOREPLACE } else { 0 },
-        )
+        ) as libc::c_int
     };
     #[cfg(target_os = "macos")]
     let result = unsafe {
