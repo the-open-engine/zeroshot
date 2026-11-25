@@ -384,6 +384,7 @@ fn policy_query_is_repository_generic_and_paginates_required_contexts() {
     assert!(arguments.iter().any(|argument| argument == "owner=acme"));
     assert!(arguments.iter().any(|argument| argument == "name=project"));
     assert!(arguments.iter().any(|argument| argument == "number=17"));
+    assert!(arguments.iter().any(|argument| argument == "branch=main"));
     assert!(
         arguments
             .iter()
@@ -404,10 +405,14 @@ fn policy_query_is_repository_generic_and_paginates_required_contexts() {
     assert!(!query.contains("branchProtectionRule"));
     assert!(!query.contains("rules(first:"));
     assert_eq!(
-        query.matches("pageInfo").count(),
+        query
+            .lines()
+            .filter(|line| line.trim_start().starts_with("pageInfo "))
+            .count(),
         1,
         "gh paginates only check contexts"
     );
+    assert!(query.contains("queuePageInfo: pageInfo"));
     assert!(!query.contains("allowedMergeMethods"));
 }
 
@@ -1059,6 +1064,7 @@ fn oversized_failure_summary_marks_omitted_text() {
 #[test]
 fn merge_actions_preserve_terminal_authority_and_queue_ownership() {
     let snapshot = |state, queued| PolicySnapshot {
+        queue_recovery: None,
         pull_request_id: "PR_node_17".to_owned(),
         is_in_merge_queue: false,
         auto_merge_enabled: false,
