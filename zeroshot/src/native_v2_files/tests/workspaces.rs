@@ -79,8 +79,12 @@ fn copied_root_executables_survive_source_deletion_and_pinned_restart() {
     let source = temp.path().join("source");
     std::fs::create_dir_all(source.join("tools")).assert_value();
     let script = source.join("tools/setup.sh");
-    std::fs::write(&script, b"#!/bin/sh\nprintf original > proof\n").assert_value();
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o751)).assert_value();
+    openengine_cluster_testkit::fixture::write_executable(
+        &script,
+        b"#!/bin/sh\nprintf original > proof\n",
+        0o751,
+    )
+    .assert_value();
     std::fs::write(source.join("data"), b"not executable").assert_value();
     let run = freeze_root(&files, &source);
     std::fs::remove_dir_all(&source).assert_value();
