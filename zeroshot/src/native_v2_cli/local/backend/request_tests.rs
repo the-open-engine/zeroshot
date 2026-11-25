@@ -169,6 +169,7 @@ async fn suspended_run(
                         run_id: run.clone(),
                         created_at,
                         content: RunVectorContent::Request {
+                            artifacts: Default::default(),
                             node: node.clone(),
                             text: request.text.clone(),
                             signals: request.signals.clone(),

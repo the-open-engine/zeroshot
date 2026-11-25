@@ -101,7 +101,7 @@ impl TargetControllerFactory for RequestFactory {
         Err(TargetAuthorityError::invalid("fixture only resumes"))
     }
 }
-async fn seed(ledger: &FakeRunLedger, index: u8, expired: bool) -> RunId {
+pub(super) async fn seed(ledger: &FakeRunLedger, index: u8, expired: bool) -> RunId {
     let id = RunId::new(format!("018f5e78-7f95-7c22-8d98-3f15af20c9{index:02}"));
     let mut submission = request().submission;
     submission.graph = serde_json::from_value(json!({
@@ -189,6 +189,7 @@ async fn seed(ledger: &FakeRunLedger, index: u8, expired: bool) -> RunId {
                         run_id: id.clone(),
                         created_at: UnixTimestampMillis::new(1000).assert_value(),
                         content: RunVectorContent::Request {
+                            artifacts: Default::default(),
                             node: NodeName::new("approval").assert_value(),
                             text: question.text.clone(),
                             signals: question.signals.clone(),

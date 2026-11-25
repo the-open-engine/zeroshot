@@ -882,6 +882,7 @@ impl CapsuleAllocator for SingleRunAllocator {
             None => runtime.cleanup,
         };
         Ok(AllocatedCapsule {
+            file_publisher: runtime.file_publisher,
             node_instance_floor: runtime.node_instance_floor,
             checkpoints: runtime.checkpoints,
             execution_seed: runtime.execution_seed,

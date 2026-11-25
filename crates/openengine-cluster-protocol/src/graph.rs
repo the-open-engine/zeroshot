@@ -296,9 +296,20 @@ pub struct StepNode {
     pub attempts: PositiveInteger,
 }
 
+/// An explicitly published workspace path. Bindings require the distinct filepath type.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
+pub enum ArtifactPath {
+    Literal { path: String },
+    Binding { value: DataSelector },
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct VerifierNode {
+    /// Files exposed only by builtin.request.ask@1. Ordinary verifiers cannot publish.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub artifacts: BTreeMap<FieldName, ArtifactPath>,
     pub name: NodeName,
     pub worker: WorkerRef,
     pub input: PayloadType,
@@ -396,6 +407,9 @@ pub struct ProfileNode {
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct SucceedNode {
+    /// Files exposed only when this success terminates the outer graph.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub artifacts: BTreeMap<FieldName, ArtifactPath>,
     pub name: NodeName,
     pub output: PayloadType,
     pub bindings: Vec<InputBinding>,

@@ -569,6 +569,60 @@ mod local {
 }
 
 #[tokio::test]
+async fn request_attachments_stay_out_of_run_history_lists_pages_and_sse() {
+    let fixture = Fixture::new().await;
+    let suspension = serde_json::from_value(json!({
+        "reason":"request", "node":"worker", "createdAt":1,
+        "request":{"id":"question", "text":"Approve?", "signals":{"decision":["approved","rejected"]},
+            "output":{"kind":"record","fields":{}}, "expiresAt":1000,
+            "artifacts":{"report":{"kind":"local","root":"/private-request-root","path":"report"}}}
+    })).assert_value();
+    fixture
+        .ledger
+        .append(
+            &fixture.id,
+            vec![RunEvent::RunStarted, RunEvent::Suspended { suspension }],
+        )
+        .await
+        .assert_value();
+    let target = NativeRunHistory::target(
+        fixture.root.join("runs").join(fixture.id.as_str()),
+        fixture.observations(),
+    );
+    for source in [&fixture.service, &target] {
+        let definition = source.detail(&fixture.id).await.assert_value();
+        let list = source.list(None).await.assert_value();
+        let page = source.page(&fixture.id, None).await.assert_value();
+        for value in [&definition, &list, &page] {
+            assert!(!value.to_string().contains("private-request-root"));
+            assert!(!value.to_string().contains("\"artifacts\""));
+        }
+        assert_eq!(definition["suspension"]["request"]["text"], "Approve?");
+        assert_eq!(list["runs"][0]["suspension"], definition["suspension"]);
+    }
+    let (authority, task) = serve_local_ui(&fixture).await;
+    let response = reqwest::Client::new()
+        .get(format!(
+            "http://{authority}/ui/api/runs/{}/events",
+            fixture.id.as_str()
+        ))
+        .send()
+        .await
+        .assert_value();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = tokio::time::timeout(Duration::from_secs(2), response.text())
+        .await
+        .assert_value()
+        .assert_value();
+    task.abort();
+    assert!(body.contains("event: history"));
+    assert!(body.contains("id: v2:2"));
+    assert!(body.contains("Approve?"));
+    assert!(!body.contains("private-request-root"));
+    assert!(!body.contains("\"artifacts\""));
+}
+
+#[tokio::test]
 async fn suspended_history_is_complete_and_ended_for_local_and_target_sources() {
     use openengine_cluster_protocol::{RunSuspension, RunWait};
     for suspension in [

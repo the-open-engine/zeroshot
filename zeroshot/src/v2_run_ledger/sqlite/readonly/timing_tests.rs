@@ -113,3 +113,69 @@ async fn readonly_existing_snapshots_recover_only_known_start_times_without_writ
         assert_eq!(std::fs::read(&path).assert_value(), before);
     }
 }
+
+#[tokio::test]
+async fn readonly_terminal_age_uses_its_exact_existing_event_without_rewriting_legacy_snapshots() {
+    for timed in [true, false] {
+        let root = openengine_cluster_testkit::TemporaryDirectory::for_test("terminal-age");
+        let path = root.path("runs.sqlite3");
+        let run_id = RunId::new("terminal-age");
+        {
+            let ledger = SqliteRunLedger::open(&path)
+                .unwrap()
+                .with_wall_clock(Arc::new(|| UnixTimestampMillis::new(10_000).unwrap()));
+            ledger
+                .create_or_get(CreateRun {
+                    run_id: run_id.clone(),
+                    submission_key: IdempotencyKey::new("terminal-age").unwrap(),
+                    submission_digest: Sha256Digest::new("a".repeat(64)).unwrap(),
+                    admitted: admitted(),
+                })
+                .await
+                .unwrap();
+            ledger
+                .append(
+                    &run_id,
+                    vec![
+                        RunEvent::RunStarted,
+                        RunEvent::Terminal {
+                            result: openengine_cluster_protocol::TerminalResult::Succeeded {
+                                output: Value::Null,
+                            },
+                        },
+                    ],
+                )
+                .await
+                .unwrap();
+        }
+        {
+            let db = rusqlite::Connection::open(&path).unwrap();
+            let json: String = db
+                .query_row("SELECT stored_json FROM v2_runs", [], |row| row.get(0))
+                .unwrap();
+            let mut stored: Value = serde_json::from_str(&json).unwrap();
+            stored["snapshot"]
+                .as_object_mut()
+                .unwrap()
+                .remove("terminalRecordedAt");
+            db.execute("UPDATE v2_runs SET stored_json = ?1", [stored.to_string()])
+                .unwrap();
+            if !timed {
+                db.execute_batch("ALTER TABLE v2_run_events DROP COLUMN recorded_at_ms")
+                    .unwrap();
+            }
+        }
+        let before = std::fs::read(&path).unwrap();
+        let ledger = SqliteRunLedger::open_read_only(&path).unwrap();
+        let time = ledger
+            .get(&run_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .snapshot
+            .terminal_recorded_at;
+        assert_eq!(time.map(|time| time.get()), timed.then_some(10_000));
+        drop(ledger);
+        assert_eq!(std::fs::read(path).unwrap(), before);
+    }
+}

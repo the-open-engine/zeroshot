@@ -370,6 +370,7 @@ async fn exercise_large_request(ledger: &dyn RunLedger) {
     let event = super::super::vector_event(
         &run,
         RunVectorContent::Request {
+            artifacts: Default::default(),
             node: NodeName::new("approval").assert_value(),
             text: "x".repeat(super::super::MAX_EVENT_BYTES - 4096),
             signals: Default::default(),
@@ -391,6 +392,7 @@ async fn exercise_large_request(ledger: &dyn RunLedger) {
         signals,
         output,
         expires_at,
+        artifacts,
     } = &vector.content
     else {
         unreachable!()
@@ -399,6 +401,7 @@ async fn exercise_large_request(ledger: &dyn RunLedger) {
         node: node.clone(),
         created_at: vector.created_at,
         request: Box::new(openengine_cluster_protocol::RunRequest {
+            artifacts: artifacts.clone(),
             id: vector.id.clone(),
             text: text.clone(),
             signals: signals.clone(),

@@ -50,7 +50,10 @@ ZEROSHOT_REQUIRE_APFS_CLONE=1 cargo test --locked --package zeroshot --lib --fea
 # Target files, including early authentication and framing refusals
 cargo test --locked --package openengine-cluster-protocol --test target_files
 cargo test --locked --package zeroshot --features ui --lib -- \
-  native_v2_files::tests native_v2_target_authority::tests::files
+  native_v2_files::tests native_v2_target_authority::tests::files \
+  execution::platform::tests::private_state_round_trips_and_replaces_an_existing_file
+cargo test --locked --package zeroshot --features ui --bin zeroshot -- \
+  native_v2_target::serve::tests::direct_serve_surfaces_hosting_preparation_failures --exact
 cargo test --locked --package zeroshot --features ui --test native_v2_files
 
 # Workspace export
@@ -94,8 +97,23 @@ cargo test --locked --package zeroshot --features ui --test native_v2_cli_portab
 cargo test --locked --package zeroshot --lib --features ui native_v2_cli::local::
 cargo test --locked --package zeroshot --features ui --test native_v2_cli_portable startup::
 
+# Profile and target registry store symlinks
+cargo test --locked --package zeroshot --features ui --lib native_v2_cli::profiles::tests
+cargo test --locked --package zeroshot --features ui --bin zeroshot native_v2_target::tests::management
+
 # Resume checkpoint policy and network authority
 cargo test --locked --package zeroshot --lib --features ui -- \
   native_v2_target_authority::tests::resume_refusals native_v2_target_authority::tests::checkpoint_opt_out
 cargo test --locked --package zeroshot --features ui --test native_v2_cli_local \
   networks_cleared_agent_labels_cannot_use_human_cli_or_rpc_across_runs
+
+# Explicit request/final publications and filepath response correction
+cargo test --locked --package zeroshot --features ui --lib -- \
+  native_v2_supervisor::tests::artifacts native_v2_codex::tests::filepath \
+  native_v2_platform::tests::cleanup v2_run_ledger::sqlite::readonly::tests::timing \
+  native_v2_runner::response native_v2_request::tests \
+  native_v2_observability::tests::publications \
+  profile_ui::runs::tests::status::request_attachments \
+  native_v2_admission::tests::requests::artifact \
+  native_v2_admission::profile_expansion::wire_contract::profile_linking
+cargo test --locked --package openengine-cluster-protocol --test payload_subtyping --test canonical

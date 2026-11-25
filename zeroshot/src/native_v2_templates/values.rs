@@ -66,6 +66,7 @@ pub(super) fn choice(
 
 pub(super) fn succeed_null(name: &str) -> Result<GraphNode, BuiltinTemplateError> {
     Ok(GraphNode::Succeed(SucceedNode {
+        artifacts: Default::default(),
         name: node_name(name)?,
         output: PayloadType::Null,
         bindings: Vec::new(),

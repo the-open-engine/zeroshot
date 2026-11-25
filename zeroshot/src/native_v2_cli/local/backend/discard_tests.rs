@@ -239,6 +239,17 @@ async fn local_discard_excludes_preparing_resumes_and_unsettled_controllers_in_b
     for (claimed, requested) in [(&fixture.id, &successor), (&successor, &fixture.id)] {
         let _claim = fixture.backend.claim_recovery_workspace(claimed).unwrap();
         assert_refusal(fixture.discard(requested).await.unwrap_err(), "force-stop");
+        assert_eq!(
+            fixture
+                .backend
+                .cleanup_checkpoints(
+                    true,
+                    openengine_cluster_protocol::UnixTimestampMillis::new(1).unwrap()
+                )
+                .await
+                .unwrap(),
+            0
+        );
         fixture.retained();
     }
     let _lease =
@@ -246,6 +257,17 @@ async fn local_discard_excludes_preparing_resumes_and_unsettled_controllers_in_b
     assert_refusal(
         fixture.discard(&fixture.id).await.unwrap_err(),
         "force-stop",
+    );
+    assert_eq!(
+        fixture
+            .backend
+            .cleanup_checkpoints(
+                true,
+                openengine_cluster_protocol::UnixTimestampMillis::new(1).unwrap()
+            )
+            .await
+            .unwrap(),
+        0
     );
     fixture.retained();
 }
@@ -259,7 +281,29 @@ async fn local_discard_allows_a_suspended_predecessor_with_a_finished_successor(
         .unwrap(),
     }))
     .await;
+    let mut recovery = fixture.backend.read_recovery_document(&fixture.id).unwrap();
+    recovery.successor_run_id = Some(RunId::new(uuid::Uuid::now_v7().to_string()));
+    fixture
+        .backend
+        .write_recovery_document(&fixture.id, &recovery)
+        .unwrap();
+    assert!(
+        fixture
+            .backend
+            .protected_file_runs()
+            .await
+            .unwrap()
+            .contains(&fixture.id)
+    );
     fixture.successor(Some(failed())).await;
+    assert!(
+        fixture
+            .backend
+            .protected_file_runs()
+            .await
+            .unwrap()
+            .is_empty()
+    );
     assert!(fixture.discard(&fixture.id).await.unwrap());
 }
 
@@ -470,4 +514,76 @@ async fn local_discard_retry_after_last_deletion_retains_disabled_policy() {
         let error = local_restore_selection(&fixture.id, None, &recovery, true).unwrap_err();
         assert!(error.to_string().contains("no checkpoints"));
     }
+}
+
+#[tokio::test]
+async fn cleanup_selects_terminal_checkpoint_lineages_at_sixty_days_and_is_explicit() {
+    const DAYS_60: u64 = 60 * 24 * 60 * 60 * 1000;
+    let fixture = Fixture::new(Some(failed())).await;
+    let ledger =
+        SqliteRunLedger::open_read_only(fixture.backend.paths(&fixture.id).unwrap().ledger())
+            .unwrap();
+    let finished = ledger
+        .get(&fixture.id)
+        .await
+        .unwrap()
+        .unwrap()
+        .snapshot
+        .terminal_recorded_at
+        .unwrap()
+        .get();
+    let at = |value| openengine_cluster_protocol::UnixTimestampMillis::new(value).unwrap();
+    fixture.retained(); // Startup and lookup never trigger cleanup.
+    assert_eq!(
+        fixture
+            .backend
+            .cleanup_checkpoints(false, at(finished + DAYS_60 - 1))
+            .await
+            .unwrap(),
+        0
+    );
+    fixture.retained();
+    assert_eq!(
+        fixture
+            .backend
+            .cleanup_checkpoints(false, at(finished + DAYS_60))
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        fixture
+            .backend
+            .cleanup_checkpoints(false, at(finished + DAYS_60))
+            .await
+            .unwrap(),
+        0
+    );
+    assert!(!fixture.repository.join("repository").exists());
+    assert!(
+        fixture
+            .backend
+            .paths(&fixture.id)
+            .unwrap()
+            .ledger()
+            .exists()
+    );
+    let fixture = Fixture::new(Some(failed())).await;
+    assert_eq!(
+        fixture
+            .backend
+            .cleanup_checkpoints(true, at(1))
+            .await
+            .unwrap(),
+        1
+    );
+    let live = Fixture::new(None).await;
+    assert_eq!(
+        live.backend
+            .cleanup_checkpoints(true, at(openengine_cluster_protocol::MAX_SAFE_GENERATION))
+            .await
+            .unwrap(),
+        0
+    );
+    live.retained();
 }

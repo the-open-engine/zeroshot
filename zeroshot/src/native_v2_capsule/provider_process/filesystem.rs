@@ -30,6 +30,10 @@ pub(crate) struct ProviderExecution<'a> {
 }
 
 impl<'a> ProviderExecution<'a> {
+    pub(crate) fn workspace(&self) -> &Path {
+        self.config.workspace
+    }
+
     pub(crate) fn new(
         config: ProviderFilesystemConfig<'a>,
         invocation: &'a DriverInvocation,

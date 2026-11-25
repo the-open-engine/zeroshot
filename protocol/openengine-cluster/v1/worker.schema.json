@@ -238,6 +238,19 @@
         {
           "additionalProperties": false,
           "properties": {
+            "kind": {
+              "const": "filepath",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "fields": {
               "additionalProperties": {
                 "$ref": "#/$defs/RecordField"

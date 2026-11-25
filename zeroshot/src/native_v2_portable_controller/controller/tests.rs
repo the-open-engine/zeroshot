@@ -919,6 +919,7 @@ async fn workspace_checkpoint_store_follows_runtime_policy() {
             &bootstrap,
             async |_, _| {
                 Ok::<_, std::io::Error>(PortableRuntime {
+                    file_publisher: None,
                     node_instance_floor: Default::default(),
                     vector_seed: Vec::new(),
                     checkpoints: None,

@@ -49,29 +49,8 @@ impl NativeV2Supervisor {
                 suspension: suspension.clone(),
             },
         ];
-        if let RunSuspension::Request {
-            node,
-            created_at,
-            request,
-        } = &suspension
-        {
-            events.insert(
-                0,
-                RunEvent::Vector {
-                    vector: openengine_cluster_protocol::RunVector {
-                        id: request.id.clone(),
-                        run_id: self.run_id.clone(),
-                        created_at: *created_at,
-                        content: RunVectorContent::Request {
-                            node: node.clone(),
-                            text: request.text.clone(),
-                            signals: request.signals.clone(),
-                            output: request.output.clone(),
-                            expires_at: request.expires_at,
-                        },
-                    },
-                },
-            );
+        if let Some(event) = super::publication::request_vector(&self.run_id, &suspension) {
+            events.insert(0, event);
         }
         // Drain admitted platform steers before reading the record, then refuse new ones without
         // holding their admission turn across host I/O or cleanup. Retained-ledger hosts steer
@@ -253,6 +232,7 @@ impl NativeV2Supervisor {
         &self,
         program: &RunProgram,
         dispatch: &Dispatch,
+        paths: BTreeMap<openengine_cluster_protocol::FieldName, String>,
     ) -> Result<(), NativeV2SupervisorError> {
         if !self
             .record_dispatches(std::slice::from_ref(dispatch))
@@ -276,6 +256,7 @@ impl NativeV2Supervisor {
             .ok_or(NativeV2SupervisorError::InvalidState)?
             .to_owned();
         let request = openengine_cluster_protocol::RunRequest {
+            artifacts: Default::default(),
             id: openengine_cluster_protocol::VectorId::new(uuid::Uuid::now_v7().to_string())
                 .map_err(|_| NativeV2SupervisorError::InvalidState)?,
             text,
@@ -283,19 +264,49 @@ impl NativeV2Supervisor {
             output: node.output.clone(),
             expires_at,
         };
+        let pending = crate::v2_run_ledger::PendingRequest {
+            suspension: RunSuspension::Request {
+                node: node.name.clone(),
+                created_at,
+                request: Box::new(request),
+            },
+            paths,
+        };
         self.ledger
             .append(
                 &self.run_id,
-                vec![RunEvent::RequestDeferred {
-                    reference: dispatch.reference.clone(),
-                }],
+                vec![
+                    RunEvent::RequestDeferred {
+                        reference: dispatch.reference.clone(),
+                    },
+                    RunEvent::RequestPrepared {
+                        pending: pending.clone(),
+                    },
+                ],
             )
             .await?;
-        self.suspend_at(RunSuspension::Request {
-            node: node.name.clone(),
-            created_at,
-            request: Box::new(request),
-        })
-        .await
+        self.publish_pending_request(pending).await
+    }
+
+    pub(super) async fn publish_pending_request(
+        &self,
+        mut pending: crate::v2_run_ledger::PendingRequest,
+    ) -> Result<(), NativeV2SupervisorError> {
+        let preflight = super::publication::request_preflight(&self.run_id, &pending.suspension);
+        let RunSuspension::Request { request, .. } = &mut pending.suspension else {
+            return Err(NativeV2SupervisorError::InvalidState);
+        };
+        request.artifacts = self
+            .publish_files(
+                crate::native_v2_files::FilePublicationOwner::Request {
+                    run_id: self.run_id.clone(),
+                    request: openengine_cluster_protocol::IdempotencyKey::new(request.id.as_str())
+                        .map_err(|_| NativeV2SupervisorError::InvalidState)?,
+                },
+                pending.paths,
+                preflight,
+            )
+            .await?;
+        self.suspend_at(pending.suspension).await
     }
 }

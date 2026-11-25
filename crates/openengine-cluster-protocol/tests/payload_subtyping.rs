@@ -225,3 +225,25 @@ fn enum_sets_are_canonical_and_wire_input_rejects_empty_or_duplicate_values() {
         .is_err()
     );
 }
+
+#[test]
+fn filepath_is_distinct_from_string_and_has_no_mime_constraint() {
+    let filepath: PayloadType = serde_json::from_value(json!({"kind":"filepath"})).assert_value();
+    assert!(filepath.is_subtype_of(&filepath));
+    assert!(!filepath.is_subtype_of(&PayloadType::String));
+    assert!(!PayloadType::String.is_subtype_of(&filepath));
+    for path in [
+        "report",
+        "/workspace/report/file.unknown",
+        "file with spaces",
+    ] {
+        assert!(filepath.validate_value(&json!(path)).is_ok());
+    }
+    for path in ["", "line\nbreak"] {
+        assert!(filepath.validate_value(&json!(path)).is_err());
+    }
+    assert!(
+        serde_json::from_value::<PayloadType>(json!({"kind":"filepath","mime":"image/png"}))
+            .is_err()
+    );
+}

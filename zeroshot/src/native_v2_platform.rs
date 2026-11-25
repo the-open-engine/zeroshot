@@ -53,13 +53,15 @@ mod tests;
 mod contracts;
 pub(crate) mod hook_output;
 mod preparation;
+mod publication_recovery;
 mod recovery;
 use preparation::{PreparationTask, PreparationStart, ResumePreparation};
 pub use contracts::{
-    AllocatedCapsule, CapsuleAllocationRequest, CapsuleAllocationUnavailable, CapsuleAllocator,
-    CapsuleCleanup, CapsulePreparation, PreparationProgress, CapsuleCleanupUnavailable,
-    CapsuleDestroyed, PlatformRunReceipt, ControllerClaimUnavailable, ExclusiveControllerClaim,
-    RetainedAllocationRequest, RetainedAllocationUnavailable, RunSourceCredentials,
+    AllocatedCapsule, RecoveredFilePublication, CapsuleAllocationRequest,
+    CapsuleAllocationUnavailable, CapsuleAllocator, CapsuleCleanup, CapsulePreparation,
+    PreparationProgress, CapsuleCleanupUnavailable, CapsuleDestroyed, PlatformRunReceipt,
+    ControllerClaimUnavailable, ExclusiveControllerClaim, RetainedAllocationRequest,
+    RetainedAllocationUnavailable, RunSourceCredentials,
 };
 pub use crate::native_v2_supervisor::RunEnvironment;
 
@@ -284,7 +286,9 @@ impl NativeV2PlatformController {
                 continue;
             }
             let _claim = self.allocator.claim_controller(&summary.run_id).await?;
-            self.finish_lost_runtime(&stored).await?;
+            if !self.recover_file_publication(&stored).await? {
+                self.finish_lost_runtime(&stored).await?;
+            }
         }
         Ok(())
     }
@@ -545,6 +549,7 @@ impl NativeV2PlatformController {
         } = start;
         let run_id = stored.snapshot.run_id.clone();
         let AllocatedCapsule {
+            file_publisher,
             node_instance_floor,
             vector_seed,
             checkpoints,
@@ -572,6 +577,7 @@ impl NativeV2PlatformController {
         }
         let mut runtime = PortableRuntime::with_cleanup(runner, cleanup);
         runtime.checkpoints = checkpoints;
+        runtime.file_publisher = file_publisher;
         // Steering that sees preparation must finish before an engine can publish suspension.
         let _control = self.lock_run_control(&run_id).await;
         let engine = PortableRunEngine::start(PortableRunEngineBootstrap {
@@ -780,6 +786,63 @@ impl NativeV2PlatformController {
         Ok(self.allocator.checkpoints(params).await?)
     }
 
+    pub async fn protected_file_runs(
+        &self,
+    ) -> Result<std::collections::BTreeSet<RunId>, NativeV2PlatformError> {
+        let mut protected = std::collections::BTreeSet::new();
+        let mut superseded = crate::native_v2_observability::lineage::SupersededParts::default();
+        for run in self.ledger.list().await? {
+            let Some(stored) = self.ledger.get(&run.run_id).await? else {
+                continue;
+            };
+            if stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Finished {
+                continue;
+            }
+            if stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended
+                && superseded
+                    .contains(&run.run_id, self.run_lineage(&run.run_id))
+                    .await?
+            {
+                continue;
+            }
+            protected.insert(run.run_id);
+        }
+        Ok(protected)
+    }
+
+    pub async fn cleanup_checkpoints(
+        &self,
+        all: bool,
+        now: openengine_cluster_protocol::UnixTimestampMillis,
+    ) -> Result<usize, NativeV2PlatformError> {
+        let mut removed = 0;
+        let cutoff = now.get().saturating_sub(60 * 24 * 60 * 60 * 1000);
+        for run in self.ledger.list().await? {
+            let _control = self.lock_run_control(&run.run_id).await;
+            let Some(stored) = self.ledger.get(&run.run_id).await? else {
+                continue;
+            };
+            if stored.snapshot.phase != crate::v2_run_ledger::RunPhase::Finished
+                || (!all
+                    && stored
+                        .snapshot
+                        .terminal_recorded_at
+                        .is_none_or(|time| time.get() > cutoff))
+            {
+                continue;
+            }
+            if self
+                .allocator
+                .discard_workspace(&run.run_id)
+                .await
+                .map_err(|_| NativeV2SupervisorError::RuntimeCleanup(RuntimeCleanupUnavailable))?
+            {
+                removed += 1;
+            }
+        }
+        Ok(removed)
+    }
+
     pub async fn discard_workspace(
         &self,
         params: RunDiscardWorkspaceParams,
@@ -916,7 +979,14 @@ impl NativeV2PlatformController {
     }
 
     pub async fn list(&self) -> Result<Vec<RunSummary>, NativeV2PlatformError> {
-        Ok(self.ledger.list().await?)
+        let mut runs = self.ledger.list().await?;
+        for run in &mut runs {
+            run.suspension = run
+                .suspension
+                .as_ref()
+                .map(crate::native_v2_observability::public_suspension);
+        }
+        Ok(runs)
     }
 
     pub async fn status(

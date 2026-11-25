@@ -156,7 +156,26 @@ async fn prepare_target(
     ),
     TargetServeError,
 > {
+    let file_store = if config.bootstrap_key_file.is_none() {
+        Some((
+            Arc::new(
+                zeroshot_engine::native_v2_files::DiskFileStore::open(
+                    config.storage.join("files"),
+                    "direct-target".to_owned(),
+                    Arc::new(zeroshot_engine::native_v2_files::SingleAccountFiles {
+                        principal: "direct-target".to_owned(),
+                        tenant: "direct-target".to_owned(),
+                    }),
+                )
+                .map_err(|_| ProductionHostingError::Storage)?,
+            ),
+            direct_identity(),
+        ))
+    } else {
+        None
+    };
     let hosting = ProductionHostingConfig {
+        file_store,
         run_sizes: config
             .bootstrap_key_file
             .is_none()

@@ -89,6 +89,8 @@ pub enum RunVectorContent {
         node_instance: u64,
     },
     Request {
+        #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+        artifacts: crate::PublishedFiles,
         node: NodeName,
         text: String,
         signals: std::collections::BTreeMap<crate::FieldName, crate::NonEmptyEnumSet>,

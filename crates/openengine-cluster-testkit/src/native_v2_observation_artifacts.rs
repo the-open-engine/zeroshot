@@ -202,6 +202,7 @@ fn watch_fixture() -> Value {
                     }),
                 },
                 metadata: RunMetadata {
+                    artifacts: Default::default(),
                     token_usage: Some(TokenUsage {
                         input_tokens: TokenCount::new(1_200).assert_value(),
                         output_tokens: TokenCount::new(200).assert_value(),

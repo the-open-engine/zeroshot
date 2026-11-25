@@ -1,7 +1,7 @@
 //! Public run identity follows the host's committed, reciprocal workspace handoffs.
 //! A preparation row, copied continuation vector or proposed successor on its own
 //! cannot move a waiting run to another part.
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
 
 use openengine_cluster_protocol::{Cursor, RunId, RunStatus, TerminalResult, WorkspaceRecovery};
@@ -145,6 +145,29 @@ impl RunLineage {
 
     pub(crate) fn contains(&self, id: &RunId) -> bool {
         self.parts.contains(id)
+    }
+}
+
+/// A cleanup pass resolves each suspended family once. A handoff observed after the pass
+/// starts can leave its old head protected until the next cleanup.
+#[derive(Default)]
+pub(crate) struct SupersededParts(HashMap<RunId, bool>);
+
+impl SupersededParts {
+    pub(crate) async fn contains<E>(
+        &mut self,
+        id: &RunId,
+        resolve: impl Future<Output = Result<RunLineage, E>>,
+    ) -> Result<bool, E> {
+        if let Some(&known) = self.0.get(id) {
+            return Ok(known);
+        }
+        let family = resolve.await?;
+        let superseded = family.current() != id;
+        for part in family.parts() {
+            self.0.insert(part.clone(), part != family.current());
+        }
+        Ok(superseded)
     }
 }
 

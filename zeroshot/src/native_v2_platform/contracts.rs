@@ -80,6 +80,7 @@ pub trait CapsuleCleanup: Send + Sync {
 }
 
 pub struct AllocatedCapsule {
+    pub file_publisher: Option<Arc<dyn crate::native_v2_files::publication::RunFilePublisher>>,
     pub vector_seed: Vec<openengine_cluster_protocol::RunVector>,
     pub checkpoints: Option<Arc<dyn crate::native_v2_supervisor::checkpoints::RunCheckpointStore>>,
     pub execution_seed: Vec<crate::full_v1_reducer::DurableExecution>,
@@ -98,6 +99,7 @@ impl AllocatedCapsule {
     ) -> Self {
         Self {
             runner,
+            file_publisher: None,
             loss,
             cleanup,
             checkpoints: None,
@@ -106,6 +108,13 @@ impl AllocatedCapsule {
             vector_seed: Vec::new(),
         }
     }
+}
+
+/// Host-confirmed committed files and the existing checkpoint authority for startup replay.
+/// No provider session, source checkout or replacement capsule is allocated.
+pub struct RecoveredFilePublication {
+    pub files: openengine_cluster_protocol::PublishedFiles,
+    pub checkpoints: Arc<dyn crate::native_v2_supervisor::checkpoints::RunCheckpointStore>,
 }
 
 /// Run-owned preparation output. Implementations persist safe lines before returning.
@@ -239,6 +248,15 @@ pub trait CapsuleAllocator: Send + Sync {
         run_id: &RunId,
         exit: RunRuntimeExit,
     ) -> Result<CapsuleDestroyed, CapsuleCleanupUnavailable>;
+
+    /// Recover only an already committed logical breakpoint, without recapturing current bytes.
+    async fn recover_file_publication(
+        &self,
+        _stored: &crate::v2_run_ledger::StoredRun,
+        _request: &crate::native_v2_files::publication::FilePublication,
+    ) -> Result<Option<RecoveredFilePublication>, CapsuleAllocationUnavailable> {
+        Ok(None)
+    }
 
     /// Durably reserves the retained workspace for one successor before resume is acknowledged.
     /// This performs the existing ownership handoff without credentials or runtime preparation.

@@ -243,6 +243,73 @@
       ],
       "type": "object"
     },
+    "FileAddress": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/FilePath"
+        },
+        "scope": {
+          "$ref": "#/$defs/FileScope"
+        }
+      },
+      "required": [
+        "scope",
+        "path"
+      ],
+      "type": "object"
+    },
+    "FilePath": {
+      "description": "Portable slash-separated names, with no aliases on supported filesystems. Empty denotes the\nselected root only; addresses require a nonempty path. Case collisions within a tree are invalid.",
+      "type": "string"
+    },
+    "FileScope": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "user",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "org",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "run",
+              "type": "string"
+            },
+            "runId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "runId"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "InboxEntry": {
       "additionalProperties": false,
       "description": "A bounded inbox row; text, shape and answers are available only through show.",
@@ -1061,6 +1128,19 @@
         {
           "additionalProperties": false,
           "properties": {
+            "kind": {
+              "const": "filepath",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "fields": {
               "additionalProperties": {
                 "$ref": "#/$defs/RecordField"
@@ -1124,6 +1204,53 @@
           "required": [
             "kind",
             "values"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PublishedFile": {
+      "description": "Managed references retain captured bytes. Local references resolve the current working file.\nNeither form contains file bytes or changes the graph's authored JSON result.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "address": {
+              "$ref": "#/$defs/FileAddress"
+            },
+            "kind": {
+              "const": "managed",
+              "type": "string"
+            },
+            "target": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "target",
+            "address"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "local",
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "root": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "root",
+            "path"
           ],
           "type": "object"
         }
@@ -1618,6 +1745,15 @@
       "additionalProperties": false,
       "description": "Runtime-owned metadata accompanying terminal status and retained run history.",
       "properties": {
+        "artifacts": {
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[A-Za-z_][A-Za-z0-9_.-]*$": {
+              "$ref": "#/$defs/PublishedFile"
+            }
+          },
+          "type": "object"
+        },
         "deliveryReceipt": {
           "description": "Confirmed native delivery evidence, independent of the graph's terminal output."
         },
@@ -1638,6 +1774,15 @@
       "additionalProperties": false,
       "description": "The question and result shape declared by a host-run request verifier.",
       "properties": {
+        "artifacts": {
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[A-Za-z_][A-Za-z0-9_.-]*$": {
+              "$ref": "#/$defs/PublishedFile"
+            }
+          },
+          "type": "object"
+        },
         "expiresAt": {
           "maximum": 9007199254740991,
           "minimum": 1,
@@ -2161,6 +2306,15 @@
         },
         {
           "properties": {
+            "artifacts": {
+              "additionalProperties": false,
+              "patternProperties": {
+                "^[A-Za-z_][A-Za-z0-9_.-]*$": {
+                  "$ref": "#/$defs/PublishedFile"
+                }
+              },
+              "type": "object"
+            },
             "expiresAt": {
               "maximum": 9007199254740991,
               "minimum": 1,

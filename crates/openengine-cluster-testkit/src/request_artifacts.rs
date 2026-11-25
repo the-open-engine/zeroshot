@@ -6,6 +6,15 @@ pub(crate) fn artifacts() -> Vec<Artifact> {
     let request = json!({"id":"request-1","text":"Ready to continue?","signals":{"decision":["approved","rejected"]},"output":{"kind":"record","fields":{"feedback":{"required":true,"type":{"kind":"string"}}}},"expiresAt":1763510400000u64});
     vec![
         json_artifact(
+            format!("{root}/inbox-show-with-files.json"),
+            json!({"runId":"run-1","partId":"run-2","node":"approval","createdAt":1762905600000u64,
+            "state":"pending","request":{
+                "artifacts":{"report":{"kind":"managed","target":"direct-target",
+                    "address":{"scope":{"kind":"run","runId":"run-2"},"path":"requests/request-1/report/report"}}},
+                "id":request["id"],"text":request["text"],"signals":request["signals"],"output":request["output"],"expiresAt":request["expiresAt"]
+            }}),
+        ),
+        json_artifact(
             format!("{root}/request-discovery.json"),
             serde_json::to_value(
                 openengine_cluster_protocol::TargetDiscoveryDocument::direct(

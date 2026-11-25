@@ -170,6 +170,8 @@ mod errors;
 mod logs;
 #[path = "tests/parallel_attach.rs"]
 mod parallel_attach;
+#[path = "tests/publications.rs"]
+mod publications;
 #[path = "tests/replay.rs"]
 mod replay;
 #[path = "tests/status.rs"]

@@ -145,6 +145,13 @@ async fn request_answer_at_deadline_is_timeout_and_before_it_is_accepted_once() 
                 .is_none()
         );
         assert_public_request_has_no_successor(&controller, &run).await;
+        assert!(
+            controller
+                .protected_file_runs()
+                .await
+                .assert_value()
+                .contains(&run)
+        );
         allocator.successors.lock().assert_value().remove(&run);
         let result = controller.resume(params.clone()).await;
         if expired {
@@ -178,6 +185,13 @@ async fn request_answer_at_deadline_is_timeout_and_before_it_is_accepted_once() 
             .await
             .assert_value();
         assert_eq!(old.successor_run_id, Some(params.successor_run_id.clone()));
+        assert!(
+            !controller
+                .protected_file_runs()
+                .await
+                .assert_value()
+                .contains(&run)
+        );
         assert_eq!(
             old.state,
             if expired {

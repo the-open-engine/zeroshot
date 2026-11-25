@@ -1,6 +1,38 @@
 use super::*;
 use std::{collections::HashMap, convert::Infallible, future::ready};
 
+#[tokio::test]
+async fn cleanup_reads_each_confirmed_family_once_in_any_inventory_order() {
+    let [root, middle, head] = ["root", "middle", "head"].map(RunId::new);
+    let calls = std::cell::Cell::new(0);
+    let read = |id: RunId| {
+        calls.set(calls.get() + 1);
+        let links = if id == root {
+            (None, Some(middle.clone()))
+        } else if id == middle {
+            (Some(root.clone()), Some(head.clone()))
+        } else {
+            (Some(middle.clone()), None)
+        };
+        ready(Ok::<_, Infallible>(Some(WorkspaceRecovery {
+            resumed_from: links.0,
+            successor_run_id: links.1,
+            ..Default::default()
+        })))
+    };
+    let mut superseded = SupersededParts::default();
+    for id in [&middle, &head, &root] {
+        assert_eq!(
+            superseded
+                .contains(id, RunLineage::resolve(id, read))
+                .await
+                .unwrap(),
+            id != &head
+        );
+    }
+    assert_eq!(calls.get(), 3);
+}
+
 #[test]
 fn grouped_history_preserves_worker_owned_definition_documents() {
     use crate::native_v2_observability::history::parts::grouped_definition;

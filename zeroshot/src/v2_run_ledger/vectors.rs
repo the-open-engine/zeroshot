@@ -77,9 +77,15 @@ pub async fn show(
             .await?;
         for stored in tail.events {
             after = Some(stored.cursor);
-            if let RunEvent::Vector { vector } = stored.event
+            if let RunEvent::Vector { mut vector } = stored.event
                 && vector.id == params.id
             {
+                if let openengine_cluster_protocol::RunVectorContent::Request {
+                    artifacts, ..
+                } = &mut vector.content
+                {
+                    artifacts.clear();
+                }
                 return Ok(vector);
             }
         }

@@ -324,6 +324,7 @@ pub(super) async fn assert_inbox_show_during_successor_startup() {
         let event = vector_event(
             &fixture.run_id,
             RunVectorContent::Request {
+                artifacts: Default::default(),
                 node: node.clone(),
                 text: request.text.clone(),
                 signals: request.signals.clone(),

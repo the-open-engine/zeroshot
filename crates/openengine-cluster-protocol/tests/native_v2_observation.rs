@@ -242,6 +242,7 @@ fn durable_events_carry_run_and_stable_cursor() {
                 output: terminal_output.clone(),
             },
             metadata: RunMetadata {
+                artifacts: Default::default(),
                 token_usage: Some(TokenUsage {
                     input_tokens: TokenCount::new(17).assert_value(),
                     output_tokens: TokenCount::new(3).assert_value(),

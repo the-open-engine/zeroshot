@@ -53,6 +53,16 @@ impl<'a> Analyzer<'a> {
         verifier: &VerifierNode,
         context: &LocatedNodeValidationContext<'_>,
     ) -> Effects {
+        self.validate_artifacts(&verifier.artifacts, context);
+        if !verifier.artifacts.is_empty() && verifier.worker.as_str() != "builtin.request.ask@1" {
+            emit_diagnostic!(
+                self,
+                GraphDiagnosticCode::InvalidGraphShape,
+                "only request verifiers may declare artifacts",
+                with_field(&context.path, "artifacts"),
+                Vec::new()
+            );
+        }
         self.validate_executable(ExecutableValidationContext {
             name: &verifier.name,
             input: &verifier.input,
@@ -100,6 +110,7 @@ impl<'a> Analyzer<'a> {
         context: &LocatedNodeValidationContext<'_>,
     ) -> Effects {
         if let GraphNode::Succeed(terminal) = node {
+            self.validate_artifacts(&terminal.artifacts, context);
             self.validate_input_bindings(
                 &terminal.bindings,
                 InputBindingsValidationContext {
@@ -112,6 +123,35 @@ impl<'a> Analyzer<'a> {
             );
         }
         terminal_effects(node.name(), context.node.incoming)
+    }
+
+    fn validate_artifacts(
+        &mut self,
+        artifacts: &BTreeMap<FieldName, openengine_cluster_protocol::ArtifactPath>,
+        context: &LocatedNodeValidationContext<'_>,
+    ) {
+        for (name, source) in artifacts {
+            let path = with_field(&with_field(&context.path, "artifacts"), name.as_str());
+            let valid = match source {
+                openengine_cluster_protocol::ArtifactPath::Literal { path } => {
+                    PayloadType::Filepath
+                        .validate_value(&serde_json::Value::String(path.clone()))
+                        .is_ok()
+                }
+                openengine_cluster_protocol::ArtifactPath::Binding { value } => self
+                    .validate_data_selector(value, context.node, &path)
+                    .is_none_or(|source| source == PayloadType::Filepath),
+            };
+            if !valid {
+                emit_diagnostic!(
+                    self,
+                    GraphDiagnosticCode::SchemaSafety,
+                    "artifact requires a nonempty literal path or a filepath binding",
+                    path,
+                    Vec::new()
+                );
+            }
+        }
     }
 
     pub(super) fn validate_group_state(
