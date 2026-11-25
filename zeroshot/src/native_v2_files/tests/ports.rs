@@ -174,6 +174,9 @@ impl TargetFileHost for FilesWithoutCleanup<'_> {
     fn pin(&self, access: &FileAccess<'_>, request: &FilePinRequest) -> Result<FilePin> {
         self.0.pin(access, request)
     }
+    fn pin_exists(&self, access: &FileAccess<'_>, pin: &FilePin) -> Result<bool> {
+        self.0.pin_exists(access, pin)
+    }
     fn stage(
         &self,
         access: &FileAccess<'_>,
