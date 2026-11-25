@@ -629,36 +629,6 @@ impl LocalCliBackend {
             resumed_from: params.run_id,
         })
     }
-    async fn managed_restart_required(
-        &self,
-        params: &openengine_cluster_protocol::RunResumeParams,
-        recovery: &LocalRecoveryDocument,
-    ) -> Result<bool, NativeV2CliError> {
-        if !matches!(params.from, None | Some(RunResumeFrom::Restart {}))
-            || !recovery
-                .submission
-                .workspace
-                .as_ref()
-                .is_some_and(|workspace| !workspace.is_in_place())
-            || recovery.workspace_checkpoints_enabled()
-        {
-            return Ok(false);
-        }
-        let ledger = SqliteRunLedger::open_read_only(self.paths(&params.run_id)?.ledger())
-            .map_err(local_error)?;
-        let stored = ledger
-            .get(&params.run_id)
-            .await
-            .map_err(local_error)?
-            .ok_or_else(|| local_message("predecessor ledger is unavailable"))?;
-        // A successor restarts at its original execution seed. Keep the corresponding live
-        // files when completed work is retained; original inputs only match an empty seed.
-        Ok(
-            stored.snapshot.phase != crate::v2_run_ledger::RunPhase::Suspended
-                && stored.snapshot.execution_seed.is_empty(),
-        )
-    }
-
     async fn prepare_successor(
         &self,
         params: &openengine_cluster_protocol::RunResumeParams,
