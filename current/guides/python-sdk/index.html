@@ -2658,12 +2658,17 @@ A complete request cannot be combined with string-submission overrides.</p>
 <p>Before starting a local controller or contacting a direct target, the bundled executable performs
 the same preflight as the CLI.</p>
 <p>The <a href="../../reference/python/">Python API reference</a> documents the public client surface.</p>
-<p><code>await run.suspend()</code> returns the current status immediately; <code>await run.resume()</code> returns the
-successor's <code>Run</code> handle. <code>run.watch()</code> ends at suspension. <code>Run.wait()</code> and <code>Client.run()</code> raise
-<code>RunSuspendedError</code>, carrying <code>run</code> and <code>status</code>, when an attempt suspends. Status and summaries
-expose <code>suspend_requested</code>, <code>reason</code>, <code>node</code>, <code>created_at</code> and <code>due_at</code>. Read the ordered record
-with <code>await run.vectors(after=None, limit=50)</code> (<code>RunVectorsPage.vectors</code>, <code>next_after</code>) and read a
-complete entry with <code>await run.vector(id)</code>. These methods use the client's selected target.</p>
+<p>A logical run keeps its <code>Run.id</code> through every answer, resume, and checkpoint retry.
+<code>await run.status()</code> reports the current part. To inspect an earlier part, use
+<code>client.get_run(run.id, part_id=part_id)</code>. Its status reports the selected <code>part_id</code> and the
+latest <code>current_part_id</code>. Status events, logs, and vector entries identify their originating part.
+<code>run.watch()</code> returns at a suspension. Use <code>run.watch(follow=True)</code> to follow the run across handoffs. Reconnect with the last cursor from that
+stream. <code>Run.wait()</code> and <code>Client.run()</code> raise <code>RunSuspendedError</code> with the handle and status when
+the current part suspends. <code>await run.suspend()</code> returns the status immediately.
+<code>await run.resume(part_id=status.part_id)</code> requires that part to still be current. Its returned
+handle has the same <code>id</code> and a new <code>current_part_id</code>.</p>
+<p>Read the ordered vector record with <code>await run.vectors(after=None, limit=50)</code> and a complete
+entry with <code>await run.vector(id)</code>. Both use the client's selected target.</p>
 <p><code>await run.discard_workspace()</code> returns whether retained data was deleted. For a finished local
 run it frees the recovery lineage's checkpoints, including those of failed runs, while keeping
 the checkout, ledger, logs and delivery recovery state. Plain resume still uses the current
@@ -2671,10 +2676,18 @@ checkout; checkpoint restore is no longer available. Named targets keep their ex
 workspace discard behavior.</p>
 <h2 id="answer-a-human-request">Answer a human request<a class="headerlink" href="#answer-a-human-request" title="Permanent link">&para;</a></h2>
 <p><code>await client.inbox(after=None, limit=50)</code> returns an <code>InboxPage</code> with requests and <code>next_after</code>.
-<code>await run.request()</code> returns the run's own <code>InboxRequest</code>, including text, declared signals/output,
-deadline, state and successor. <code>await run.answer({"signals": {"decision": "approved"}, "output":
-{"feedback": ""}})</code> returns the successor <code>Run</code>. <code>RunStatus.request</code> carries the human request.
-All methods use the client's local or named target arguments; named targets need
+<code>question = await run.request()</code> reads the question, its answer contract, deadline, state,
+and <code>successor_part_id</code>. Keep <code>question.part_id</code> when displaying a question to someone.
+Pass it back with the answer so that a delayed response cannot answer a later question.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">approve</span><span class="p">(</span><span class="n">run</span><span class="p">,</span> <span class="n">question</span><span class="p">):</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>    <span class="n">continued</span> <span class="o">=</span> <span class="k">await</span> <span class="n">run</span><span class="o">.</span><span class="n">answer</span><span class="p">(</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>        <span class="p">{</span><span class="s2">"signals"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"decision"</span><span class="p">:</span> <span class="s2">"approved"</span><span class="p">},</span> <span class="s2">"output"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"feedback"</span><span class="p">:</span> <span class="s2">""</span><span class="p">}},</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>        <span class="n">part_id</span><span class="o">=</span><span class="n">question</span><span class="o">.</span><span class="n">part_id</span><span class="p">,</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="p">)</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    <span class="k">assert</span> <span class="n">continued</span><span class="o">.</span><span class="n">id</span> <span class="o">==</span> <span class="n">run</span><span class="o">.</span><span class="n">id</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>    <span class="k">return</span> <span class="n">continued</span>
+</code></pre></div>
+<p><code>RunStatus.request</code> also carries the human request when suspended. Named targets need
 <code>openengine.request-ask/v1</code>. Answers follow resume's credential and forwarding rules.
 Invalid, repeated and late answers raise the existing CLI command error with its message. A late
 answer still starts the <code>timeout</code> successor. Deadlines default to 7 days and have a 30-day maximum;
@@ -2710,7 +2723,7 @@ UTF-8 bytes and is stored as given; do not include secrets. Existing SDK error t
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-23">23 November 2026</time>
+    Last updated <time datetime="2026-11-25">25 November 2026</time>
   </span>
 
     

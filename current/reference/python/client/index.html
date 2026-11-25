@@ -1712,6 +1712,28 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#zeroshot.Run.part_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;part_id
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.Run.current_part_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;current_part_id
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#zeroshot.Run.id" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2837,6 +2859,28 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#zeroshot.Run.part_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;part_id
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.Run.current_part_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;current_part_id
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#zeroshot.Run.id" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3385,7 +3429,7 @@ indefinitely.</p>
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              RunResult(*, run_id: str, succeeded: bool, output: JsonValue = None, delivery_receipt: JsonValue = None, failure: str | None = None, context: FailureContext | None = None)
+              <code><a class="autorefs autorefs-internal" title="              RunResult(*, run_id: str, part_id: str, succeeded: bool, output: JsonValue = None, delivery_receipt: JsonValue = None, failure: str | None = None, context: FailureContext | None = None)
 
   
       dataclass
@@ -3499,7 +3543,7 @@ remote. See RunRequest for local-only worktree and cleanup semantics.</p>
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              Run(client: Client, run_id: str) (zeroshot.client.Run)" href="#zeroshot.Run">Run</a></code>
+              <code><a class="autorefs autorefs-internal" title="              Run(client: Client, run_id: str, *, part_id: str | None = None) (zeroshot.client.Run)" href="#zeroshot.Run">Run</a></code>
           –
           <div class="doc-md-description">
             <p>A durable run handle bound to this client's target.</p>
@@ -3683,7 +3727,7 @@ completes before local controller startup or direct-target contact.</p>
 
 
 <h3 id="zeroshot.Client.get_run" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">get_run</span><span class="p">(</span><span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Run</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">get_run</span><span class="p">(</span><span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">part_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Run</span></code>
 
 <a href="#zeroshot.Client.get_run" class="headerlink" title="Permanent link">&para;</a></h3>
 
@@ -3700,7 +3744,17 @@ completes before local controller startup or direct-target contact.</p>
               (<code><span title="str">str</span></code>)
           –
           <div class="doc-md-description">
-            <p>Opaque public run identity.</p>
+            <p>Stable public run identity. A saved part ID resolves on status lookup.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>part_id</code></b>
+              (<code><span title="str">str</span> | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Select a single admitted part. Omit to follow the run across continuations.</p>
           </div>
         </li>
     </ul>
@@ -3709,7 +3763,7 @@ completes before local controller startup or direct-target contact.</p>
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              Run(client: Client, run_id: str) (zeroshot.client.Run)" href="#zeroshot.Run">Run</a></code>
+              <code><a class="autorefs autorefs-internal" title="              Run(client: Client, run_id: str, *, part_id: str | None = None) (zeroshot.client.Run)" href="#zeroshot.Run">Run</a></code>
           –
           <div class="doc-md-description">
             <p>A handle resolved lazily against this client's target.</p>
@@ -4046,7 +4100,7 @@ completes before local controller startup or direct-target contact.</p>
 
 
 <h2 id="zeroshot.Run" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">Run</span><span class="p">(</span><span class="n">client</span><span class="p">:</span> <span class="n">Client</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">Run</span><span class="p">(</span><span class="n">client</span><span class="p">:</span> <span class="n">Client</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">part_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
 
 <a href="#zeroshot.Run" class="headerlink" title="Permanent link">&para;</a></h2>
 
@@ -4074,6 +4128,50 @@ completes before local controller startup or direct-target contact.</p>
 
 
 
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="zeroshot.Run.part_id" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-attribute"></code>            <code class="highlight language-python"><span class="n">part_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#zeroshot.Run.part_id" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return the selected historical part, or None when following the logical run.</p>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="zeroshot.Run.current_part_id" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-attribute"></code>            <code class="highlight language-python"><span class="n">current_part_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#zeroshot.Run.current_part_id" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return the most recently observed head, or None before the first lookup.</p>
+
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-attribute">
 
@@ -4121,7 +4219,7 @@ completes before local controller startup or direct-target contact.</p>
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait', 'request'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None, request: HumanRequest | None = None, steers: tuple[RunSteer, ...] = (), omitted_steers: int = 0, recorded_at: int | None = None)
+              <code><a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, part_id: str, current_part_id: str | None = None, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait', 'request'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None, request: HumanRequest | None = None, steers: tuple[RunSteer, ...] = (), omitted_steers: int = 0, recorded_at: int | None = None)
 
   
       dataclass
@@ -4168,14 +4266,18 @@ completes before local controller startup or direct-target contact.</p>
 
 
 <h3 id="zeroshot.Run.watch" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">watch</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">after</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AsyncIterator</span><span class="p">[</span><span class="n">RunStatus</span><span class="p">]</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">watch</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">after</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">follow</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AsyncGenerator</span><span class="p">[</span><span class="n">RunStatus</span><span class="p">,</span> <span class="kc">None</span><span class="p">]</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
 
 <a href="#zeroshot.Run.watch" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
 
-        <p>Open a durable status stream strictly after an optional cursor.</p>
+        <p>Watch run status until an actionable suspension or terminal result.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -4190,17 +4292,27 @@ completes before local controller startup or direct-target contact.</p>
             <p>Last consumed opaque status cursor. None replays retained history.</p>
           </div>
         </li>
+        <li class="doc-section-item field-body">
+            <b><code>follow</code></b>
+              (<code><span title="bool">bool</span></code>, default:
+                  <code>False</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Keep watching through suspensions and accepted continuations.</p>
+          </div>
+        </li>
     </ul>
 
 
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><span title="collections.abc.AsyncIterator">AsyncIterator</span>[<a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait', 'request'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None, request: HumanRequest | None = None, steers: tuple[RunSteer, ...] = (), omitted_steers: int = 0, recorded_at: int | None = None)
+              <code><span title="collections.abc.AsyncGenerator">AsyncGenerator</span>[<a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, part_id: str, current_part_id: str | None = None, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait', 'request'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None, request: HumanRequest | None = None, steers: tuple[RunSteer, ...] = (), omitted_steers: int = 0, recorded_at: int | None = None)
 
   
       dataclass
-   (zeroshot.runs.RunStatus)" href="../results/#zeroshot.RunStatus">RunStatus</a>]</code>
+   (zeroshot.runs.RunStatus)" href="../results/#zeroshot.RunStatus">RunStatus</a>, None]</code>
           –
           <div class="doc-md-description">
             <p>An async iterator of immutable status snapshots.</p>
@@ -4256,7 +4368,7 @@ completes before local controller startup or direct-target contact.</p>
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><span title="collections.abc.AsyncIterator">AsyncIterator</span>[<a class="autorefs autorefs-internal" title="              LogEvent(*, run_id: str, cursor: str, timestamp: int, execution: str | None, level: Literal['debug', 'info', 'error'], target: str, message: str, map_indices: tuple[int, ...] = ())
+              <code><span title="collections.abc.AsyncIterator">AsyncIterator</span>[<a class="autorefs autorefs-internal" title="              LogEvent(*, run_id: str, part_id: str, cursor: str, timestamp: int, execution: str | None, level: Literal['debug', 'info', 'error'], target: str, message: str, map_indices: tuple[int, ...] = ())
 
   
       dataclass
@@ -4310,7 +4422,7 @@ completes before local controller startup or direct-target contact.</p>
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              RunResult(*, run_id: str, succeeded: bool, output: JsonValue = None, delivery_receipt: JsonValue = None, failure: str | None = None, context: FailureContext | None = None)
+              <code><a class="autorefs autorefs-internal" title="              RunResult(*, run_id: str, part_id: str, succeeded: bool, output: JsonValue = None, delivery_receipt: JsonValue = None, failure: str | None = None, context: FailureContext | None = None)
 
   
       dataclass
@@ -4396,7 +4508,7 @@ completes before local controller startup or direct-target contact.</p>
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait', 'request'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None, request: HumanRequest | None = None, steers: tuple[RunSteer, ...] = (), omitted_steers: int = 0, recorded_at: int | None = None)
+              <code><a class="autorefs autorefs-internal" title="              RunStatus(*, run_id: str, part_id: str, current_part_id: str | None = None, title: str, source: ResolvedSource | None, size: str, cursor: str, phase: Literal['admitted', 'running', 'stopping', 'suspended', 'finished'], active_executions: tuple[ActiveExecution, ...] = (), result: RunResult | None = None, graph_result: RunResult | None = None, controller: ControllerObservation | None = None, suspend_requested: bool = False, reason: Literal['command', 'wait', 'request'] | None = None, node: str | None = None, created_at: int | None = None, due_at: int | None = None, request: HumanRequest | None = None, steers: tuple[RunSteer, ...] = (), omitted_steers: int = 0, recorded_at: int | None = None)
 
   
       dataclass
@@ -4417,7 +4529,7 @@ completes before local controller startup or direct-target contact.</p>
 
 
 <h3 id="zeroshot.Run.resume" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">resume</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">runtime</span><span class="p">:</span> <span class="n">_Runtime</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Run</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">resume</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">runtime</span><span class="p">:</span> <span class="n">_Runtime</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">part_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Run</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
@@ -4433,6 +4545,16 @@ completes before local controller startup or direct-target contact.</p>
 
 <p><span class="doc-section-title">Parameters:</span></p>
     <ul>
+        <li class="doc-section-item field-body">
+            <b><code>part_id</code></b>
+              (<code><span title="str">str</span> | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Resume only if this part is still current. Defaults to the observed part.</p>
+          </div>
+        </li>
         <li class="doc-section-item field-body">
             <b><code>runtime</code></b>
               (<code><span title="zeroshot.client._Runtime">_Runtime</span> | None</code>, default:
@@ -4450,10 +4572,10 @@ Native conversations use the harness's restoration and fresh-session fallback.</
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              Run(client: Client, run_id: str) (zeroshot.client.Run)" href="#zeroshot.Run">Run</a></code>
+              <code><a class="autorefs autorefs-internal" title="              Run(client: Client, run_id: str, *, part_id: str | None = None) (zeroshot.client.Run)" href="#zeroshot.Run">Run</a></code>
           –
           <div class="doc-md-description">
-            <p>The successor run handle.</p>
+            <p>A handle with the same logical ID and the newly admitted current part.</p>
           </div>
         </li>
     </ul>
@@ -4478,13 +4600,13 @@ Native conversations use the harness's restoration and fresh-session fallback.</
 
     <div class="doc doc-contents ">
 
-        <p>Read the request this run made, including its state and successor.</p>
+        <p>Read the selected part's own request, including its state and successor part.</p>
 
 
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              InboxRequest(*, run_id: str, node: str, created_at: int, request: HumanRequest, state: Literal['pending', 'answered', 'expired', 'stopped'], successor_run_id: str | None)
+              <code><a class="autorefs autorefs-internal" title="              InboxRequest(*, run_id: str, part_id: str, node: str, created_at: int, request: HumanRequest, state: Literal['pending', 'answered', 'expired', 'stopped'], successor_part_id: str | None)
 
   
       dataclass
@@ -4505,7 +4627,7 @@ Native conversations use the harness's restoration and fresh-session fallback.</
 
 
 <h3 id="zeroshot.Run.answer" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">answer</span><span class="p">(</span><span class="n">answer</span><span class="p">:</span> <span class="n">JsonValue</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Run</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">answer</span><span class="p">(</span><span class="n">answer</span><span class="p">:</span> <span class="n">JsonValue</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">part_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Run</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
@@ -4521,6 +4643,16 @@ Native conversations use the harness's restoration and fresh-session fallback.</
 
 <p><span class="doc-section-title">Parameters:</span></p>
     <ul>
+        <li class="doc-section-item field-body">
+            <b><code>part_id</code></b>
+              (<code><span title="str">str</span> | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Answer only the request owned by this part. Defaults to the observed part.</p>
+          </div>
+        </li>
         <li class="doc-section-item field-body">
             <b><code>answer</code></b>
               (<code><a class="autorefs autorefs-internal" title="            JsonValue: TypeAlias = bool | int | float | str | list['JsonValue'] | dict[str, 'JsonValue'] | None
@@ -4539,10 +4671,17 @@ Native conversations use the harness's restoration and fresh-session fallback.</
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              Run(client: Client, run_id: str) (zeroshot.client.Run)" href="#zeroshot.Run">Run</a></code>
+              <code><a class="autorefs autorefs-internal" title="              Run(client: Client, run_id: str, *, part_id: str | None = None) (zeroshot.client.Run)" href="#zeroshot.Run">Run</a></code>
           –
           <div class="doc-md-description">
-            <p>The successor run handle. Invalid, repeated and late answers raise the CLI error.</p>
+            <p>A handle with the same logical ID and the newly admitted current part.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="              Run(client: Client, run_id: str, *, part_id: str | None = None) (zeroshot.client.Run)" href="#zeroshot.Run">Run</a></code>
+          –
+          <div class="doc-md-description">
+            <p>Invalid, repeated and late answers raise the CLI error.</p>
           </div>
         </li>
     </ul>
@@ -4692,7 +4831,7 @@ Native conversations use the harness's restoration and fresh-session fallback.</
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              RunVectorsPage(*, run_id: str, vectors: tuple[RunVector, ...], next_after: str | None)
+              <code><a class="autorefs autorefs-internal" title="              RunVectorsPage(*, run_id: str, part_id: str, vectors: tuple[RunVector, ...], next_after: str | None)
 
   
       dataclass
@@ -4755,7 +4894,7 @@ Native conversations use the harness's restoration and fresh-session fallback.</
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              RunVector(*, id: str, run_id: str, created_at: int, kind: str, content: JsonValue)
+              <code><a class="autorefs autorefs-internal" title="              RunVector(*, run_id: str, part_id: str, id: str, created_at: int, kind: str, content: JsonValue)
 
   
       dataclass
@@ -4793,7 +4932,7 @@ Native conversations use the harness's restoration and fresh-session fallback.</
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              RunResult(*, run_id: str, succeeded: bool, output: JsonValue = None, delivery_receipt: JsonValue = None, failure: str | None = None, context: FailureContext | None = None)
+              <code><a class="autorefs autorefs-internal" title="              RunResult(*, run_id: str, part_id: str, succeeded: bool, output: JsonValue = None, delivery_receipt: JsonValue = None, failure: str | None = None, context: FailureContext | None = None)
 
   
       dataclass
@@ -4804,7 +4943,7 @@ Native conversations use the harness's restoration and fresh-session fallback.</
           </div>
         </li>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              RunResult(*, run_id: str, succeeded: bool, output: JsonValue = None, delivery_receipt: JsonValue = None, failure: str | None = None, context: FailureContext | None = None)
+              <code><a class="autorefs autorefs-internal" title="              RunResult(*, run_id: str, part_id: str, succeeded: bool, output: JsonValue = None, delivery_receipt: JsonValue = None, failure: str | None = None, context: FailureContext | None = None)
 
   
       dataclass
@@ -4820,11 +4959,10 @@ Native conversations use the harness's restoration and fresh-session fallback.</
 <p><span class="doc-section-title">Raises:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              RunSuspendedError(run: Run, status: RunStatus) (zeroshot.run_errors.RunSuspendedError)" href="../errors/#zeroshot.RunSuspendedError">RunSuspendedError</a></code>
+              <code><a class="autorefs autorefs-internal" title="              InvalidRequestError(message: str, *, code: str = 'request.invalid', path: tuple[str | int, ...] | None = None, node: str | None = None, details: Mapping[str, JsonValue] | None = None) (zeroshot.errors.InvalidRequestError)" href="../errors/#zeroshot.InvalidRequestError">InvalidRequestError</a></code>
             –
           <div class="doc-md-description">
-            <p>If the run is suspended and already has a successor, which a
-force-stop leaves unchanged.</p>
+            <p>If a selected part has been superseded.</p>
           </div>
         </li>
         <li class="doc-section-item field-body">
@@ -5170,7 +5308,7 @@ Read complete text through <code>Run.vector(receipt.id)</code>.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-23">23 November 2026</time>
+    Last updated <time datetime="2026-11-25">25 November 2026</time>
   </span>
 
     

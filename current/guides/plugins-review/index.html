@@ -2601,8 +2601,8 @@ or assistance. Keep all account credentials outside this document, source contro
 <td>An unused organization profile name and caller-selected runtime identifiers compatible with the server's catalog.</td>
 </tr>
 <tr>
-<td><code>FAILED_RUN</code>, <code>CHECKPOINT</code>, <code>SUCCESSOR_ID</code></td>
-<td>A failed run with readable failure history and a resumable checkpoint, whose transient failure has been resolved; a fresh UUIDv7 for the explicitly requested successor.</td>
+<td><code>FAILED_RUN</code>, <code>CHECKPOINT</code>, <code>SUCCESSOR_PART_ID</code></td>
+<td>A failed run with readable failure history and a resumable checkpoint, whose transient failure has been resolved; a fresh UUIDv7 for the explicitly requested part.</td>
 </tr>
 <tr>
 <td><code>SETUP_PROFILE</code></td>
@@ -2652,12 +2652,13 @@ logical run. No different-key retry, unsolicited merge, or early success claim m
 <h3 id="p5-inspect-failure-and-recover-explicitly">P5 Inspect failure and recover explicitly<a class="headerlink" href="#p5-inspect-failure-and-recover-explicitly" title="Permanent link">&para;</a></h3>
 <p><strong>Prompt:</strong> “Use zeroshot to inspect FAILED_RUN and explain its recorded failure without changing
 anything.” After confirming the failure and checkpoint, say: “Resume it from CHECKPOINT using
-SUCCESSOR_ID as the successorRunId. Follow the recovered run and report its observed result.”</p>
-<p>Expect <code>get_run</code>, <code>read_run_logs</code>, and <code>list_run_checkpoints</code>, followed only after the recovery
-request by <code>resume_run</code> with the supplied successor and checkpoint selector. Verify that the new
-run belongs to the recorded recovery lineage. Retries must preserve the same successor/selector;
-no stop/discard or extra successor may occur, and the original failure must not be reported as a
-successful run.</p>
+SUCCESSOR_PART_ID for the next part. Follow the recovered run and report its observed result.”</p>
+<p>Expect <code>get_run</code>, <code>read_run_logs</code>, and <code>list_run_checkpoints</code>, followed after the recovery
+request by <code>resume_run</code>. Verify the call uses the original <code>runId</code>, the inspected <code>partId</code> and
+the supplied <code>successorPartId</code>. Follow the original run ID and verify that <code>currentPartId</code>
+matches the requested part. After a lost response, check whether that part was admitted. Any
+retry uses the same IDs and checkpoint. A stale request must report the conflict and leave a
+single accepted successor.</p>
 <h2 id="negative-cases">Negative cases<a class="headerlink" href="#negative-cases" title="Permanent link">&para;</a></h2>
 <h3 id="n1-keep-planning-separate-from-execution">N1 Keep planning separate from execution<a class="headerlink" href="#n1-keep-planning-separate-from-execution" title="Permanent link">&para;</a></h3>
 <p><strong>Prompt:</strong> “Use zeroshot to plan the health endpoint from EVIDENCE. Do not start a run, stop an
@@ -2707,7 +2708,7 @@ approval; record published install links only after they work.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-22">22 November 2026</time>
+    Last updated <time datetime="2026-11-25">25 November 2026</time>
   </span>
 
     

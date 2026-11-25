@@ -2188,6 +2188,10 @@
           "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
           "type": "string"
         },
+        "partId": {
+          "description": "Part that owns this record.",
+          "type": "string"
+        },
         "runId": {
           "$ref": "#/$defs/VectorId"
         },
@@ -2197,6 +2201,7 @@
       },
       "required": [
         "runId",
+        "partId",
         "node",
         "createdAt",
         "expiresAt",
@@ -2263,6 +2268,10 @@
           "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
           "type": "string"
         },
+        "partId": {
+          "description": "Part that owns this record.",
+          "type": "string"
+        },
         "request": {
           "$ref": "#/$defs/RunRequest"
         },
@@ -2272,7 +2281,7 @@
         "state": {
           "$ref": "#/$defs/RequestState"
         },
-        "successorRunId": {
+        "successorPartId": {
           "type": [
             "string",
             "null"
@@ -2281,6 +2290,7 @@
       },
       "required": [
         "runId",
+        "partId",
         "node",
         "createdAt",
         "request",
@@ -2292,7 +2302,7 @@
       "additionalProperties": false,
       "properties": {
         "protocolVersion": {
-          "const": "openengine.cluster/v2",
+          "const": "openengine.cluster/v3",
           "type": "string"
         }
       },
@@ -2307,7 +2317,7 @@
           "$ref": "#/$defs/ServerCapabilities"
         },
         "protocolVersion": {
-          "const": "openengine.cluster/v2",
+          "const": "openengine.cluster/v3",
           "type": "string"
         },
         "status": {
@@ -3885,7 +3895,7 @@
           "type": "string"
         },
         "result": {
-          "$ref": "#/$defs/RunVector"
+          "$ref": "#/$defs/RunVectorResult"
         }
       },
       "required": [
@@ -5221,6 +5231,10 @@
           "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
           "type": "string"
         },
+        "partId": {
+          "description": "Part that owns this record.",
+          "type": "string"
+        },
         "runId": {
           "type": "string"
         },
@@ -5231,6 +5245,7 @@
       "required": [
         "subscriptionId",
         "runId",
+        "partId",
         "execution",
         "event"
       ],
@@ -5245,6 +5260,13 @@
           "minLength": 1,
           "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
           "type": "string"
+        },
+        "partId": {
+          "description": "Select one physical part of this run. Omission addresses the logical run.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "runId": {
           "type": "string"
@@ -5265,6 +5287,10 @@
           "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
           "type": "string"
         },
+        "partId": {
+          "description": "Part that owns this record.",
+          "type": "string"
+        },
         "runId": {
           "type": "string"
         },
@@ -5275,6 +5301,7 @@
       "required": [
         "subscriptionId",
         "runId",
+        "partId",
         "execution"
       ],
       "type": "object"
@@ -5353,6 +5380,13 @@
             "null"
           ]
         },
+        "partId": {
+          "description": "Select one physical part of this run. Omission addresses the logical run.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "runId": {
           "type": "string"
         }
@@ -5394,12 +5428,17 @@
             }
           ]
         },
+        "partId": {
+          "description": "Part that owns this record.",
+          "type": "string"
+        },
         "runId": {
           "type": "string"
         }
       },
       "required": [
         "runId",
+        "partId",
         "checkpoints"
       ],
       "type": "object"
@@ -5407,6 +5446,13 @@
     "RunDiscardWorkspaceParams": {
       "additionalProperties": false,
       "properties": {
+        "partId": {
+          "description": "When supplied, the observed part must still be current.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "runId": {
           "type": "string"
         }
@@ -5422,12 +5468,17 @@
         "discarded": {
           "type": "boolean"
         },
+        "partId": {
+          "description": "Part that owns this record.",
+          "type": "string"
+        },
         "runId": {
           "type": "string"
         }
       },
       "required": [
         "runId",
+        "partId",
         "discarded"
       ],
       "type": "object"
@@ -5459,6 +5510,13 @@
       "additionalProperties": false,
       "description": "Requests the MVP's only stop mode: force. Repeated requests are idempotent at the run ledger.",
       "properties": {
+        "partId": {
+          "description": "When supplied, the observed part must still be current.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "runId": {
           "type": "string"
         }
@@ -5493,10 +5551,18 @@
           ],
           "description": "Omitted for responding controllers and finished runs. Never durable run state."
         },
+        "currentPartId": {
+          "description": "Latest accepted part, including when inspecting an earlier part.",
+          "type": "string"
+        },
         "omittedSteers": {
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "partId": {
+          "description": "Part whose state is projected.",
+          "type": "string"
         },
         "runId": {
           "description": "Public identity of the run whose force request was recorded.",
@@ -5543,6 +5609,8 @@
       },
       "required": [
         "runId",
+        "partId",
+        "currentPartId",
         "title",
         "size",
         "atCursor",
@@ -5596,6 +5664,10 @@
           },
           "type": "array"
         },
+        "partId": {
+          "description": "Part that owns this record.",
+          "type": "string"
+        },
         "record": {
           "$ref": "#/$defs/LogRecord"
         },
@@ -5615,6 +5687,7 @@
       "required": [
         "subscriptionId",
         "runId",
+        "partId",
         "cursor",
         "timestamp",
         "record"
@@ -5635,6 +5708,13 @@
           ]
         },
         "fromCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "partId": {
+          "description": "Select one physical part of this run. Omission addresses the logical run.",
           "type": [
             "string",
             "null"
@@ -5904,6 +5984,10 @@
             "null"
           ]
         },
+        "partId": {
+          "description": "Part observed by the caller. This must still be the current part when resume claims it.",
+          "type": "string"
+        },
         "runId": {
           "type": "string"
         },
@@ -5918,13 +6002,14 @@
           ],
           "description": "Complete successor runtime replacement. Omission retains the saved runtime."
         },
-        "successorRunId": {
+        "successorPartId": {
           "type": "string"
         }
       },
       "required": [
         "runId",
-        "successorRunId"
+        "partId",
+        "successorPartId"
       ],
       "type": "object"
     },
@@ -5932,6 +6017,13 @@
       "additionalProperties": false,
       "description": "Resolve replacement declarations against the retained graph and source without starting work.",
       "properties": {
+        "partId": {
+          "description": "When supplied, the observed part must still be current.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "runId": {
           "type": "string"
         },
@@ -5973,7 +6065,11 @@
     "RunResumeResult": {
       "additionalProperties": false,
       "properties": {
-        "resumedFrom": {
+        "currentPartId": {
+          "description": "Physical identity of the current part of the run.",
+          "type": "string"
+        },
+        "resumedFromPartId": {
           "type": "string"
         },
         "runId": {
@@ -5982,7 +6078,8 @@
       },
       "required": [
         "runId",
-        "resumedFrom"
+        "currentPartId",
+        "resumedFromPartId"
       ],
       "type": "object"
     },
@@ -6235,6 +6332,13 @@
     "RunStatusParams": {
       "additionalProperties": false,
       "properties": {
+        "partId": {
+          "description": "Select one physical part of this run. Omission addresses the logical run.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "runId": {
           "type": "string"
         }
@@ -6267,10 +6371,18 @@
           ],
           "description": "Omitted for responding controllers and finished runs. Never durable run state."
         },
+        "currentPartId": {
+          "description": "Latest accepted part, including when inspecting an earlier part.",
+          "type": "string"
+        },
         "omittedSteers": {
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "partId": {
+          "description": "Part whose state is projected.",
+          "type": "string"
         },
         "runId": {
           "type": "string"
@@ -6312,6 +6424,8 @@
       },
       "required": [
         "runId",
+        "partId",
+        "currentPartId",
         "title",
         "size",
         "atCursor",
@@ -6405,6 +6519,13 @@
             "null"
           ]
         },
+        "partId": {
+          "description": "When supplied, the observed part must still be current.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "runId": {
           "type": "string"
         },
@@ -6421,6 +6542,10 @@
     "RunSteerResult": {
       "additionalProperties": false,
       "properties": {
+        "partId": {
+          "description": "Part that owns this record.",
+          "type": "string"
+        },
         "runId": {
           "type": "string"
         },
@@ -6430,6 +6555,7 @@
       },
       "required": [
         "runId",
+        "partId",
         "steer"
       ],
       "type": "object"
@@ -6514,16 +6640,45 @@
       "additionalProperties": false,
       "description": "A successful submission returns the one public identity used by every later run method.",
       "properties": {
+        "currentPartId": {
+          "description": "Physical identity of the current part of the run.",
+          "type": "string"
+        },
         "runId": {
           "type": "string"
         }
       },
       "required": [
-        "runId"
+        "runId",
+        "currentPartId"
       ],
       "type": "object"
     },
-    "RunVector": {
+    "RunVectorParams": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/VectorId"
+        },
+        "partId": {
+          "description": "Select one physical part of this run. Omission addresses the logical run.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runId",
+        "id"
+      ],
+      "type": "object"
+    },
+    "RunVectorResult": {
+      "description": "Full vector content. Kept separate from page response bounds.",
       "oneOf": [
         {
           "properties": {
@@ -6731,6 +6886,17 @@
         },
         {
           "properties": {
+            "checkpointId": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/CheckpointId"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Present when the operator explicitly rewound to a named checkpoint."
+            },
             "kind": {
               "const": "continuation",
               "type": "string"
@@ -6780,6 +6946,10 @@
         "id": {
           "$ref": "#/$defs/VectorId"
         },
+        "partId": {
+          "$ref": "#/$defs/VectorId",
+          "description": "Physical part that originally recorded this vector, including inherited entries."
+        },
         "runId": {
           "$ref": "#/$defs/VectorId"
         }
@@ -6787,23 +6957,8 @@
       "required": [
         "id",
         "runId",
+        "partId",
         "createdAt"
-      ],
-      "type": "object"
-    },
-    "RunVectorParams": {
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "$ref": "#/$defs/VectorId"
-        },
-        "runId": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "runId",
-        "id"
       ],
       "type": "object"
     },
@@ -6911,6 +7066,17 @@
         },
         {
           "properties": {
+            "checkpointId": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/CheckpointId"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Present when the operator explicitly rewound to a named checkpoint."
+            },
             "kind": {
               "const": "continuation",
               "type": "string"
@@ -7017,6 +7183,9 @@
         "id": {
           "$ref": "#/$defs/VectorId"
         },
+        "partId": {
+          "$ref": "#/$defs/VectorId"
+        },
         "runId": {
           "$ref": "#/$defs/VectorId"
         }
@@ -7024,6 +7193,7 @@
       "required": [
         "id",
         "runId",
+        "partId",
         "createdAt"
       ],
       "type": "object"
@@ -7050,6 +7220,13 @@
             "null"
           ]
         },
+        "partId": {
+          "description": "Select one physical part of this run. Omission addresses the logical run.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "runId": {
           "type": "string"
         }
@@ -7072,6 +7249,10 @@
             }
           ]
         },
+        "partId": {
+          "description": "Part that owns this record.",
+          "type": "string"
+        },
         "runId": {
           "type": "string"
         },
@@ -7085,6 +7266,7 @@
       },
       "required": [
         "runId",
+        "partId",
         "vectors"
       ],
       "type": "object"
@@ -7115,6 +7297,10 @@
           "type": "array"
         },
         "cursor": {
+          "type": "string"
+        },
+        "partId": {
+          "description": "Part that owns this record.",
           "type": "string"
         },
         "recordedAt": {
@@ -7161,6 +7347,7 @@
       "required": [
         "subscriptionId",
         "runId",
+        "partId",
         "title",
         "size",
         "cursor",
@@ -7173,6 +7360,13 @@
       "description": "Establishes a durable run watch.\n\n`fromCursor` is exclusive. Reconnecting with the last delivered cursor therefore returns each\nlater watch record once, with no replayed boundary record and no skipped later record.",
       "properties": {
         "fromCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "partId": {
+          "description": "Select one physical part of this run. Omission addresses the logical run.",
           "type": [
             "string",
             "null"

@@ -2611,6 +2611,9 @@ the graph live and follows new output only when you reach the bottom.</p>
 <p>Switch the run view between <strong>Steps</strong> and <strong>Graph</strong>. Runs open in Steps until you choose the
 graph, and a run you have not opened before starts in the view you chose last. Both show the same
 replay position, and the selection carries over when you switch.</p>
+<p>Resuming, answering a question, or retrying from a checkpoint extends the same row and URL.
+Steps shows each attempt in order. Select an earlier attempt and choose <strong>Show in graph</strong> to
+see the graph and runtime at that point. <strong>Go to latest</strong> returns to the current state.</p>
 <p>In the graph, selecting a step opens it in the inspector, whose header names the groups that enclose
 it, each a link up the hierarchy; while it is open, selecting the empty canvas or the header's first
 link shows the run's own details. The graph
@@ -2940,12 +2943,15 @@ use <code>--after CHECKPOINT_ID</code> with the returned <code>nextAfter</code> 
 prerequisite outputs. The selected node runs again. Parallel and mapped groups have one checkpoint
 for the whole outer group, including nested groups and all mapped batches; individual concurrent
 writers do not have separate snapshots. Read-only boundaries can share the same workspace bytes.</p>
-<p>Both modes create a new run ID, keep the original graph, input, source, and delivery lineage, and
-resolve credentials again. A selected checkpoint or the continuation of a suspended run restores each supported
+<p>Both modes keep the original <code>runId</code> and start a new part with fresh credentials.
+Status reports the latest part as <code>currentPartId</code>. A resume receipt identifies the previous
+part as <code>resumedFromPartId</code>. An answered inbox request identifies the next part as <code>successorPartId</code>.
+Use <code>zeroshot status RUN_ID --part PART_ID</code> to inspect an earlier attempt. Each part uses the original graph, input, source, and
+delivery lineage. A selected checkpoint or the continuation of a suspended run restores each supported
 <code>node_instance</code> agent's provider conversation as it was at the checkpoint, even on another machine
 or without restoring workspace files. Restarting such a successor restores the same conversations
 again, without the turns it added before it failed. A restarted run you submitted and every
-<code>execution</code>-scoped agent start new conversations. Successor token usage starts at zero.</p>
+<code>execution</code>-scoped agent start new conversations. Each part records its own token usage. Run totals include every part that performed work.</p>
 <p>Checkpoints hold raw provider transcripts and conversation files, up to 1 GiB per conversation.
 They are kept and deleted with their checkpoint, deduplicated across its lineage, and never included
 in workspace exports. Restoring replaces only that conversation's provider files, including later
@@ -3015,16 +3021,18 @@ Running nodes finish, including the whole outer parallel or mapped group. At the
 status becomes <code>suspended</code>, with <code>reason</code>, <code>node</code> and <code>createdAt</code>. The controller exits and releases
 the workspace lock. A graph that finishes first keeps its ordinary result. Running status includes
 <code>suspendRequested</code> after the request. Suspension requires workspace checkpoints.</p>
-<p><code>zeroshot resume RUN_ID</code> creates a successor (<code>runId</code>, <code>resumedFrom</code>) beginning at the held-back
-node. It preserves workspace changes made after suspension and restores captured node-instance provider
+<p><code>zeroshot resume RUN_ID</code> returns the same <code>runId</code> and a new <code>currentPartId</code>. The part begins
+at the held-back node. It preserves workspace changes made after suspension and restores captured node-instance provider
 conversations from the checkpoint. Unsupported or missing conversations start new with a system log.
 A suspended wait can continue only from its reported <code>wait.dueAt</code>, and continues after the wait.
 No timer starts successors locally or on a direct target. Selected checkpoint resume and
-<code>--discard-workspace-changes</code> are refused for suspended runs. The predecessor stays suspended and
-<code>workspaceRecovery.successorRunId</code> links to its sole successor. <code>force-stop</code> can finish an unclaimed
+<code>--discard-workspace-changes</code> are refused for suspended runs. The old part stays suspended in its own history. Reading the original run ID shows the current
+part. Add <code>--part PART_ID</code> to pin a read, resume or answer to the part you observed. A second
+attempt to answer an earlier question then reports that the run has advanced. <code>force-stop</code> can finish an unclaimed
 suspended attempt as <code>force_stopped</code> and removes its retained checkpoints. A direct target refuses
 <code>discard-workspace</code> for a suspended run that has no successor; force-stop it first.</p>
-<p>Foreground <code>run</code> and <code>watch</code> end with exit 0 at suspension. <code>logs</code> and read-only status commands
+<p>Foreground <code>run</code> and <code>watch</code> end with exit 0 at suspension. Use <code>zeroshot watch RUN_ID --follow</code>
+to stay attached while someone answers or resumes the run. <code>logs</code> and read-only status commands
 continue to work after the controller exits. Add <code>--target NAME</code> for the same controls on a direct
 target. Hosts advertise suspension with <code>openengine.run-suspension/v1</code>.</p>
 <h2 id="vector-record">Vector record<a class="headerlink" href="#vector-record" title="Permanent link">&para;</a></h2>
@@ -3049,14 +3057,11 @@ that advertises <code>openengine.request-ask/v1</code>. See <a href="../ask-a-pe
 <p>In the browser, a request step shows its question and allowed answers. While the run waits, the
 status line reads <strong>Waiting for a person</strong> with the question, and the step shows the deadline and
 the <code>answer</code> command. When the deadline passes, the open view marks it and removes the answer hint;
-this does not imply that a successor has recorded an expiry. Replay uses the selected position's
-recorded time and shows successor information only at the current end of history.
-Once a successor run took the question over, the step names that run and the
-status line reads <strong>Continued in run</strong> with its ID; a question the run stopped waiting for without
-a successor reads as closed without an answer. Once answered, the chosen answer is marked with how
-long the answer took, from the recorded request and answer times.
-Who answered is not recorded. A successor run lists the work it carried over, marks where it
-continued after each answer, and links back to the run that asked.</p>
+expiry is recorded when the run takes its timeout route. Replay uses the selected position's
+recorded time.
+In the live run view, the same URL follows the answer into the next part. Replay keeps the
+selected moment. A second question appears in order after the first answer. Earlier work keeps
+its original logs and usage, and a checkpoint retry marks where the graph started again.</p>
 <h2 id="steer-a-run">Steer a run<a class="headerlink" href="#steer-a-run" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="go">zeroshot steer RUN_ID "Prioritize the parser regression."</span>
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="go">zeroshot steer RUN_ID --node e2e_tester "Use the E2E service on port 3000."</span>
@@ -3064,14 +3069,16 @@ continued after each answer, and links back to the run that asked.</p>
 <a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="go">printf '%s' 'Check the Windows path too.' | zeroshot steer RUN_ID --text-stdin</span>
 </code></pre></div>
 <p>Supply exactly one text source. An admitted, running or suspended run accepts direction.
-Steering keeps a suspended run suspended. A run with a successor refuses and names that successor;
-steer the successor instead. Stopping runs and runs past the end of their graph refuse steering.</p>
+Use the original run ID to steer the current part, including after a resume or answer. Steering
+keeps a suspended run suspended. Stopping runs and runs past the end of their graph refuse steering.</p>
 <p>Use <code>--node NAME</code> to select the exact name of one agent in the run's admitted runtime plan.
 The node need not have started: every mapped copy and future visit with that name is eligible.
 Unknown names and non-agent nodes are rejected before recording direction. Without <code>--node</code>,
 direction goes to every agent. Node targeting uses human steering authorization and cannot be
 combined with <code>--network</code>. Both scopes default to <code>standing</code>; <code>--mode once</code> delivers once per
 matching node instance.</p>
+<p>An agent publishing with <code>--network NAME</code> uses its execution's exact run part ID as <code>RUN_ID</code>.
+If it supplies <code>--part</code>, both IDs must match. The execution capability authorizes the publication.</p>
 <p>With the default standing mode, every eligible agent conversation, including reviewers, receives each steer
 at its next tool call or in its next prompt, whichever comes first. It cannot revise a tool call
 already issued. At a tool call the steer arrives as a user message of its own on Claude Code,
@@ -3158,7 +3165,7 @@ outcome, inspect the run vectors before sending the message again.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-23">23 November 2026</time>
+    Last updated <time datetime="2026-11-25">25 November 2026</time>
   </span>
 
     

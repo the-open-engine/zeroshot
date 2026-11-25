@@ -2601,13 +2601,14 @@ The example is an ordinary custom graph; there is no built-in approval template.
 </code></pre></div>
 <p>For approval, change the answer's decision to <code>approved</code> and give empty feedback. An answer must
 provide every declared signal and every required output field. Unknown fields, signals and labels
-are refused as <code>invalid_request</code>, naming the path, without consuming the request. A second answer
-names the accepted successor. <code>resume</code>, including checkpoint selection, refuses requests and names
-<code>answer</code> before resolving credentials; after an answer it names the successor instead. If that
-successor fails or is lost, <code>resume</code> on it starts again right after the answer: the request stays
-answered, the question is not asked again, and <code>node_instance</code> agents continue their conversations
-from when the question was asked. Only a successor lost in the instant it starts, before its
-starting point is recorded, restarts at the root with new conversations and asks again.</p>
+are refused as <code>invalid_request</code>, naming the path, without consuming the request. To answer the
+question you inspected, pass its <code>partId</code> to <code>zeroshot answer RUN_ID --part PART_ID --input answer.json</code>.
+If the run has advanced, the command reports the stale part. While a question is pending,
+<code>resume</code> directs you to <code>answer</code> even if you selected a checkpoint.</p>
+<p>If the next part fails or is lost, <code>zeroshot resume RUN_ID</code> restarts right after the answer.
+The request stays answered, and <code>node_instance</code> agents continue their conversations from when
+the question was asked. A part lost before its starting point was recorded restarts at the root
+with new conversations and asks again.</p>
 <p>Every request has a deadline: <code>timeoutMs</code> from creation, 7 days when omitted, at most 30 days.
 Acceptance is strictly before the deadline. At or after it, <code>answer</code> checks expiry before content,
 records an <code>expiry</code> vector and starts the <code>timeout</code> successor, then exits 1 naming it. The successor
@@ -2616,12 +2617,12 @@ routes <code>timeout</code> to an explicit failure. Local and direct targets hav
 report overdue requests as <code>expired</code> without changing the suspended run or starting anything.</p>
 <p><code>inbox list</code> returns <code>requests</code> and optional <code>nextAfter</code> in run ID order. Pass that cursor with
 <code>--after</code>, which locally must be a run ID; <code>--limit</code> accepts 1 through 100, default 50. Answered
-and force-stopped requests drop from the list. <code>inbox show</code> retains their <code>answered</code>, <code>expired</code> or
-<code>stopped</code> disposition and the successor link. It shows only the question that run made, never an
-inherited question.</p>
+and force-stopped requests drop from the list. <code>inbox show RUN_ID</code> shows the latest question in
+the run. To inspect an earlier question, use <code>inbox show RUN_ID --part PART_ID</code>. Its record
+retains the <code>answered</code>, <code>expired</code> or <code>stopped</code> disposition and, when present, <code>successorPartId</code>.</p>
 <p>Use <code>vectors RUN_ID</code> for bounded summaries and <code>vectors show RUN_ID ID</code> for full requests and
 answers. Successors inherit the ordered record. <code>checkpoints</code> includes entry to the request node.
-The run viewer and list display the question, deadline and successor; answering uses the CLI or SDK.</p>
+The run viewer shows questions and answers in order. Use the CLI or SDK to answer a pending question.</p>
 <p>Request nodes use <code>builtin.request.ask@1</code> with <code>{"kind":"request"}</code>. They must be verifiers with
 exactly one required string input <code>text</code>, a flat record output of boolean, integer, number, string
 or enum fields, the fixed message diagnostic, no instructions and one attempt. They may appear
@@ -2656,7 +2657,7 @@ those routes refuses inbox reads. Vector reads still require only <code>openengi
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-22">22 November 2026</time>
+    Last updated <time datetime="2026-11-25">25 November 2026</time>
   </span>
 
     

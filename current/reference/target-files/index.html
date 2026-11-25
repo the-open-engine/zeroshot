@@ -2299,7 +2299,8 @@ Downloads require a new destination and publish it only after validating the com
 Use portable ASCII names; absolute paths, traversal, Windows reserved names, case collisions,
 links and special files are rejected. Permissions and executable bits are not transferred.</p>
 <p><code>file list --run RUN_ID</code> lists host-managed publications. <code>file download PATH OUTPUT --run RUN_ID</code>
-reads one. Clients cannot write or remove run publications. The host separately owns staged inputs,
+reads one. After a resume, pass the producing part ID from the receipt’s <code>address.scope.runId</code>
+to <code>--run</code>. Clients cannot write or remove run publications. The host separately owns staged inputs,
 private pins, request publications and final publications. References to files in a live local
 workspace are not managed publications and do not appear in this tree.</p>
 <p>An upload receipt includes its operation key. Supply <code>--operation</code> when retrying a known upload:
