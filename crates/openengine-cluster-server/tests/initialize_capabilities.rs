@@ -56,7 +56,7 @@ async fn initialize_capabilities<B: ClusterBackend>(
                     "jsonrpc": "2.0",
                     "id": 1,
                     "method": "initialize",
-                    "params": { "protocolVersion": "openengine.cluster/v3" }
+                    "params": { "protocolVersion": "openengine.cluster/v4" }
                 })
                 .to_string(),
             )

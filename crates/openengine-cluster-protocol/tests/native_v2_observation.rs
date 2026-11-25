@@ -1,6 +1,3 @@
-#[path = "native_v2_observation/previous_workspace_reader.rs"]
-mod previous_workspace_reader;
-
 #[path = "support/assert_value.rs"]
 mod assert_value;
 

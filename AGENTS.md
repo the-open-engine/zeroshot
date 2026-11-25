@@ -2036,11 +2036,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   controller shutdown preserves managed folders; explicit force-stop also disposes retained managed
   folders after suspension/reconstruction under the folder lease.
 
-- OECP uses `openengine.cluster/v3`. Direct and hosted HTTP discovery use
-  `zeroshot.native-v2-target/v4`, with `zeroshot.hosted-runs/v3` for hosted observation.
+- OECP uses `openengine.cluster/v4`. Direct and hosted HTTP discovery use
+  `zeroshot.native-v2-target/v5`, with `zeroshot.hosted-runs/v4` for hosted observation.
   Run and browser history routes group confirmed successors under the original run ID.
   The isolated `crates/openengine-cluster-testkit/tests/released-wire-contract` workspace pins
-  v17.1.1 to test version mismatch at initialization and reading its continuation records.
+  actual pre-workspace main `79ccf9e` (including run parts) and v17.1.1 to test bidirectional
+  version refusal before observation and stored continuation readability. The actual-main reader
+  controls retain part IDs while isolating incompatible workspace status/list/watch fields.
   The protocol's `native_v2_observation` integration suite invokes these controls and the current
   runtime/HTTP wire tests through the Linux, Windows and macOS CI entry points. Child Cargo
   commands clear the parent package's Cargo metadata and use independent build directories.

@@ -2318,7 +2318,7 @@
       "additionalProperties": false,
       "properties": {
         "protocolVersion": {
-          "const": "openengine.cluster/v3",
+          "const": "openengine.cluster/v4",
           "type": "string"
         }
       },
@@ -2333,7 +2333,7 @@
           "$ref": "#/$defs/ServerCapabilities"
         },
         "protocolVersion": {
-          "const": "openengine.cluster/v3",
+          "const": "openengine.cluster/v4",
           "type": "string"
         },
         "status": {

@@ -66,7 +66,7 @@ async fn client_rejects_a_success_that_does_not_echo_the_requested_version() {
         error,
         ClientError::InvalidResponse(message)
             if message.contains("requested openengine.cluster/v0")
-                && message.contains("received openengine.cluster/v3")
+                && message.contains("received openengine.cluster/v4")
     );
     assert!(rejected);
 }

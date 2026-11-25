@@ -9,21 +9,23 @@ description: 'Target discovery, local harness configuration, permissions and wor
 ## Wire compatibility
 
 Clients and targets must implement the same current wire contract. OECP initialization requires
-`openengine.cluster/v3`; target discovery requires `zeroshot.native-v2-target/v4`; hosted run
-observation requires `zeroshot.hosted-runs/v3`. These are wire identifiers, independent of package
+`openengine.cluster/v4`; target discovery requires `zeroshot.native-v2-target/v5`; hosted run
+observation requires `zeroshot.hosted-runs/v4`. These are wire identifiers, independent of package
 versions. The discovery URL, HTTP routes and JSON-RPC method names are unchanged.
 
 Upgrade Zeroshot clients (including Python wheels), targets and hosted gateways together to
 releases implementing these wire identifiers. Gateway operators must update discovery and protocol
 dependencies in the same rollout. Incompatibility stops the operation before submission or
-observation, without automatic submission retries; existing runs continue executing.
+observation, without automatic submission retries; existing runs continue executing. Workspace
+observation requires these newer gates even when the peer already supports run parts. Stored run
+metadata and artifact identities remain readable; this upgrade changes only peer negotiation.
 
 Run status returns the original `runId`, the selected `partId` and `currentPartId`.
 Resume includes the observed `partId` and the proposed `successorPartId`. A stale source
 returns `RUN_CONFLICT` with the current part ID. Log and watch cursors include the
 originating part and can be passed back unchanged.
 
-Hosted run routes use `zeroshot.hosted-runs/v3` for status, watch, logs and force in every phase.
+Hosted run routes use `zeroshot.hosted-runs/v4` for status, watch, logs and force in every phase.
 For attach and steer, the CLI opens an OECP session scoped to the selected physical part.
 A guarded steer must still address the current part when the host accepts it.
 
@@ -396,7 +398,7 @@ outer discovery extension alongside the existing `hosted_runs` extension:
 
 `TargetWorkspaceExportDiscovery` is the authoritative Rust type. The extension object is strict;
 unknown outer extension keys remain compatible with older clients. Do not add export fields to
-`zeroshot.hosted-runs/v3` or `openengine.hosted-workspace-recovery/v1`. Export requires the exact
+`zeroshot.hosted-runs/v4` or `openengine.hosted-workspace-recovery/v1`. Export requires the exact
 kind above; an absent or unfamiliar kind disables it without a fallback operation.
 
 The route uses the same-origin `hosted_runs.base_url`, including any installation path prefix,

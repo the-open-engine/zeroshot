@@ -11,6 +11,10 @@ publish = false
 openengine-cluster-client = { path = "../../../openengine-cluster-client" }
 openengine-cluster-protocol = { path = "../../../openengine-cluster-protocol" }
 openengine-cluster-server = { path = "../../../openengine-cluster-server" }
+# Actual pre-workspace main, including run/part and artifact contracts.
+base-client = { package = "openengine-cluster-client", git = "https://github.com/the-open-engine/zeroshot", rev = "79ccf9effe15a47cf44b893421320816f8c1ce6f" }
+base-protocol = { package = "openengine-cluster-protocol", git = "https://github.com/the-open-engine/zeroshot", rev = "79ccf9effe15a47cf44b893421320816f8c1ce6f" }
+base-server = { package = "openengine-cluster-server", git = "https://github.com/the-open-engine/zeroshot", rev = "79ccf9effe15a47cf44b893421320816f8c1ce6f" }
 released-client = { package = "openengine-cluster-client", git = "https://github.com/the-open-engine/zeroshot", rev = "15e17f792359cf6f6a0358918ad6146da57fb32f" }
 released-protocol = { package = "openengine-cluster-protocol", git = "https://github.com/the-open-engine/zeroshot", rev = "15e17f792359cf6f6a0358918ad6146da57fb32f" }
 released-server = { package = "openengine-cluster-server", git = "https://github.com/the-open-engine/zeroshot", rev = "15e17f792359cf6f6a0358918ad6146da57fb32f" }

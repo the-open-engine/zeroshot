@@ -431,6 +431,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "openengine-cluster-client"
+version = "0.1.0"
+source = "git+https://github.com/the-open-engine/zeroshot?rev=79ccf9effe15a47cf44b893421320816f8c1ce6f#79ccf9effe15a47cf44b893421320816f8c1ce6f"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "openengine-cluster-protocol 0.1.0 (git+https://github.com/the-open-engine/zeroshot?rev=79ccf9effe15a47cf44b893421320816f8c1ce6f)",
+ "openengine-cluster-server 0.1.0 (git+https://github.com/the-open-engine/zeroshot?rev=79ccf9effe15a47cf44b893421320816f8c1ce6f)",
+ "parking_lot",
+ "rustls",
+ "rustls-native-certs",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-tungstenite",
+]
+
+[[package]]
 name = "openengine-cluster-protocol"
 version = "0.1.0"
 dependencies = [
@@ -446,6 +465,19 @@ dependencies = [
 name = "openengine-cluster-protocol"
 version = "0.1.0"
 source = "git+https://github.com/the-open-engine/zeroshot?rev=15e17f792359cf6f6a0358918ad6146da57fb32f#15e17f792359cf6f6a0358918ad6146da57fb32f"
+dependencies = [
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "url",
+]
+
+[[package]]
+name = "openengine-cluster-protocol"
+version = "0.1.0"
+source = "git+https://github.com/the-open-engine/zeroshot?rev=79ccf9effe15a47cf44b893421320816f8c1ce6f#79ccf9effe15a47cf44b893421320816f8c1ce6f"
 dependencies = [
  "schemars",
  "serde",
@@ -480,6 +512,24 @@ dependencies = [
  "async-trait",
  "futures-util",
  "openengine-cluster-protocol 0.1.0 (git+https://github.com/the-open-engine/zeroshot?rev=15e17f792359cf6f6a0358918ad6146da57fb32f)",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tokio-tungstenite",
+ "tokio-util",
+]
+
+[[package]]
+name = "openengine-cluster-server"
+version = "0.1.0"
+source = "git+https://github.com/the-open-engine/zeroshot?rev=79ccf9effe15a47cf44b893421320816f8c1ce6f#79ccf9effe15a47cf44b893421320816f8c1ce6f"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "openengine-cluster-protocol 0.1.0 (git+https://github.com/the-open-engine/zeroshot?rev=79ccf9effe15a47cf44b893421320816f8c1ce6f)",
  "parking_lot",
  "serde",
  "serde_json",
@@ -1268,10 +1318,13 @@ version = "0.0.0"
 dependencies = [
  "openengine-cluster-client 0.1.0",
  "openengine-cluster-client 0.1.0 (git+https://github.com/the-open-engine/zeroshot?rev=15e17f792359cf6f6a0358918ad6146da57fb32f)",
+ "openengine-cluster-client 0.1.0 (git+https://github.com/the-open-engine/zeroshot?rev=79ccf9effe15a47cf44b893421320816f8c1ce6f)",
  "openengine-cluster-protocol 0.1.0",
  "openengine-cluster-protocol 0.1.0 (git+https://github.com/the-open-engine/zeroshot?rev=15e17f792359cf6f6a0358918ad6146da57fb32f)",
+ "openengine-cluster-protocol 0.1.0 (git+https://github.com/the-open-engine/zeroshot?rev=79ccf9effe15a47cf44b893421320816f8c1ce6f)",
  "openengine-cluster-server 0.1.0",
  "openengine-cluster-server 0.1.0 (git+https://github.com/the-open-engine/zeroshot?rev=15e17f792359cf6f6a0358918ad6146da57fb32f)",
+ "openengine-cluster-server 0.1.0 (git+https://github.com/the-open-engine/zeroshot?rev=79ccf9effe15a47cf44b893421320816f8c1ce6f)",
  "serde_json",
  "tokio",
 ]
