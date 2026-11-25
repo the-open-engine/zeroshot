@@ -715,7 +715,7 @@ def test_closed_client_rejects_run_handle(fake_native: Path) -> None:
 
 
 def test_failed_result_has_opt_in_exception_projection() -> None:
-    result = RunResult(run_id="run-1", succeeded=False, failure="worker_failed")
+    result = RunResult(run_id="run-1", part_id="run-1", succeeded=False, failure="worker_failed")
     with pytest.raises(RunFailedError) as caught:
         result.raise_for_failure()
     assert caught.value.result is result

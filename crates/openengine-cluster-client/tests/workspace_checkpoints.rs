@@ -19,7 +19,6 @@ impl JsonRpcTransport for CheckpointTransport {
                 assert_eq!(
                     request["params"],
                     json!({
-                        "protocolVersion": openengine_cluster_protocol::PROTOCOL_VERSION,
                         "runId": "prior", "after": "entry-1", "limit": 1
                     })
                 );
@@ -34,7 +33,6 @@ impl JsonRpcTransport for CheckpointTransport {
                 assert_eq!(
                     request["params"],
                     json!({
-                        "protocolVersion": openengine_cluster_protocol::PROTOCOL_VERSION,
                         "runId": "prior", "partId":"prior", "successorPartId": "successor",
                         "from": {"kind": "checkpoint", "checkpointId": "entry-2"}
                     })
@@ -147,43 +145,4 @@ async fn typed_client_queries_fixed_requirements_and_carries_runtime_replacement
             .current_part_id,
         RunId::new("successor")
     );
-}
-
-#[tokio::test]
-async fn v2_only_peer_gets_one_physical_resume_and_never_a_foreign_guard() {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use openengine_cluster_protocol::physical_runs;
-    struct PhysicalPeer(AtomicUsize);
-    #[async_trait]
-    impl JsonRpcTransport for PhysicalPeer {
-        async fn request(&self, request: String) -> Result<String, TransportError> {
-            let request: Value = serde_json::from_str(&request).unwrap();
-            let id = &request["id"];
-            let params = &request["params"];
-            let response = if request["method"] == "initialize" {
-                assert_eq!(params["protocolVersion"], "");
-                json!({"jsonrpc":"2.0","id":id,"error":{"code":-32000,"message":"Unsupported protocol version",
-                    "data":{"code":"UNSUPPORTED_PROTOCOL_VERSION","details":{"supportedProtocolVersion":physical_runs::VERSION}}}})
-            } else if params.get("protocolVersion").is_some() {
-                json!({"jsonrpc":"2.0","id":id,"error":{"code":-32602,"message":"Invalid params"}})
-            } else {
-                assert_eq!(params, &json!({"runId":"source","successorRunId":"child"}));
-                self.0.fetch_add(1, Ordering::Relaxed);
-                json!({"jsonrpc":"2.0","id":id,"result":{"runId":"child","resumedFrom":"source"}})
-            };
-            Ok(response.to_string())
-        }
-    }
-    let peer = PhysicalPeer(AtomicUsize::new(0));
-    let client = ClusterClient::new(&peer);
-    let mut params: RunResumeParams = serde_json::from_value(
-        json!({"runId":"source", "partId":"source", "successorPartId":"child"}),
-    )
-    .unwrap();
-    let receipt = client.run_resume(params.clone()).await.unwrap();
-    assert_eq!(receipt.current_part_id.as_str(), "child");
-    assert_eq!(receipt.resumed_from.as_str(), "source");
-    params.part_id = RunId::new("foreign");
-    assert!(client.run_resume(params).await.is_err());
-    assert_eq!(peer.0.load(Ordering::Relaxed), 1);
 }

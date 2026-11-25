@@ -1262,16 +1262,7 @@ impl NativeV2PlatformController {
         id: &RunId,
         successor: Option<RunId>,
     ) -> Result<openengine_cluster_protocol::InboxShowResult, NativeV2PlatformError> {
-        if !self.allocator.supports_request_ask() {
-            return Err(NativeV2PlatformError::InvalidRequest(
-                "host does not enable openengine.request-ask/v1".to_owned(),
-            ));
-        }
-        let now = (self
-            .allocator
-            .suspension_policy()
-            .unwrap_or_default()
-            .wall_clock)();
+        let now = self.inbox_time()?;
         let request = crate::v2_run_ledger::inbox::show(self.ledger.as_ref(), id, now).await?;
         match successor {
             Some(successor) => Ok(crate::v2_run_ledger::inbox::with_successor(
@@ -1283,58 +1274,44 @@ impl NativeV2PlatformController {
             None => Ok(request),
         }
     }
-    pub async fn inbox_list(
+    fn inbox_time(
         &self,
-        params: openengine_cluster_protocol::InboxListParams,
-    ) -> Result<openengine_cluster_protocol::InboxListResult, NativeV2PlatformError> {
-        self.inbox_inventory(params, false).await
-    }
-
-    async fn inbox_inventory(
-        &self,
-        params: openengine_cluster_protocol::InboxListParams,
-        physical: bool,
-    ) -> Result<openengine_cluster_protocol::InboxListResult, NativeV2PlatformError> {
+    ) -> Result<openengine_cluster_protocol::UnixTimestampMillis, NativeV2PlatformError> {
         if !self.allocator.supports_request_ask() {
             return Err(NativeV2PlatformError::InvalidRequest(
                 "host does not enable openengine.request-ask/v1".to_owned(),
             ));
         }
+        Ok((self
+            .allocator
+            .suspension_policy()
+            .unwrap_or_default()
+            .wall_clock)())
+    }
+
+    pub async fn inbox_list(
+        &self,
+        params: openengine_cluster_protocol::InboxListParams,
+    ) -> Result<openengine_cluster_protocol::InboxListResult, NativeV2PlatformError> {
+        let now = self.inbox_time()?;
         params
             .validate()
             .map_err(|error| NativeV2PlatformError::InvalidRequest(error.to_string()))?;
         let mut requests = Vec::new();
-        let mut families = self.run_families(physical).await?;
+        let mut families = self.run_families().await?;
         families.sort_by(|a, b| a.root().cmp(b.root()));
-        let now = (self
-            .allocator
-            .suspension_policy()
-            .unwrap_or_default()
-            .wall_clock)();
-        for family in families {
-            if params
+        for family in families.iter().filter(|family| {
+            params
                 .after
                 .as_ref()
-                .is_some_and(|after| family.root() <= after)
-            {
-                continue;
-            }
+                .is_none_or(|after| family.root() > after)
+        }) {
             let id = family.current();
             let stored = self
                 .ledger
                 .get(id)
                 .await?
                 .ok_or(RunLedgerError::RunNotFound)?;
-            if physical
-                && self
-                    .allocator
-                    .workspace_recovery(id)
-                    .await
-                    .successor_run_id
-                    .is_some()
-            {
-                continue;
-            }
             if stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended
                 && let Some(mut entry) =
                     stored.snapshot.suspension.as_ref().and_then(|suspension| {

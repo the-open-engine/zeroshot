@@ -1,7 +1,6 @@
 //! Per-method request routing: decode typed params, invoke the backend, serialize the response.
 
-use std::sync::{Arc, atomic::Ordering};
-use openengine_cluster_protocol::physical_runs;
+use std::sync::Arc;
 
 use openengine_cluster_protocol::{
     ApplyParams, DeleteParams, DomainErrorData, GetParams, InitializeParams, PlanParams, RequestId,
@@ -27,16 +26,15 @@ where
 {
     #[must_use]
     pub fn new(backend: B, context: ConnectionContext) -> Self {
-        Self::from_shared(Arc::new(backend), context)
+        Self {
+            backend: Arc::new(backend),
+            context,
+        }
     }
 
     #[must_use]
     pub fn from_shared(backend: Arc<B>, context: ConnectionContext) -> Self {
-        Self {
-            run_parts: Default::default(),
-            backend,
-            context,
-        }
+        Self { backend, context }
     }
 
     pub(crate) fn backend(&self) -> &Arc<B> {
@@ -69,58 +67,7 @@ where
         if !params.is_object() {
             return serialize_error(Some(id), INVALID_PARAMS, "Invalid params", None);
         }
-        if physical_runs::run_method(method) {
-            let mut params = params;
-            let dispatcher = match self.run_dispatcher(&id, method, &mut params) {
-                Ok(dispatcher) => dispatcher,
-                Err(response) => return response,
-            };
-            return dispatcher.route(descriptor, id, params).await;
-        }
         self.route(descriptor, id, params).await
-    }
-
-    pub(crate) fn run_dispatcher(
-        &self,
-        id: &RequestId,
-        method: &str,
-        params: &mut Value,
-    ) -> Result<Self, String> {
-        let mut dispatcher = self.clone();
-        let version = params
-            .as_object_mut()
-            .and_then(|o| o.remove("protocolVersion"));
-        let uses_parts = match version {
-            Some(value) if value.as_str() == Some(PROTOCOL_VERSION) => true,
-            None => self.run_parts.load(Ordering::Acquire),
-            _ => return Err(invalid_run_params(id)),
-        };
-        dispatcher.context.physical_run_ids = !uses_parts;
-        if !uses_parts && !physical_runs::read_request(method, params) {
-            return Err(invalid_run_params(id));
-        }
-        Ok(dispatcher)
-    }
-
-    pub(crate) fn run_response<T: serde::Serialize>(
-        &self,
-        method: &str,
-        id: RequestId,
-        result: T,
-    ) -> String {
-        if !self.context.physical_run_ids() {
-            return serialize_success(id, result);
-        }
-        match serde_json::to_value(result) {
-            Ok(mut value) => {
-                physical_runs::write_response(method, &mut value);
-                serialize_success(id, value)
-            }
-            Err(error) => serialize_backend_error(
-                id,
-                BackendError::new(INTERNAL_ERROR_CODE, error.to_string()),
-            ),
-        }
     }
 
     async fn route(&self, descriptor: &MethodDescriptor, id: RequestId, params: Value) -> String {
@@ -229,8 +176,7 @@ where
                 return serialize_error(Some(id), INVALID_PARAMS, "Invalid params", None);
             }
         };
-        let legacy = params.protocol_version == physical_runs::VERSION;
-        if !legacy && params.protocol_version != PROTOCOL_VERSION {
+        if params.protocol_version != PROTOCOL_VERSION {
             return serialize_error(
                 Some(id),
                 APPLICATION_ERROR,
@@ -245,31 +191,14 @@ where
             );
         }
 
-        match self
-            .backend
-            .initialize(
-                &self.context,
-                InitializeParams {
-                    protocol_version: PROTOCOL_VERSION.to_owned(),
-                },
-            )
-            .await
-        {
-            Ok(mut result) if result.protocol_version == PROTOCOL_VERSION => {
-                self.run_parts.store(!legacy, Ordering::Release);
-                result.protocol_version = params.protocol_version;
-                serialize_success(id, result)
-            }
-            Ok(result) => serialize_backend_error(
-                id,
-                BackendError::new(
-                    INTERNAL_ERROR_CODE,
-                    openengine_cluster_protocol::ProtocolVersionMismatch {
-                        received: result.protocol_version,
-                    }
-                    .to_string(),
+        match self.backend.initialize(&self.context, params).await {
+            Ok(result) => match result.validate_protocol_version() {
+                Ok(()) => serialize_success(id, result),
+                Err(error) => serialize_backend_error(
+                    id,
+                    BackendError::new(INTERNAL_ERROR_CODE, error.to_string()),
                 ),
-            ),
+            },
             Err(error) => serialize_backend_error(id, error),
         }
     }
@@ -399,9 +328,7 @@ where
             Err(_) => return native_v2_invalid_params(id),
         };
         match self.run_submit(params).await {
-            Ok(result) => {
-                self.run_response(openengine_cluster_protocol::RUN_SUBMIT_METHOD, id, result)
-            }
+            Ok(result) => serialize_success(id, result),
             Err(error) => serialize_backend_error(id, error),
         }
     }
@@ -412,9 +339,7 @@ where
             Err(_) => return native_v2_invalid_params(id),
         };
         match self.run_list(params).await {
-            Ok(result) => {
-                self.run_response(openengine_cluster_protocol::RUN_LIST_METHOD, id, result)
-            }
+            Ok(result) => serialize_success(id, result),
             Err(error) => serialize_backend_error(id, error),
         }
     }
@@ -425,9 +350,7 @@ where
             Err(_) => return native_v2_invalid_params(id),
         };
         match self.run_status(params).await {
-            Ok(result) => {
-                self.run_response(openengine_cluster_protocol::RUN_STATUS_METHOD, id, result)
-            }
+            Ok(result) => serialize_success(id, result),
             Err(error) => serialize_backend_error(id, error),
         }
     }
@@ -438,9 +361,7 @@ where
             Err(_) => return native_v2_invalid_params(id),
         };
         match self.run_force(params).await {
-            Ok(result) => {
-                self.run_response(openengine_cluster_protocol::RUN_FORCE_METHOD, id, result)
-            }
+            Ok(result) => serialize_success(id, result),
             Err(error) => serialize_backend_error(id, error),
         }
     }
@@ -452,9 +373,7 @@ where
                 Err(_) => return native_v2_invalid_params(id),
             };
         match self.run_steer(params).await {
-            Ok(result) => {
-                self.run_response(openengine_cluster_protocol::RUN_STEER_METHOD, id, result)
-            }
+            Ok(result) => serialize_success(id, result),
             Err(error) => serialize_backend_error(id, error),
         }
     }
@@ -466,9 +385,7 @@ where
                 Err(_) => return native_v2_invalid_params(id),
             };
         match self.run_suspend(params).await {
-            Ok(result) => {
-                self.run_response(openengine_cluster_protocol::RUN_SUSPEND_METHOD, id, result)
-            }
+            Ok(result) => serialize_success(id, result),
             Err(error) => serialize_backend_error(id, error),
         }
     }
@@ -480,9 +397,7 @@ where
                 Err(_) => return native_v2_invalid_params(id),
             };
         match self.run_vectors(params).await {
-            Ok(result) => {
-                self.run_response(openengine_cluster_protocol::RUN_VECTORS_METHOD, id, result)
-            }
+            Ok(result) => serialize_success(id, result),
             Err(error) => serialize_backend_error(id, error),
         }
     }
@@ -494,9 +409,7 @@ where
                 Err(_) => return native_v2_invalid_params(id),
             };
         match self.inbox_show(params).await {
-            Ok(result) => {
-                self.run_response(openengine_cluster_protocol::INBOX_SHOW_METHOD, id, result)
-            }
+            Ok(result) => serialize_success(id, result),
             Err(error) => serialize_backend_error(id, error),
         }
     }
@@ -508,9 +421,7 @@ where
                 Err(_) => return native_v2_invalid_params(id),
             };
         match self.inbox_list(params).await {
-            Ok(result) => {
-                self.run_response(openengine_cluster_protocol::INBOX_LIST_METHOD, id, result)
-            }
+            Ok(result) => serialize_success(id, result),
             Err(error) => serialize_backend_error(id, error),
         }
     }
@@ -522,9 +433,7 @@ where
                 Err(_) => return native_v2_invalid_params(id),
             };
         match self.run_vector(params).await {
-            Ok(result) => {
-                self.run_response(openengine_cluster_protocol::RUN_VECTOR_METHOD, id, result)
-            }
+            Ok(result) => serialize_success(id, result),
             Err(error) => serialize_backend_error(id, error),
         }
     }
@@ -535,11 +444,7 @@ where
             Err(_) => return native_v2_invalid_params(id),
         };
         match self.run_checkpoints(params).await {
-            Ok(result) => self.run_response(
-                openengine_cluster_protocol::RUN_CHECKPOINTS_METHOD,
-                id,
-                result,
-            ),
+            Ok(result) => serialize_success(id, result),
             Err(error) => serialize_backend_error(id, error),
         }
     }
@@ -553,11 +458,7 @@ where
             Err(_) => return native_v2_invalid_params(id),
         };
         match self.run_resume_requirements(params).await {
-            Ok(result) => self.run_response(
-                openengine_cluster_protocol::RUN_RESUME_REQUIREMENTS_METHOD,
-                id,
-                result,
-            ),
+            Ok(result) => serialize_success(id, result),
             Err(error) => serialize_backend_error(id, error),
         }
     }
@@ -568,9 +469,7 @@ where
             Err(_) => return native_v2_invalid_params(id),
         };
         match self.run_resume(params).await {
-            Ok(result) => {
-                self.run_response(openengine_cluster_protocol::RUN_RESUME_METHOD, id, result)
-            }
+            Ok(result) => serialize_success(id, result),
             Err(error) => serialize_backend_error(id, error),
         }
     }
@@ -581,11 +480,7 @@ where
             Err(_) => return native_v2_invalid_params(id),
         };
         match self.run_discard_workspace(params).await {
-            Ok(result) => self.run_response(
-                openengine_cluster_protocol::RUN_DISCARD_WORKSPACE_METHOD,
-                id,
-                result,
-            ),
+            Ok(result) => serialize_success(id, result),
             Err(error) => serialize_backend_error(id, error),
         }
     }
@@ -594,15 +489,6 @@ where
 fn native_v2_invalid_params(id: RequestId) -> String {
     serialize_error(
         Some(id),
-        INVALID_PARAMS,
-        "Invalid params",
-        Some(DomainErrorData::new(SCHEMA_VIOLATION)),
-    )
-}
-
-fn invalid_run_params(id: &RequestId) -> String {
-    serialize_error(
-        Some(id.clone()),
         INVALID_PARAMS,
         "Invalid params",
         Some(DomainErrorData::new(SCHEMA_VIOLATION)),

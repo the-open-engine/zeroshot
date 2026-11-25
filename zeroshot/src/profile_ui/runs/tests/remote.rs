@@ -199,7 +199,6 @@ impl RunHistoryTransport for ScriptedTransport {
 fn ui_get(client: &reqwest::Client, server: &LocalServer, path: &str) -> reqwest::RequestBuilder {
     client
         .get(format!("{}{}", server.origin, path))
-        .header(openengine_cluster_protocol::RUN_PARTS_HEADER, "1")
         .header(header::ORIGIN, &server.origin)
 }
 

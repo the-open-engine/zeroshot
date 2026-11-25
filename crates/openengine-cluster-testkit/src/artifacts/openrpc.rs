@@ -66,17 +66,6 @@ fn method_document(descriptor: &MethodDescriptor) -> Value {
     if matches!(descriptor.name, "inbox/list" | "inbox/show") {
         object.insert("description".to_owned(),json!("Read-only vector-backed request inbox. Requires request_ask, kind openengine.request-ask/v1, in target discovery. Reads do not apply expiry or start a successor."));
     }
-    if openengine_cluster_protocol::physical_runs::run_method(descriptor.name) {
-        object
-            .get_mut("params")
-            .and_then(Value::as_array_mut)
-            .expect("method parameters")
-            .push(json!({
-                "name": "protocolVersion", "required": false,
-                "description": "Select logical run IDs without initializing the connection.",
-                "schema": { "const": PROTOCOL_VERSION }
-            }));
-    }
     object.insert("name".to_owned(), json!(descriptor.name));
     object.insert(
         "x-subscription".to_owned(),
@@ -197,7 +186,7 @@ fn initialize_method() -> Value {
             "required": true,
             "schema": {
                 "type": "string",
-                "enum": [PROTOCOL_VERSION, openengine_cluster_protocol::physical_runs::VERSION]
+                "const": PROTOCOL_VERSION
             }
         }],
         "result": {

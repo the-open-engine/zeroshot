@@ -11,7 +11,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use zeroshot_engine::native_v2_cli::oecp::{BoxedSubscription, HostedRunRoute, TargetConnector};
+use zeroshot_engine::native_v2_cli::oecp::{BoxedSubscription, TargetConnector};
 use zeroshot_engine::native_v2_cli::{
     CliRunForceResult, CliRunListResult, CliRunStatusResult, CliRunWatchEventNotification,
     NativeV2CliError, PreparedStackRequest, PreparedRunRequest, TargetAdd,
@@ -939,26 +939,15 @@ where
         name: &str,
         params: RunStatusParams,
     ) -> Result<Option<CliRunStatusResult>, NativeV2CliError> {
-        Ok(self
-            .hosted_run_route(name, params, false)
-            .await?
-            .map(|route| route.status))
-    }
-
-    async fn hosted_run_route(
-        &self,
-        name: &str,
-        params: RunStatusParams,
-        grouped_only: bool,
-    ) -> Result<Option<HostedRunRoute>, NativeV2CliError> {
         let target = self.target(name)?;
         if matches!(target.access, TargetAccess::Direct) {
             return Ok(None);
         }
         self.authority
-            .hosted_run_status(&target, params, grouped_only)
+            .hosted_run_status(&target, params)
             .await
             .map_err(|error| self.authority.redact_error(error).into_cli(&target))
+            .map(Some)
     }
 
     async fn hosted_run_watch(

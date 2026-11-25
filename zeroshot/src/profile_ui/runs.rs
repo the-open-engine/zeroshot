@@ -694,16 +694,6 @@ fn history_error_event(error: ApiError) -> Event {
         .data(json!({"code":error.code,"message":error.message}).to_string())
 }
 
-fn resume_cursor(query: PageQuery, headers: &HeaderMap) -> Result<Option<Cursor>, ApiError> {
-    cursor_header_or_query(query.after, headers)?
-        .map(|value| {
-            let cursor = Cursor::new(value);
-            cursor_sequence(&cursor).map_err(ledger_error)?;
-            Ok(cursor)
-        })
-        .transpose()
-}
-
 fn cursor_header_or_query(
     query: Option<String>,
     headers: &HeaderMap,

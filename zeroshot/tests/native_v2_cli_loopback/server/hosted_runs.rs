@@ -181,6 +181,7 @@ async fn serve_hosted_watch(
                 "event":{
                     "subscriptionId":"hosted-queued",
                     "runId":current.run_id,
+                    "partId":current.part_id,
                     "title":current.title,
                     "source":current.source,
                     "size":current.size,
@@ -211,6 +212,8 @@ fn queued_status(status: impl serde::Serialize) -> serde_json::Value {
     let status = serde_json::to_value(status).assert_value();
     json!({
         "runId": status.pointer("/runId").assert_value(),
+        "partId": status.pointer("/partId").assert_value(),
+        "currentPartId": status.pointer("/currentPartId").assert_value(),
         "title": status.pointer("/title").assert_value(),
         "source": status.pointer("/source").assert_value(),
         "size": status.pointer("/size").assert_value(),

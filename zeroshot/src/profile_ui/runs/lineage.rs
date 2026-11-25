@@ -301,11 +301,7 @@ fn position(
 pub(in crate::profile_ui) async fn list(
     State(state): State<UiState>,
     query: Result<Query<PageQuery>, axum::extract::rejection::QueryRejection>,
-    headers: HeaderMap,
 ) -> Result<Json<Value>, ApiError> {
-    if !requests_run_parts(&headers) {
-        return archive_list(State(state), query).await;
-    }
     let after = query
         .map_err(|_| invalid_cursor())?
         .after
@@ -313,12 +309,6 @@ pub(in crate::profile_ui) async fn list(
         .map(parse_id)
         .transpose()?;
     state.runs.browser_list(after).await.map(Json)
-}
-
-fn requests_run_parts(headers: &HeaderMap) -> bool {
-    headers
-        .get(openengine_cluster_protocol::RUN_PARTS_HEADER)
-        .is_some_and(|value| value == "1")
 }
 
 fn exact_value(mut value: Value, family: &RunLineage, part: &RunId) -> Value {
@@ -333,11 +323,7 @@ pub(in crate::profile_ui) async fn show(
     State(state): State<UiState>,
     Path(id): Path<String>,
     query: BrowserParams,
-    headers: HeaderMap,
 ) -> Result<Json<Value>, ApiError> {
-    if !requests_run_parts(&headers) {
-        return archive_show(State(state), Path(id)).await;
-    }
     let (_, query, family) = selection(&state.runs, id, query).await?;
     if query.after.is_some() {
         return Err(invalid_cursor());
@@ -357,12 +343,7 @@ pub(in crate::profile_ui) async fn history(
     State(state): State<UiState>,
     Path(id): Path<String>,
     query: BrowserParams,
-    headers: HeaderMap,
 ) -> Result<Json<Value>, ApiError> {
-    if !requests_run_parts(&headers) {
-        let query = query.map(|Query(value)| Query(PageQuery { after: value.after }));
-        return archive_history(State(state), Path(id), query).await;
-    }
     let (id, query, family) = selection(&state.runs, id, query).await?;
     if let Some(part) = query.part_id {
         let part = exact_part(&family, part)?;
@@ -386,17 +367,11 @@ pub(in crate::profile_ui) async fn events(
     query: BrowserParams,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
-    if !requests_run_parts(&headers) {
-        let query = query.map_err(|_| invalid_cursor())?.0;
-        let part = parse_id(id)?;
-        let cursor = resume_cursor(PageQuery { after: query.after }, &headers)?;
-        return part_events(state, part, cursor, None).await;
-    }
     let (id, query, family) = selection(&state.runs, id, query).await?;
     if let Some(part) = query.part_id {
         let part = exact_part(&family, part)?;
         let cursor = exact_cursor(&part, cursor_header_or_query(query.after, &headers)?)?;
-        return part_events(state, part, cursor, Some(family)).await;
+        return part_events(state, part, cursor, family).await;
     }
     let (part, cursor) = position(&id, &family, cursor_header_or_query(query.after, &headers)?)?;
     let first = state
@@ -435,7 +410,7 @@ async fn part_events(
     state: UiState,
     part: RunId,
     cursor: Option<Cursor>,
-    family: Option<RunLineage>,
+    family: RunLineage,
 ) -> Result<Response, ApiError> {
     let stream = state
         .runs
@@ -444,12 +419,7 @@ async fn part_events(
         .take_until(async move { state.shutdown.cancelled().await });
     Ok(Sse::new(stream.map(move |result| {
         Ok::<_, Infallible>(match result {
-            Ok(page) => match &family {
-                Some(family) => {
-                    history_event(&page.next_cursor, &exact_value(json!(page), family, &part))
-                }
-                None => history_event(&page.next_cursor, &page),
-            },
+            Ok(page) => history_event(&page.next_cursor, &exact_value(json!(page), &family, &part)),
             Err(error) => history_error_event(error),
         })
     }))

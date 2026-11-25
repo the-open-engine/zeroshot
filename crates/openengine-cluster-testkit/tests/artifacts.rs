@@ -396,19 +396,10 @@ async fn openrpc_recovery_methods_match_the_authoritative_schema() {
             .as_array()
             .assert_value();
         let parameters = method.assert_key("params").as_array().assert_value();
-        let negotiation = parameters
-            .iter()
-            .find(|p| p.assert_key("name") == "protocolVersion")
-            .assert_value_with("run methods expose the optional per-request version");
-        assert_eq!(negotiation.assert_key("required"), false);
-        assert_eq!(
-            negotiation.assert_key("schema").assert_key("const"),
-            PROTOCOL_VERSION
-        );
         assert_eq!(
             parameters.len(),
-            properties.len() + 1,
-            "OpenRPC must expose every {params_type} property and the negotiation field"
+            properties.len(),
+            "OpenRPC parameter count drifted from {params_type}"
         );
         for (name, property_schema) in properties {
             let parameter = parameters
@@ -619,11 +610,8 @@ async fn schema_is_derived_from_canonical_envelopes_with_required_success_ids() 
             .assert_value()
             .assert_key("properties")
             .assert_key("protocolVersion")
-            .assert_key("enum"),
-        &serde_json::json!([
-            PROTOCOL_VERSION,
-            openengine_cluster_protocol::physical_runs::VERSION
-        ])
+            .assert_key("const"),
+        PROTOCOL_VERSION
     );
 }
 

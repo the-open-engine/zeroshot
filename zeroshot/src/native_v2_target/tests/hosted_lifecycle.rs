@@ -13,7 +13,7 @@ use super::hosted_authority::*;
 #[tokio::test]
 async fn hosted_lifecycle_stays_platform_owned_from_queue_through_completion() {
     let root = temp_root();
-    let (backend, dialer, server) = hosted_backend(&root, 38).await;
+    let (backend, dialer, server) = hosted_backend(&root, 23).await;
     let run_id = RunId::new("run-hosted");
 
     assert_queued(&backend, &run_id).await;
@@ -110,7 +110,7 @@ where
 }
 
 fn assert_platform_requests(requests: &[CapturedHttpRequest]) {
-    assert_eq!(requests.len(), 38);
+    assert_eq!(requests.len(), 23);
     assert_eq!(
         requests
             .iter()

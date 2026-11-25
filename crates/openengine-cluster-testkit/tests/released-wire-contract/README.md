@@ -1,7 +1,7 @@
 # Released wire-contract control
 
 This isolated Cargo workspace uses unmodified client, protocol and server crates from Zeroshot
-v16.0.0 (`df429ea0e36b5baa7eadb997e1a7efe276d95ae1`). Keeping its lockfile separate avoids ambiguous
+v17.1.1 (`15e17f792359cf6f6a0358918ad6146da57fb32f`). Keeping its lockfile separate avoids ambiguous
 package selectors in the product workspace. No provider credentials or live gateway are needed.
 
 From the repository root:
@@ -10,10 +10,9 @@ From the repository root:
 cargo test --locked --manifest-path crates/openengine-cluster-testkit/tests/released-wire-contract/Cargo.toml --target-dir target --jobs 1
 ```
 
-The controls exercise real NDJSON and WebSocket initialization in both directions. They also decode
-current ledger/projector serialization with released direct and hosted readers, proving timing is
-incompatible without the gate and removing only timing restores decoding. Product workspace tests
-cover matching-contract status, mixed lists, active/finished watches and hosted discovery refusal.
+The controls exercise version rejection at NDJSON and WebSocket initialization in both directions.
+A stored continuation from the release round-trips through the current reader with its original ID
+and predecessor.
 
 The protocol's `native_v2_observation` integration suite invokes these controls together with the
 current runtime and HTTP wire-contract tests. That existing suite runs in the Linux, Windows and

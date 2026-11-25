@@ -39,7 +39,7 @@ This page is generated from the checked-in OpenRPC document. Method names, param
 
 | Name | Required | Schema |
 | --- | --- | --- |
-| <code>protocolVersion</code> | Yes | <code>{&quot;enum&quot;:[&quot;openengine.cluster/v3&quot;,&quot;openengine.cluster/v2&quot;],&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>protocolVersion</code> | Yes | <code>{&quot;const&quot;:&quot;openengine.cluster/v3&quot;,&quot;type&quot;:&quot;string&quot;}</code> |
 
 #### Result
 
@@ -272,7 +272,6 @@ This method has no parameters.
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
 | <code>submission</code> | Yes | <a href="../schema.json#/$defs/RunSubmission"><code>schema.json#/$defs/RunSubmission</code></a> |
-| <code>protocolVersion</code> | No | <code>{&quot;const&quot;:&quot;openengine.cluster/v3&quot;}</code> |
 
 #### Result
 
@@ -288,9 +287,7 @@ This method has no parameters.
 
 #### Parameters
 
-| Name | Required | Schema |
-| --- | --- | --- |
-| <code>protocolVersion</code> | No | <code>{&quot;const&quot;:&quot;openengine.cluster/v3&quot;}</code> |
+This method has no parameters.
 
 #### Result
 
@@ -310,7 +307,6 @@ This method has no parameters.
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
 | <code>partId</code> | No | <code>{&quot;description&quot;:&quot;Select one physical part of this run. Omission addresses the logical run.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
-| <code>protocolVersion</code> | No | <code>{&quot;const&quot;:&quot;openengine.cluster/v3&quot;}</code> |
 
 #### Result
 
@@ -331,7 +327,6 @@ This method has no parameters.
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
 | <code>partId</code> | No | <code>{&quot;description&quot;:&quot;Select one physical part of this run. Omission addresses the logical run.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 | <code>fromCursor</code> | No | <code>{&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
-| <code>protocolVersion</code> | No | <code>{&quot;const&quot;:&quot;openengine.cluster/v3&quot;}</code> |
 
 #### Result
 
@@ -353,7 +348,6 @@ This method has no parameters.
 | <code>partId</code> | No | <code>{&quot;description&quot;:&quot;Select one physical part of this run. Omission addresses the logical run.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 | <code>fromCursor</code> | No | <code>{&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 | <code>execution</code> | No | <code>{&quot;maxLength&quot;:128,&quot;minLength&quot;:1,&quot;pattern&quot;:&quot;^[^\\u0000-\\u001f\\u007f-\\u009f]+$&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
-| <code>protocolVersion</code> | No | <code>{&quot;const&quot;:&quot;openengine.cluster/v3&quot;}</code> |
 
 #### Result
 
@@ -374,7 +368,6 @@ This method has no parameters.
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
 | <code>partId</code> | No | <code>{&quot;description&quot;:&quot;Select one physical part of this run. Omission addresses the logical run.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 | <code>execution</code> | Yes | <code>{&quot;maxLength&quot;:128,&quot;minLength&quot;:1,&quot;pattern&quot;:&quot;^[^\\u0000-\\u001f\\u007f-\\u009f]+$&quot;,&quot;type&quot;:&quot;string&quot;}</code> |
-| <code>protocolVersion</code> | No | <code>{&quot;const&quot;:&quot;openengine.cluster/v3&quot;}</code> |
 
 #### Result
 
@@ -394,7 +387,6 @@ This method has no parameters.
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
 | <code>partId</code> | No | <code>{&quot;description&quot;:&quot;When supplied, the observed part must still be current.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
-| <code>protocolVersion</code> | No | <code>{&quot;const&quot;:&quot;openengine.cluster/v3&quot;}</code> |
 
 #### Result
 
@@ -417,7 +409,6 @@ This method has no parameters.
 | <code>text</code> | Yes | <a href="../schema.json#/$defs/NodeInstructions"><code>schema.json#/$defs/NodeInstructions</code></a> |
 | <code>mode</code> | No | <a href="../schema.json#/$defs/SteeringMode"><code>schema.json#/$defs/SteeringMode</code></a> |
 | <code>node</code> | No | <a href="../schema.json#/$defs/RunSteerParams/properties/node"><code>schema.json#/$defs/RunSteerParams/properties/node</code></a> |
-| <code>protocolVersion</code> | No | <code>{&quot;const&quot;:&quot;openengine.cluster/v3&quot;}</code> |
 
 #### Result
 
@@ -437,7 +428,6 @@ This method has no parameters.
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
 | <code>partId</code> | No | <code>{&quot;description&quot;:&quot;Select one physical part of this run. Omission addresses the logical run.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
-| <code>protocolVersion</code> | No | <code>{&quot;const&quot;:&quot;openengine.cluster/v3&quot;}</code> |
 
 #### Result
 
@@ -459,7 +449,6 @@ This method has no parameters.
 | <code>partId</code> | No | <code>{&quot;description&quot;:&quot;Select one physical part of this run. Omission addresses the logical run.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 | <code>after</code> | No | <a href="../schema.json#/$defs/RunVectorsParams/properties/after"><code>schema.json#/$defs/RunVectorsParams/properties/after</code></a> |
 | <code>limit</code> | No | <code>{&quot;format&quot;:&quot;uint32&quot;,&quot;maximum&quot;:100,&quot;minimum&quot;:1,&quot;type&quot;:[&quot;integer&quot;,&quot;null&quot;]}</code> |
-| <code>protocolVersion</code> | No | <code>{&quot;const&quot;:&quot;openengine.cluster/v3&quot;}</code> |
 
 #### Result
 
@@ -481,7 +470,6 @@ Read-only vector-backed request inbox. Requires request_ask, kind openengine.req
 | --- | --- | --- |
 | <code>after</code> | No | <code>{&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 | <code>limit</code> | No | <code>{&quot;format&quot;:&quot;uint32&quot;,&quot;maximum&quot;:100,&quot;minimum&quot;:1,&quot;type&quot;:[&quot;integer&quot;,&quot;null&quot;]}</code> |
-| <code>protocolVersion</code> | No | <code>{&quot;const&quot;:&quot;openengine.cluster/v3&quot;}</code> |
 
 #### Result
 
@@ -503,7 +491,6 @@ Read-only vector-backed request inbox. Requires request_ask, kind openengine.req
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
 | <code>partId</code> | No | <code>{&quot;description&quot;:&quot;Select one physical part of this run. Omission addresses the logical run.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
-| <code>protocolVersion</code> | No | <code>{&quot;const&quot;:&quot;openengine.cluster/v3&quot;}</code> |
 
 #### Result
 
@@ -524,7 +511,6 @@ Read-only vector-backed request inbox. Requires request_ask, kind openengine.req
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
 | <code>partId</code> | No | <code>{&quot;description&quot;:&quot;Select one physical part of this run. Omission addresses the logical run.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 | <code>id</code> | Yes | <a href="../schema.json#/$defs/VectorId"><code>schema.json#/$defs/VectorId</code></a> |
-| <code>protocolVersion</code> | No | <code>{&quot;const&quot;:&quot;openengine.cluster/v3&quot;}</code> |
 
 #### Result
 
@@ -548,7 +534,6 @@ Lists checkpoints in increasing sequence order. The after cursor is exclusive. O
 | <code>partId</code> | No | <code>{&quot;description&quot;:&quot;Select one physical part of this run. Omission addresses the logical run.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 | <code>after</code> | No | <code>{&quot;anyOf&quot;:[{&quot;$ref&quot;:&quot;#/$defs/CheckpointId&quot;},{&quot;type&quot;:&quot;null&quot;}]}</code> |
 | <code>limit</code> | No | <code>{&quot;format&quot;:&quot;uint32&quot;,&quot;maximum&quot;:100,&quot;minimum&quot;:1,&quot;type&quot;:[&quot;integer&quot;,&quot;null&quot;]}</code> |
-| <code>protocolVersion</code> | No | <code>{&quot;const&quot;:&quot;openengine.cluster/v3&quot;}</code> |
 
 #### Result
 
@@ -569,7 +554,6 @@ Lists checkpoints in increasing sequence order. The after cursor is exclusive. O
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
 | <code>partId</code> | No | <code>{&quot;description&quot;:&quot;When supplied, the observed part must still be current.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 | <code>runtime</code> | Yes | <a href="../schema.json#/$defs/RunResumeRequirementsParams/properties/runtime"><code>schema.json#/$defs/RunResumeRequirementsParams/properties/runtime</code></a> |
-| <code>protocolVersion</code> | No | <code>{&quot;const&quot;:&quot;openengine.cluster/v3&quot;}</code> |
 
 #### Result
 
@@ -600,7 +584,6 @@ RunId identifies the original submission. PartId must identify its current part.
 | <code>gitCredentials</code> | No | <code>{&quot;anyOf&quot;:[{&quot;$ref&quot;:&quot;#/$defs/GitTransportCredentials&quot;},{&quot;type&quot;:&quot;null&quot;}],&quot;description&quot;:&quot;Fresh generic Git authority, excluded from immutable source and submission identity.&quot;}</code> |
 | <code>commitIdentity</code> | No | <code>{&quot;anyOf&quot;:[{&quot;$ref&quot;:&quot;#/$defs/CommitIdentity&quot;},{&quot;type&quot;:&quot;null&quot;}],&quot;description&quot;:&quot;Author and committer of every commit the successor&#39;s delivery creates. Omission keeps the\ntarget&#39;s default delivery identity.&quot;}</code> |
 | <code>commitCoAuthor</code> | No | <code>{&quot;anyOf&quot;:[{&quot;$ref&quot;:&quot;#/$defs/CommitIdentity&quot;},{&quot;type&quot;:&quot;null&quot;}],&quot;description&quot;:&quot;Person credited by a `Co-authored-by` trailer on every commit carrying the successor&#39;s\nchanges. Author and committer stay as `commitIdentity` selects.&quot;}</code> |
-| <code>protocolVersion</code> | No | <code>{&quot;const&quot;:&quot;openengine.cluster/v3&quot;}</code> |
 
 #### Result
 
@@ -620,7 +603,6 @@ RunId identifies the original submission. PartId must identify its current part.
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
 | <code>partId</code> | No | <code>{&quot;description&quot;:&quot;When supplied, the observed part must still be current.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
-| <code>protocolVersion</code> | No | <code>{&quot;const&quot;:&quot;openengine.cluster/v3&quot;}</code> |
 
 #### Result
 

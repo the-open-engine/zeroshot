@@ -10,12 +10,8 @@ use super::super::contract::MAX_RESPONSE_BYTES;
 
 pub(super) async fn read_run_list(
     mut response: Response,
-    run_parts: bool,
 ) -> Result<CliRunListResult, TargetAuthorityError> {
-    let mut reader = RunListReader {
-        run_parts,
-        ..Default::default()
-    };
+    let mut reader = RunListReader::default();
     while let Some(chunk) = response.chunk().await.map_err(|error| {
         TargetAuthorityError::request_failed("hosted run list response read", &error)
     })? {
@@ -38,7 +34,6 @@ enum Position {
 
 #[derive(Default)]
 struct RunListReader {
-    run_parts: bool,
     position: Position,
     received: usize,
     // The small outer object is validated separately with an empty runs array.
@@ -104,15 +99,8 @@ impl RunListReader {
             }
         }
         if self.depth == 0 {
-            self.runs.push(
-                super::part_identity::decode(&self.item, self.run_parts, |row| {
-                    openengine_cluster_protocol::physical_runs::read_response(
-                        openengine_cluster_protocol::RUN_STATUS_METHOD,
-                        row,
-                    )
-                })
-                .map_err(|_| malformed())?,
-            );
+            self.runs
+                .push(bounded_json_from_slice(&self.item).map_err(|_| malformed())?);
             self.item.clear();
             self.position = Position::Separator;
         }

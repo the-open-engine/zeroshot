@@ -57,7 +57,6 @@ pub(super) struct HostedAuthDescriptor {
 }
 
 pub(super) struct ControllerDescriptor {
-    pub(super) run_parts: bool,
     pub(super) run_url: Url,
     pub(super) session_url: Url,
     pub(super) audience: String,
@@ -135,11 +134,6 @@ pub(super) fn build_controller_descriptor(
         .map(|routes| same_origin_path(origin, &routes.resolve))
         .transpose()?;
     Ok(ControllerDescriptor {
-        run_parts: wire
-            .extensions
-            .run_parts
-            .as_ref()
-            .is_some_and(|marker| marker.kind == openengine_cluster_protocol::RUN_PARTS_KIND),
         run_url: same_origin_path(origin, &wire.run_path)?,
         session_url: same_origin_path(origin, &wire.session_path)?,
         audience: wire.audience,

@@ -1,6 +1,6 @@
 import { ApiError, type ApiClient } from './api';
 import { appendGroupedHistory } from './grouped-history';
-import { runPartsHeaders, watchHistoryEvents, type HistoryObserver } from './history-stream';
+import { watchHistoryEvents, type HistoryObserver } from './history-stream';
 import { historyRetryDelay } from './history-response';
 import type { HistoryRetryDelay } from './history-readiness';
 import {
@@ -97,21 +97,10 @@ export function createRunHistorySource(
     forPart: (part) => createRunHistorySource(api, base, fetcher, part),
     retryDelay: historyRetryDelay,
     list: (after, signal) =>
-      api(
-        `runs${after ? `?after=${encodeURIComponent(after)}` : ''}`,
-        undefined,
-        signal,
-        runPartsHeaders
-      ),
-    detail: async (id, signal) =>
-      readRunDetail(await api(path(id), undefined, signal, runPartsHeaders), id, partId),
+      api(`runs${after ? `?after=${encodeURIComponent(after)}` : ''}`, undefined, signal),
+    detail: async (id, signal) => readRunDetail(await api(path(id), undefined, signal), id, partId),
     page: async (id, after, signal) => {
-      const page = await api<HistoryPage>(
-        path(id, '/history', after),
-        undefined,
-        signal,
-        runPartsHeaders
-      );
+      const page = await api<HistoryPage>(path(id, '/history', after), undefined, signal);
       readPageRuntimeFailure(page);
       readObservation(page.observation);
       return page;

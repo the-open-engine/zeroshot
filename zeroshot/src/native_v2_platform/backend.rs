@@ -70,16 +70,10 @@ impl ClusterBackend for NativeV2PlatformController {
 
     async fn run_submit(
         &self,
-        context: &ConnectionContext,
+        _context: &ConnectionContext,
         params: RunSubmitParams,
     ) -> Result<RunSubmitResult, BackendError> {
         let receipt = self.submit(params).await.map_err(platform_backend_error)?;
-        if context.physical_run_ids() {
-            return Ok(RunSubmitResult {
-                run_id: receipt.run_id.clone(),
-                current_part_id: receipt.run_id,
-            });
-        }
         let family = self
             .run_lineage(&receipt.run_id)
             .await
@@ -92,22 +86,16 @@ impl ClusterBackend for NativeV2PlatformController {
 
     async fn run_list(
         &self,
-        context: &ConnectionContext,
+        _context: &ConnectionContext,
         _params: RunListParams,
     ) -> Result<RunListResult, BackendError> {
-        let families = self
-            .run_families(context.physical_run_ids())
-            .await
-            .map_err(platform_backend_error)?;
+        let families = self.run_families().await.map_err(platform_backend_error)?;
         let mut runs = Vec::with_capacity(families.len());
         for family in families {
-            let mut result = if context.physical_run_ids() {
-                self.status(RunStatusParams::new(family.root().clone()))
-                    .await
-            } else {
-                self.projected_status(&family, None).await
-            }
-            .map_err(platform_backend_error)?;
+            let mut result = self
+                .projected_status(&family, None)
+                .await
+                .map_err(platform_backend_error)?;
             result.steering = Default::default();
             runs.push(result);
         }
@@ -116,12 +104,9 @@ impl ClusterBackend for NativeV2PlatformController {
 
     async fn run_status(
         &self,
-        context: &ConnectionContext,
+        _context: &ConnectionContext,
         params: RunStatusParams,
     ) -> Result<RunStatusResult, BackendError> {
-        if context.physical_run_ids() {
-            return self.status(params).await.map_err(platform_backend_error);
-        }
         let family = self
             .run_lineage(&params.run_id)
             .await
@@ -133,37 +118,29 @@ impl ClusterBackend for NativeV2PlatformController {
 
     async fn run_watch(
         &self,
-        context: &ConnectionContext,
+        _context: &ConnectionContext,
         params: RunWatchParams,
     ) -> Result<(RunWatchResult, RunWatchEventStream), BackendError> {
-        let physical_id = context.physical_run_ids().then(|| params.run_id.clone());
-        let (mut result, source) = self.watch(params).await.map_err(platform_backend_error)?;
-        if let Some(id) = physical_id {
-            result.run_id = id;
-        }
+        let (result, source) = self.watch(params).await.map_err(platform_backend_error)?;
         Ok((result, RunSubscriptionStream::new(WatchSource(source))))
     }
 
     async fn run_logs(
         &self,
-        context: &ConnectionContext,
+        _context: &ConnectionContext,
         params: RunLogsParams,
     ) -> Result<(RunLogsResult, RunLogEventStream), BackendError> {
-        let physical_id = context.physical_run_ids().then(|| params.run_id.clone());
-        let (mut result, source) = self.logs(params).await.map_err(platform_backend_error)?;
-        if let Some(id) = physical_id {
-            result.run_id = id;
-        }
+        let (result, source) = self.logs(params).await.map_err(platform_backend_error)?;
         Ok((result, RunSubscriptionStream::new(LogsSource(source))))
     }
 
     async fn run_attach(
         &self,
-        context: &ConnectionContext,
+        _context: &ConnectionContext,
         params: RunAttachParams,
     ) -> Result<(RunAttachResult, RunAttachEventStream), BackendError> {
         let (family, part) = self
-            .read_target(context, &params.run_id, params.part_id.as_ref())
+            .read_target(&params.run_id, params.part_id.as_ref())
             .await?;
         let (mut result, source) = self
             .attach(RunAttachParams {
@@ -184,14 +161,11 @@ impl ClusterBackend for NativeV2PlatformController {
 
     async fn run_force(
         &self,
-        context: &ConnectionContext,
+        _context: &ConnectionContext,
         params: RunForceParams,
     ) -> Result<RunForceResult, BackendError> {
-        if context.physical_run_ids() {
-            return self.force(params).await.map_err(platform_backend_error);
-        }
         let (family, run_id) = self
-            .current_target(context, &params.run_id, params.part_id.as_ref())
+            .current_target(&params.run_id, params.part_id.as_ref())
             .await?;
         let mut result = self
             .force(RunForceParams { run_id, ..params })
@@ -208,11 +182,11 @@ impl ClusterBackend for NativeV2PlatformController {
 
     async fn run_steer(
         &self,
-        context: &ConnectionContext,
+        _context: &ConnectionContext,
         params: openengine_cluster_protocol::RunSteerParams,
     ) -> Result<openengine_cluster_protocol::RunSteerResult, BackendError> {
         let (family, run_id) = self
-            .current_target(context, &params.run_id, params.part_id.as_ref())
+            .current_target(&params.run_id, params.part_id.as_ref())
             .await?;
         let mut result = self
             .steer(openengine_cluster_protocol::RunSteerParams { run_id, ..params })
@@ -224,14 +198,11 @@ impl ClusterBackend for NativeV2PlatformController {
 
     async fn run_suspend(
         &self,
-        context: &ConnectionContext,
+        _context: &ConnectionContext,
         params: openengine_cluster_protocol::RunSuspendParams,
     ) -> Result<openengine_cluster_protocol::RunSuspendResult, BackendError> {
-        if context.physical_run_ids() {
-            return self.suspend(params).await.map_err(platform_backend_error);
-        }
         let (family, run_id) = self
-            .current_target(context, &params.run_id, params.part_id.as_ref())
+            .current_target(&params.run_id, params.part_id.as_ref())
             .await?;
         let mut result = self
             .suspend(RunStatusParams { run_id, ..params })
@@ -248,24 +219,18 @@ impl ClusterBackend for NativeV2PlatformController {
 
     async fn inbox_list(
         &self,
-        context: &ConnectionContext,
+        _context: &ConnectionContext,
         params: openengine_cluster_protocol::InboxListParams,
     ) -> Result<openengine_cluster_protocol::InboxListResult, BackendError> {
-        self.inbox_inventory(params, context.physical_run_ids())
+        self.inbox_list(params)
             .await
             .map_err(platform_backend_error)
     }
     async fn inbox_show(
         &self,
-        context: &ConnectionContext,
+        _context: &ConnectionContext,
         params: openengine_cluster_protocol::InboxShowParams,
     ) -> Result<openengine_cluster_protocol::InboxShowResult, BackendError> {
-        if context.physical_run_ids() {
-            return self
-                .inbox_show(params)
-                .await
-                .map_err(platform_backend_error);
-        }
         let family = self
             .run_lineage(&params.run_id)
             .await
@@ -294,11 +259,11 @@ impl ClusterBackend for NativeV2PlatformController {
 
     async fn run_vectors(
         &self,
-        context: &ConnectionContext,
+        _context: &ConnectionContext,
         params: openengine_cluster_protocol::RunVectorsParams,
     ) -> Result<openengine_cluster_protocol::RunVectorsResult, BackendError> {
         let (family, run_id) = self
-            .read_target(context, &params.run_id, params.part_id.as_ref())
+            .read_target(&params.run_id, params.part_id.as_ref())
             .await?;
         let mut result = self
             .vectors(openengine_cluster_protocol::RunVectorsParams { run_id, ..params })
@@ -313,11 +278,11 @@ impl ClusterBackend for NativeV2PlatformController {
 
     async fn run_vector(
         &self,
-        context: &ConnectionContext,
+        _context: &ConnectionContext,
         params: openengine_cluster_protocol::RunVectorParams,
     ) -> Result<openengine_cluster_protocol::RunVectorResult, BackendError> {
         let (family, run_id) = self
-            .read_target(context, &params.run_id, params.part_id.as_ref())
+            .read_target(&params.run_id, params.part_id.as_ref())
             .await?;
         let mut result = self
             .vector(openengine_cluster_protocol::RunVectorParams { run_id, ..params })
@@ -329,11 +294,11 @@ impl ClusterBackend for NativeV2PlatformController {
 
     async fn run_checkpoints(
         &self,
-        context: &ConnectionContext,
+        _context: &ConnectionContext,
         params: openengine_cluster_protocol::RunCheckpointsParams,
     ) -> Result<openengine_cluster_protocol::RunCheckpointsResult, BackendError> {
         let (family, run_id) = self
-            .read_target(context, &params.run_id, params.part_id.as_ref())
+            .read_target(&params.run_id, params.part_id.as_ref())
             .await?;
         let mut result = self
             .checkpoints(openengine_cluster_protocol::RunCheckpointsParams { run_id, ..params })
@@ -345,11 +310,11 @@ impl ClusterBackend for NativeV2PlatformController {
 
     async fn run_resume_requirements(
         &self,
-        context: &ConnectionContext,
+        _context: &ConnectionContext,
         params: openengine_cluster_protocol::RunResumeRequirementsParams,
     ) -> Result<openengine_cluster_protocol::RunResumeRequirementsResult, BackendError> {
         let (_, run_id) = self
-            .current_target(context, &params.run_id, params.part_id.as_ref())
+            .current_target(&params.run_id, params.part_id.as_ref())
             .await?;
         let source = self
             .recoverable_resume_source(&run_id)
@@ -371,11 +336,11 @@ impl ClusterBackend for NativeV2PlatformController {
 
     async fn run_resume(
         &self,
-        context: &ConnectionContext,
+        _context: &ConnectionContext,
         params: RunResumeParams,
     ) -> Result<RunResumeResult, BackendError> {
         let (family, run_id) = self
-            .current_target(context, &params.run_id, Some(&params.part_id))
+            .current_target(&params.run_id, Some(&params.part_id))
             .await?;
         let mut result = self
             .resume(RunResumeParams { run_id, ..params })
@@ -387,11 +352,11 @@ impl ClusterBackend for NativeV2PlatformController {
 
     async fn run_discard_workspace(
         &self,
-        context: &ConnectionContext,
+        _context: &ConnectionContext,
         params: RunDiscardWorkspaceParams,
     ) -> Result<RunDiscardWorkspaceResult, BackendError> {
         let (family, run_id) = self
-            .current_target(context, &params.run_id, params.part_id.as_ref())
+            .current_target(&params.run_id, params.part_id.as_ref())
             .await?;
         let mut result = self
             .discard_workspace(RunDiscardWorkspaceParams { run_id, ..params })

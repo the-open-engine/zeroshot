@@ -11,7 +11,6 @@ pub(crate) fn artifacts() -> Vec<Artifact> {
                 openengine_cluster_protocol::TargetDiscoveryDocument::direct(
                     openengine_cluster_protocol::TargetAuthentication::None,
                 )
-                .with_run_parts()
                 .with_run_suspension()
                 .with_request_ask(),
             )

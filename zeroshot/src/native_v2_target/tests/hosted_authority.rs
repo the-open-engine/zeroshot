@@ -91,7 +91,6 @@ pub(super) struct CapturedHttpRequest {
     pub(super) path: String,
     pub(super) authorization: Option<String>,
     pub(super) organization: Option<String>,
-    pub(super) run_parts: bool,
     pub(super) body: String,
 }
 
@@ -208,7 +207,7 @@ pub(super) fn authority_response(
 fn hosted_run_response(request: &CapturedHttpRequest) -> Option<String> {
     let queued = || {
         json!({
-            "runId": "run-hosted",
+            "runId": "run-hosted", "partId": "run-hosted", "currentPartId": "run-hosted",
             "title": "Hosted queue test",
             "source": source(),
             "size": "medium",
@@ -224,7 +223,7 @@ fn hosted_run_response(request: &CapturedHttpRequest) -> Option<String> {
                 "type": "event",
                 "event": {
                     "subscriptionId": "watch-1",
-                    "runId": "run-hosted",
+                    "runId": "run-hosted", "partId": "run-hosted",
                     "title": "Hosted queue test",
                     "source": source(),
                     "size": "medium",
@@ -241,7 +240,7 @@ fn hosted_run_response(request: &CapturedHttpRequest) -> Option<String> {
                 "type": "event",
                 "event": {
                     "subscriptionId": "watch-2",
-                    "runId": "run-hosted",
+                    "runId": "run-hosted", "partId": "run-hosted",
                     "title": "Hosted queue test",
                     "source": source(),
                     "size": "medium",
@@ -264,7 +263,7 @@ fn hosted_run_response(request: &CapturedHttpRequest) -> Option<String> {
                     "type": "event",
                     "event": {
                         "subscriptionId": "logs-1",
-                        "runId": "run-hosted",
+                        "runId": "run-hosted", "partId": "run-hosted",
                         "cursor": "v2:4",
                         "timestamp": 1_725_000_000_123_u64,
                         "execution": "worker/1",
@@ -303,7 +302,7 @@ fn controller_response(
             if request.authorization.as_deref() == Some("Bearer user-machine-key") { "user" } else { "org" }
         }).to_string()),
         ("POST", "/native-v2/run") => {
-            Some(r#"{"runId":"018f5e78-7f95-7c22-8d98-3f15af20c991"}"#.to_owned())
+            Some(r#"{"runId":"018f5e78-7f95-7c22-8d98-3f15af20c991","currentPartId":"018f5e78-7f95-7c22-8d98-3f15af20c991"}"#.to_owned())
         }
         ("POST", "/native-v2/oecp-session") => Some(format!(
             r#"{{"endpoint":"ws://{address}/native-v2/oecp","bearerToken":"oecp-session-token"}}"#
@@ -314,7 +313,7 @@ fn controller_response(
 
 fn hosted_discovery(origin: &str) -> String {
     json!({
-        "kind": "zeroshot.native-v2-target/v3",
+        "kind": "zeroshot.native-v2-target/v4",
         "authentication": "hosted_oauth",
         "runPath": "/native-v2/run",
         "sessionPath": "/native-v2/oecp-session",
@@ -356,7 +355,7 @@ fn hosted_discovery(origin: &str) -> String {
                 }
             },
             "hosted_runs": {
-                "kind": "zeroshot.hosted-runs/v2",
+                "kind": "zeroshot.hosted-runs/v3",
                 "base_url": origin,
                 "route_templates": hosted_run_routes()
             },
@@ -487,14 +486,12 @@ pub(super) async fn read_http_request(stream: &mut tokio::net::TcpStream) -> Cap
         .map_or(0, |value| value.parse::<usize>().assert_value());
     let authorization = header_value(head, "authorization").map(str::to_owned);
     let organization = header_value(head, "x-zeroshot-organization").map(str::to_owned);
-    let run_parts = header_value(head, openengine_cluster_protocol::RUN_PARTS_HEADER) == Some("1");
     read_http_body(stream, &mut bytes, header_end + content_length).await;
     CapturedHttpRequest {
         method,
         path,
         authorization,
         organization,
-        run_parts,
         body: String::from_utf8(
             bytes
                 .get(header_end..header_end + content_length)

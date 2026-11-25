@@ -107,7 +107,6 @@ fn migration_failure_after_begin_retains_native_cause_before_rollback() {
     assert!(!message.contains("migration.sqlite3"));
     assert!(!message.contains("ALTER TABLE"));
     std::fs::remove_dir(&fault.path).assert_value();
-    drop(SqliteRunLedger::open(&path).assert_value());
-    let reopened = Connection::open(path).assert_value();
-    assert!(EventColumns::inspect(&reopened).assert_value() == EventColumns::CURRENT);
+    let ledger = SqliteRunLedger::open(&path).assert_value();
+    assert!(ledger.recorded_at, "rollback left migration retryable");
 }

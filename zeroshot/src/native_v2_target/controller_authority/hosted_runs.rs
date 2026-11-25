@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use openengine_cluster_protocol as protocol;
 use openengine_cluster_protocol::{
     HostedRunStreamFrame, RunForceParams, RunListParams, RunLogEventNotification, RunLogsParams,
     RunStatusParams, RunWatchParams,
@@ -14,10 +13,10 @@ use super::contract::{
 };
 use super::TargetHttpControlAuthority;
 use super::access::AccessToken;
-use zeroshot_engine::native_v2_cli::oecp::{BoxedSubscription, HostedRunRoute};
+use zeroshot_engine::native_v2_cli::oecp::BoxedSubscription;
 use zeroshot_engine::native_v2_cli::{
-    CliRunForceResult, CliRunListResult, CliRunWatchEventNotification, CliSubscription,
-    CliSubscriptionItem, NativeV2CliError,
+    CliRunForceResult, CliRunListResult, CliRunStatusResult, CliRunWatchEventNotification,
+    CliSubscription, CliSubscriptionItem, NativeV2CliError,
 };
 use crate::native_v2_target::{TargetAccess, TargetAuthorityError, TargetRecord};
 
@@ -28,49 +27,24 @@ const MAX_STREAM_FRAME_BYTES: usize = 64 * 1024;
 mod export_http;
 #[path = "hosted_runs/list_http.rs"]
 mod list_http;
-#[path = "hosted_runs/part_identity.rs"]
-pub(super) mod part_identity;
 #[path = "hosted_runs/recovery_http.rs"]
 mod recovery_http;
 #[path = "hosted_runs/stacks_http.rs"]
 mod stacks_http;
 
-pub(super) struct HostedRunResponse {
-    operation: &'static str,
-    maximum_bytes: Option<usize>,
-    method: &'static str,
-}
-
-impl HostedRunResponse {
-    pub(super) const fn new(operation: &'static str, method: &'static str) -> Self {
-        Self {
-            operation,
-            maximum_bytes: None,
-            method,
-        }
-    }
-
-    const fn with_limit(mut self, maximum_bytes: usize) -> Self {
-        self.maximum_bytes = Some(maximum_bytes);
-        self
-    }
-}
-
 struct HostedRunSubscription<E> {
     response: Response,
     buffered: Vec<u8>,
     maximum_frame_bytes: usize,
-    run_parts: bool,
     closed: bool,
     marker: std::marker::PhantomData<E>,
 }
 
 impl<E> HostedRunSubscription<E> {
-    const fn new(response: Response, maximum_frame_bytes: usize, run_parts: bool) -> Self {
+    const fn new(response: Response, maximum_frame_bytes: usize) -> Self {
         Self {
             response,
             buffered: Vec::new(),
-            run_parts,
             maximum_frame_bytes,
             closed: false,
             marker: std::marker::PhantomData,
@@ -135,12 +109,8 @@ where
         if line.is_empty() || line.len() > self.maximum_frame_bytes {
             return Err(stream_error("hosted run stream frame is malformed"));
         }
-        match part_identity::decode::<HostedRunStreamFrame<E>>(line, self.run_parts, |frame| {
-            if let Some(event) = frame.get_mut("event") {
-                protocol::physical_runs::read_response("event", event);
-            }
-        })
-        .map_err(|_| stream_error("hosted run stream frame is malformed"))?
+        match openengine_cluster_protocol::bounded_json_from_slice::<HostedRunStreamFrame<E>>(line)
+            .map_err(|_| stream_error("hosted run stream frame is malformed"))?
         {
             HostedRunStreamFrame::Event { event } => Ok(CliSubscriptionItem::Event(event)),
             HostedRunStreamFrame::Closed { reason } => {
@@ -170,8 +140,7 @@ impl TargetHttpControlAuthority {
             ));
         }
         let (auth, controller) = self.descriptors(target).await?;
-        let mut routes = auth.hosted_runs.clone();
-        routes.run_parts = controller.run_parts;
+        let routes = auth.hosted_runs.clone();
         super::require_git_transport(&controller, git_transport)?;
         let access = self
             .access_token(target, &auth, &controller.audience)
@@ -205,43 +174,33 @@ impl TargetHttpControlAuthority {
         }
     }
 
-    pub(super) async fn hosted_run_json<T: DeserializeOwned>(
+    pub(super) async fn hosted_get_json<T: DeserializeOwned>(
         &self,
-        request: (RequestBuilder, &AccessToken),
-        run_parts: bool,
-        response: HostedRunResponse,
+        request: (Url, &AccessToken),
+        operation: &'static str,
+        maximum_bytes: usize,
     ) -> Result<T, TargetAuthorityError> {
-        let HostedRunResponse {
-            operation,
-            maximum_bytes,
-            method,
-        } = response;
-        if run_parts {
-            let (builder, access) = request;
-            let builder = part_identity::negotiate(builder, run_parts);
-            return self
-                .hosted_json((builder, access), operation, maximum_bytes)
-                .await;
-        }
-        let mut value = self.hosted_json(request, operation, maximum_bytes).await?;
-        protocol::physical_runs::read_response(method, &mut value);
-        serde_json::from_value(value)
-            .map_err(|_| authority_error(format!("{operation} response is malformed")))
+        let (url, access) = request;
+        let request = self
+            .authorized(self.client.get(url.clone()), access)?
+            .header(ACCEPT, "application/json")
+            .header(CACHE_CONTROL, "no-store");
+        self.hosted_json((request, access), operation, Some(maximum_bytes))
+            .await
     }
 
     async fn hosted_stream<E>(
         &self,
-        request: (Url, &AccessToken, bool),
+        request: (Url, &AccessToken),
         operation: &'static str,
         maximum_frame_bytes: usize,
     ) -> Result<BoxedSubscription<E>, TargetAuthorityError>
     where
         E: DeserializeOwned + Send + 'static,
     {
-        let (url, access, run_parts) = request;
-        let builder = part_identity::negotiate(self.stream_client.get(url.clone()), run_parts);
+        let (url, access) = request;
         let response = self
-            .authorized(builder, access)?
+            .authorized(self.stream_client.get(url.clone()), access)?
             .header(ACCEPT, NDJSON_MEDIA_TYPE)
             .header(CACHE_CONTROL, "no-store")
             .send()
@@ -256,7 +215,6 @@ impl TargetHttpControlAuthority {
         Ok(BoxedSubscription::new(HostedRunSubscription::new(
             response,
             maximum_frame_bytes,
-            run_parts,
         )))
     }
 }
@@ -269,9 +227,8 @@ impl TargetHttpControlAuthority {
     ) -> Result<CliRunListResult, TargetAuthorityError> {
         let (routes, access) = self.require_hosted_run_access(target).await?;
         let url = routes.list_url()?;
-        let builder = part_identity::negotiate(self.client.get(url.clone()), routes.run_parts);
         let response = self
-            .authorized(builder, &access)?
+            .authorized(self.client.get(url.clone()), &access)?
             .header(ACCEPT, "application/json")
             .header(CACHE_CONTROL, "no-store")
             .send()
@@ -283,39 +240,23 @@ impl TargetHttpControlAuthority {
         if !response.status().is_success() {
             return Err(http_error(response, "hosted run list").await);
         }
-        list_http::read_run_list(response, routes.run_parts).await
+        list_http::read_run_list(response).await
     }
 
     pub(super) async fn hosted_run_status(
         &self,
         target: &TargetRecord,
         params: RunStatusParams,
-        grouped_only: bool,
-    ) -> Result<Option<HostedRunRoute>, TargetAuthorityError> {
+    ) -> Result<CliRunStatusResult, TargetAuthorityError> {
         let (routes, access) = self.require_hosted_run_access(target).await?;
-        if grouped_only && !routes.run_parts {
-            return Ok(None);
-        }
         let url = routes.status_url(&params.run_id)?;
-        let url = part_identity::selected_url(
-            url,
-            routes.run_parts,
-            &params.run_id,
-            params.part_id.as_ref(),
-        )?;
-        let request = self
-            .authorized(self.client.get(url), &access)?
-            .header(ACCEPT, "application/json")
-            .header(CACHE_CONTROL, "no-store");
-        let response = HostedRunResponse::new("hosted run status", protocol::RUN_STATUS_METHOD)
-            .with_limit(openengine_cluster_protocol::MAX_REQUEST_RESPONSE_BYTES);
-        let status = self
-            .hosted_run_json((request, &access), routes.run_parts, response)
-            .await?;
-        Ok(Some(HostedRunRoute {
-            status,
-            run_parts: routes.run_parts,
-        }))
+        let url = selected_url(url, params.part_id.as_ref());
+        self.hosted_get_json(
+            (url, &access),
+            "hosted run status",
+            openengine_cluster_protocol::MAX_REQUEST_RESPONSE_BYTES,
+        )
+        .await
     }
 
     pub(super) async fn hosted_run_watch(
@@ -325,14 +266,9 @@ impl TargetHttpControlAuthority {
     ) -> Result<BoxedSubscription<CliRunWatchEventNotification>, TargetAuthorityError> {
         let (routes, access) = self.require_hosted_run_access(target).await?;
         let url = routes.watch_url(&params.run_id, params.from_cursor.as_ref())?;
-        let url = part_identity::selected_url(
-            url,
-            routes.run_parts,
-            &params.run_id,
-            params.part_id.as_ref(),
-        )?;
+        let url = selected_url(url, params.part_id.as_ref());
         self.hosted_stream(
-            (url, &access, routes.run_parts),
+            (url, &access),
             "hosted run watch",
             openengine_cluster_protocol::MAX_REQUEST_RESPONSE_BYTES,
         )
@@ -350,18 +286,9 @@ impl TargetHttpControlAuthority {
             params.from_cursor.as_ref(),
             params.execution.as_ref(),
         )?;
-        let url = part_identity::selected_url(
-            url,
-            routes.run_parts,
-            &params.run_id,
-            params.part_id.as_ref(),
-        )?;
-        self.hosted_stream(
-            (url, &access, routes.run_parts),
-            "hosted run logs",
-            MAX_STREAM_FRAME_BYTES,
-        )
-        .await
+        let url = selected_url(url, params.part_id.as_ref());
+        self.hosted_stream((url, &access), "hosted run logs", MAX_STREAM_FRAME_BYTES)
+            .await
     }
 
     pub(super) async fn hosted_run_force(
@@ -372,23 +299,23 @@ impl TargetHttpControlAuthority {
         let (routes, access) = self.require_hosted_run_access(target).await?;
         let url = routes.force_url(&params.run_id)?;
         let mut body = serde_json::Map::new();
-        if let Some(part) = params.part_id.as_ref() {
-            part_identity::validate_part(routes.run_parts, &params.run_id, part)?;
-            if routes.run_parts {
-                body.insert("partId".into(), serde_json::json!(part));
-            }
+        if let Some(part) = params.part_id {
+            body.insert("partId".into(), serde_json::json!(part));
         }
         let request = self
-            .authorized(self.client.post(url.clone()), &access)?
+            .authorized(self.client.post(url), &access)?
             .header(ACCEPT, "application/json")
             .json(&body);
-        self.hosted_run_json(
-            (request, &access),
-            routes.run_parts,
-            HostedRunResponse::new("hosted run force", protocol::RUN_FORCE_METHOD),
-        )
-        .await
+        self.hosted_json((request, &access), "hosted run force", None)
+            .await
     }
+}
+
+fn selected_url(mut url: Url, part: Option<&openengine_cluster_protocol::RunId>) -> Url {
+    if let Some(part) = part {
+        url.query_pairs_mut().append_pair("partId", part.as_str());
+    }
+    url
 }
 
 fn stream_error(message: &'static str) -> NativeV2CliError {

@@ -15,7 +15,7 @@ use super::ConnectionState;
 use crate::native_v2::{
     RunAttachEventStream, RunLogEventStream, RunSubscriptionItem, RunWatchEventStream,
 };
-use crate::{serialize_backend_error, serialize_error, ClusterBackend, Dispatcher};
+use crate::{serialize_backend_error, serialize_error, serialize_success, ClusterBackend, Dispatcher};
 
 pub(crate) async fn run_run_watch_subscription<B>(
     dispatcher: Dispatcher<B>,
@@ -25,9 +25,8 @@ pub(crate) async fn run_run_watch_subscription<B>(
 ) where
     B: ClusterBackend,
 {
-    let reply = dispatcher.dispatch_run_watch(id.clone(), params).await;
-    let physical = dispatcher.context().physical_run_ids();
-    run_cursor_subscription(id, state, reply, physical).await;
+    let (response, established) = dispatcher.dispatch_run_watch(id.clone(), params).await;
+    run_cursor_subscription(id, state, response, established).await;
 }
 
 pub(crate) async fn run_run_logs_subscription<B>(
@@ -38,9 +37,8 @@ pub(crate) async fn run_run_logs_subscription<B>(
 ) where
     B: ClusterBackend,
 {
-    let reply = dispatcher.dispatch_run_logs(id.clone(), params).await;
-    let physical = dispatcher.context().physical_run_ids();
-    run_cursor_subscription(id, state, reply, physical).await;
+    let (response, established) = dispatcher.dispatch_run_logs(id.clone(), params).await;
+    run_cursor_subscription(id, state, response, established).await;
 }
 
 trait CursorNotification: serde::Serialize {
@@ -71,8 +69,8 @@ impl CursorNotification for RunLogEventNotification {
 async fn run_cursor_subscription<S, E>(
     id: RequestId,
     state: ConnectionState,
-    (response, established): (String, Option<(SubscriptionId, S, ())>),
-    physical: bool,
+    response: String,
+    established: Option<(SubscriptionId, S, ())>,
 ) where
     S: EventSource<Item = RunSubscriptionItem<E>>,
     E: CursorNotification,
@@ -88,7 +86,7 @@ async fn run_cursor_subscription<S, E>(
         RunSubscriptionItem::Event(mut event) => {
             event.bind_subscription(subscription_id.clone());
             last_delivered_cursor = Some(event.cursor());
-            event_notification(event, physical)
+            event_notification(event)
         }
         RunSubscriptionItem::Closed { reason } => closed_notification(
             subscription_id.clone(),
@@ -108,7 +106,6 @@ pub(crate) async fn run_run_attach_subscription<B>(
     B: ClusterBackend,
 {
     let (response, established) = dispatcher.dispatch_run_attach(id.clone(), params).await;
-    let physical = dispatcher.context().physical_run_ids();
     let channels = subscription_channels(id, state);
     let Some((established, ())) = establish_subscription(&channels, response, established).await
     else {
@@ -118,7 +115,7 @@ pub(crate) async fn run_run_attach_subscription<B>(
     run_established_subscription(established, channels, move |item| match item {
         RunSubscriptionItem::Event(mut event) => {
             event.subscription_id = subscription_id.clone();
-            event_notification(event, physical)
+            event_notification(event)
         }
         RunSubscriptionItem::Closed { reason } => {
             closed_notification(subscription_id.clone(), reason, None)
@@ -140,12 +137,7 @@ fn subscription_channels(id: RequestId, state: ConnectionState) -> SubscriptionC
     }
 }
 
-fn event_notification<P: serde::Serialize>(params: P, physical: bool) -> Option<String> {
-    if physical {
-        let mut value = serde_json::to_value(params).ok()?;
-        openengine_cluster_protocol::physical_runs::write_response("event", &mut value);
-        return event_notification_with_method("event", value);
-    }
+fn event_notification<P: serde::Serialize>(params: P) -> Option<String> {
     serde_json::to_string(&JsonRpcNotification {
         jsonrpc: JSON_RPC_VERSION.to_owned(),
         method: "event".to_owned(),
@@ -191,16 +183,9 @@ where
             Ok(params) => params,
             Err(_) => return subscription_invalid_params(id),
         };
-        match self.run_watch(params).await {
-            Ok((result, stream)) => {
-                let subscription_id = result.subscription_id.clone();
-                (
-                    self.run_response(openengine_cluster_protocol::RUN_WATCH_METHOD, id, result),
-                    Some((subscription_id, stream, ())),
-                )
-            }
-            Err(error) => (serialize_backend_error(id, error), None),
-        }
+        subscription_reply(id, self.run_watch(params).await, |result| {
+            result.subscription_id
+        })
     }
 
     pub(crate) async fn dispatch_run_logs(
@@ -212,16 +197,9 @@ where
             Ok(params) => params,
             Err(_) => return subscription_invalid_params(id),
         };
-        match self.run_logs(params).await {
-            Ok((result, stream)) => {
-                let subscription_id = result.subscription_id.clone();
-                (
-                    self.run_response(openengine_cluster_protocol::RUN_LOGS_METHOD, id, result),
-                    Some((subscription_id, stream, ())),
-                )
-            }
-            Err(error) => (serialize_backend_error(id, error), None),
-        }
+        subscription_reply(id, self.run_logs(params).await, |result| {
+            result.subscription_id
+        })
     }
 
     pub(crate) async fn dispatch_run_attach(
@@ -233,16 +211,23 @@ where
             Ok(params) => params,
             Err(_) => return subscription_invalid_params(id),
         };
-        match self.run_attach(params).await {
-            Ok((result, stream)) => {
-                let subscription_id = result.subscription_id.clone();
-                (
-                    self.run_response(openengine_cluster_protocol::RUN_ATTACH_METHOD, id, result),
-                    Some((subscription_id, stream, ())),
-                )
-            }
-            Err(error) => (serialize_backend_error(id, error), None),
-        }
+        subscription_reply(id, self.run_attach(params).await, |result| {
+            result.subscription_id
+        })
+    }
+}
+
+fn subscription_reply<R: serde::Serialize, S>(
+    id: RequestId,
+    opened: Result<(R, S), crate::BackendError>,
+    subscription_id: impl FnOnce(R) -> SubscriptionId,
+) -> (String, Option<(SubscriptionId, S, ())>) {
+    match opened {
+        Ok((result, stream)) => (
+            serialize_success(id, &result),
+            Some((subscription_id(result), stream, ())),
+        ),
+        Err(error) => (serialize_backend_error(id, error), None),
     }
 }
 

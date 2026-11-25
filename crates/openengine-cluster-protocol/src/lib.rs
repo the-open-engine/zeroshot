@@ -17,7 +17,6 @@ pub mod native_v2_run;
 pub mod native_v2_target;
 pub mod payload;
 mod payload_value;
-pub mod physical_runs;
 mod value;
 pub mod watch;
 mod wire;
@@ -50,7 +49,7 @@ use thiserror::Error;
 
 pub const JSON_RPC_VERSION: &str = "2.0";
 pub const PROTOCOL_NAME: &str = "openengine.cluster";
-/// Current logical-run wire contract. Physical-run peers negotiate `physical_runs::VERSION`.
+/// The single current wire contract accepted at Cluster Protocol initialization.
 pub const PROTOCOL_VERSION: &str = "openengine.cluster/v3";
 pub const BASE_PROFILE: &str = "openengine.cluster/base/v1";
 
@@ -177,10 +176,7 @@ impl InitializeResult {
     }
 
     pub fn validate_protocol_version(&self) -> Result<(), ProtocolVersionMismatch> {
-        if matches!(
-            self.protocol_version.as_str(),
-            PROTOCOL_VERSION | physical_runs::VERSION
-        ) {
+        if self.protocol_version == PROTOCOL_VERSION {
             Ok(())
         } else {
             Err(ProtocolVersionMismatch {
@@ -193,7 +189,7 @@ impl InitializeResult {
 fn protocol_version_schema(_generator: &mut SchemaGenerator) -> Schema {
     json_schema!({
         "type": "string",
-        "enum": [PROTOCOL_VERSION, physical_runs::VERSION]
+        "const": PROTOCOL_VERSION
     })
 }
 

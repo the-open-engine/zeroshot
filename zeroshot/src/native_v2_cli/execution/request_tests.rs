@@ -206,7 +206,6 @@ async fn named_target_request_deadline_uses_controller_clock_and_preserves_valid
             resumes[0].successor_run_id.as_str()
         );
         assert_eq!(receipt["resumedFromPartId"], "original");
-        assert_eq!(receipt["resumedFrom"], receipt["resumedFromPartId"]);
         assert!(matches!(
             *backend.resolution.lock().expect("resolution"),
             Some(RequestResolution::Answer { .. })

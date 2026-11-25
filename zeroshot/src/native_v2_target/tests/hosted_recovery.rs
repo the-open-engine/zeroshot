@@ -52,7 +52,8 @@ async fn hosted_recovery_uses_authenticated_http_without_the_deleted_capsules_tr
             )
             .await
             .assert_value();
-        assert_eq!(result.run_id, RunId::new("successor"));
+        assert_eq!(result.run_id, run_id);
+        assert_eq!(result.current_part_id, RunId::new("successor"));
         assert_eq!(result.resumed_from, run_id);
     }
     let checkpoints = backend
@@ -162,10 +163,10 @@ pub(super) fn response(request: &CapturedHttpRequest) -> Option<String> {
     let body: Value = serde_json::from_str(&request.body).assert_value();
     Some(
         match suffix {
-            "resume" => json!({"runId": body["successorRunId"], "resumedFrom": body["runId"]}),
-            "checkpoints" => json!({"runId": body["runId"], "checkpoints": []}),
-            "discard-workspace" => json!({"runId": body["runId"], "discarded": true}),
-            "vectors" => json!({"runId": body["runId"], "vectors":[vector()], "nextAfter":"entry"}),
+            "resume" => json!({"runId": body["runId"], "currentPartId": body["successorPartId"], "resumedFromPartId": body["partId"]}),
+            "checkpoints" => json!({"runId": body["runId"], "partId": body["runId"], "checkpoints": []}),
+            "discard-workspace" => json!({"runId": body["runId"], "partId": body["runId"], "discarded": true}),
+            "vectors" => json!({"runId": body["runId"], "partId": body["runId"], "vectors":[vector()], "nextAfter":"entry"}),
             "vector" => vector(),
             _ => return None,
         }
@@ -174,7 +175,7 @@ pub(super) fn response(request: &CapturedHttpRequest) -> Option<String> {
 }
 
 fn vector() -> Value {
-    json!({"id":"entry", "kind":"suspend_request", "runId":"run-recoverable", "createdAt":1})
+    json!({"id":"entry", "kind":"suspend_request", "runId":"run-recoverable", "partId":"run-recoverable", "createdAt":1})
 }
 
 #[tokio::test]

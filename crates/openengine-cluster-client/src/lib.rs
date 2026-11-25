@@ -40,7 +40,6 @@ use openengine_cluster_protocol::{
     RUN_FORCE_METHOD, RUN_LIST_METHOD, RUN_RESUME_METHOD, RUN_STATUS_METHOD, RUN_SUBMIT_METHOD,
 };
 use openengine_cluster_server::{ClusterBackend, Dispatcher};
-use openengine_cluster_protocol::physical_runs;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
@@ -262,7 +261,6 @@ async fn run_pump<R, W>(
 pub struct ClusterClient<T> {
     transport: T,
     next_id: AtomicI64,
-    physical_runs: std::sync::atomic::AtomicBool,
 }
 
 impl<T> ClusterClient<T>
@@ -274,17 +272,11 @@ where
         Self {
             transport,
             next_id: AtomicI64::new(1),
-            physical_runs: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
     pub async fn initialize(&self) -> Result<InitializeResult, ClientError> {
-        match self.initialize_with_version(PROTOCOL_VERSION).await {
-            Err(error) if supports_physical_version(&error) => {
-                self.initialize_with_version(physical_runs::VERSION).await
-            }
-            result => result,
-        }
+        self.initialize_with_version(PROTOCOL_VERSION).await
     }
 
     pub async fn initialize_with_version(
@@ -322,10 +314,6 @@ where
         result
             .validate_protocol_version()
             .map_err(|error| ClientError::InvalidResponse(error.to_string()))?;
-        self.physical_runs.store(
-            protocol_version == physical_runs::VERSION,
-            Ordering::Release,
-        );
         Ok(result)
     }
 
@@ -365,29 +353,29 @@ where
         &self,
         params: RunSubmitParams,
     ) -> Result<RunSubmitResult, ClientError> {
-        self.run_call(RUN_SUBMIT_METHOD, params).await
+        self.call(RUN_SUBMIT_METHOD, params).await
     }
 
     pub async fn run_list(&self, params: RunListParams) -> Result<RunListResult, ClientError> {
-        self.run_call(RUN_LIST_METHOD, params).await
+        self.call(RUN_LIST_METHOD, params).await
     }
 
     pub async fn run_status(
         &self,
         params: RunStatusParams,
     ) -> Result<RunStatusResult, ClientError> {
-        self.run_call(RUN_STATUS_METHOD, params).await
+        self.call(RUN_STATUS_METHOD, params).await
     }
 
     pub async fn run_force(&self, params: RunForceParams) -> Result<RunForceResult, ClientError> {
-        self.run_call(RUN_FORCE_METHOD, params).await
+        self.call(RUN_FORCE_METHOD, params).await
     }
 
     pub async fn run_steer(
         &self,
         params: openengine_cluster_protocol::RunSteerParams,
     ) -> Result<openengine_cluster_protocol::RunSteerResult, ClientError> {
-        self.run_call(openengine_cluster_protocol::RUN_STEER_METHOD, params)
+        self.call(openengine_cluster_protocol::RUN_STEER_METHOD, params)
             .await
     }
 
@@ -395,7 +383,7 @@ where
         &self,
         params: openengine_cluster_protocol::RunSuspendParams,
     ) -> Result<openengine_cluster_protocol::RunSuspendResult, ClientError> {
-        self.run_call(openengine_cluster_protocol::RUN_SUSPEND_METHOD, params)
+        self.call(openengine_cluster_protocol::RUN_SUSPEND_METHOD, params)
             .await
     }
 
@@ -403,7 +391,7 @@ where
         &self,
         params: openengine_cluster_protocol::RunVectorsParams,
     ) -> Result<openengine_cluster_protocol::RunVectorsResult, ClientError> {
-        self.run_call(openengine_cluster_protocol::RUN_VECTORS_METHOD, params)
+        self.call(openengine_cluster_protocol::RUN_VECTORS_METHOD, params)
             .await
     }
 
@@ -411,7 +399,7 @@ where
         &self,
         params: openengine_cluster_protocol::InboxShowParams,
     ) -> Result<openengine_cluster_protocol::InboxShowResult, ClientError> {
-        self.run_call(openengine_cluster_protocol::INBOX_SHOW_METHOD, params)
+        self.call(openengine_cluster_protocol::INBOX_SHOW_METHOD, params)
             .await
     }
 
@@ -419,7 +407,7 @@ where
         &self,
         params: openengine_cluster_protocol::InboxListParams,
     ) -> Result<openengine_cluster_protocol::InboxListResult, ClientError> {
-        self.run_call(openengine_cluster_protocol::INBOX_LIST_METHOD, params)
+        self.call(openengine_cluster_protocol::INBOX_LIST_METHOD, params)
             .await
     }
 
@@ -427,7 +415,7 @@ where
         &self,
         params: openengine_cluster_protocol::RunVectorParams,
     ) -> Result<openengine_cluster_protocol::RunVectorResult, ClientError> {
-        self.run_call(openengine_cluster_protocol::RUN_VECTOR_METHOD, params)
+        self.call(openengine_cluster_protocol::RUN_VECTOR_METHOD, params)
             .await
     }
 
@@ -435,14 +423,14 @@ where
         &self,
         params: RunCheckpointsParams,
     ) -> Result<RunCheckpointsResult, ClientError> {
-        self.run_call(RUN_CHECKPOINTS_METHOD, params).await
+        self.call(RUN_CHECKPOINTS_METHOD, params).await
     }
 
     pub async fn run_resume_requirements(
         &self,
         params: openengine_cluster_protocol::RunResumeRequirementsParams,
     ) -> Result<openengine_cluster_protocol::RunResumeRequirementsResult, ClientError> {
-        self.run_call(
+        self.call(
             openengine_cluster_protocol::RUN_RESUME_REQUIREMENTS_METHOD,
             params,
         )
@@ -453,87 +441,22 @@ where
         &self,
         params: RunResumeParams,
     ) -> Result<RunResumeResult, ClientError> {
-        self.run_call(RUN_RESUME_METHOD, params).await
+        self.call(RUN_RESUME_METHOD, params).await
     }
 
     pub async fn run_discard_workspace(
         &self,
         params: RunDiscardWorkspaceParams,
     ) -> Result<RunDiscardWorkspaceResult, ClientError> {
-        self.run_call(RUN_DISCARD_WORKSPACE_METHOD, params).await
+        self.call(RUN_DISCARD_WORKSPACE_METHOD, params).await
     }
 
-    async fn run_call<P: Serialize + Send + Sync, R: DeserializeOwned>(
-        &self,
-        method: &str,
-        params: P,
-    ) -> Result<R, ClientError> {
-        if !self.physical_runs.load(Ordering::Acquire) {
-            let result = self.call(method, VersionedRunParams::new(&params)).await;
-            match result {
-                Err(ref error)
-                    if self
-                        .physical_peer_after_rejection(error, self.next_request_id())
-                        .await => {}
-                _ => return result,
-            }
-        }
-        let params = physical_params(&params)?;
-        let mut result: Value = self.call(method, params).await?;
-        physical_runs::read_response(method, &mut result);
-        serde_json::from_value(result).map_err(|e| ClientError::InvalidResponse(e.to_string()))
-    }
-
-    // Released peers strictly reject the opt-in field before dispatch. Only retry a command
-    // after the peer explicitly identifies its physical protocol in an initialize refusal.
-    async fn physical_peer_after_rejection(&self, error: &ClientError, id: RequestId) -> bool {
-        let ClientError::Rpc(rpc) = error else {
-            return false;
-        };
-        let invalid_params = rpc.data.as_ref().map_or_else(
-            || rpc.message == "Invalid params",
-            |data| data.code == openengine_cluster_protocol::SCHEMA_VIOLATION,
-        );
-        if rpc.code != openengine_cluster_protocol::INVALID_PARAMS || !invalid_params {
-            return false;
-        }
-        // An unsupported version returns supportedProtocolVersion without changing the connection's negotiated default.
-        let probe: Result<InitializeResult, ClientError> = self
-            .call_with_id(
-                id,
-                "initialize",
-                InitializeParams {
-                    protocol_version: String::new(),
-                },
-            )
-            .await;
-        let Err(error) = probe else {
-            return false;
-        };
-        let legacy = supports_physical_version(&error);
-        self.physical_runs.store(legacy, Ordering::Release);
-        legacy
-    }
-
-    fn next_request_id(&self) -> RequestId {
-        RequestId::Integer(self.next_id.fetch_add(1, Ordering::Relaxed))
-    }
-
-    async fn call<P: Serialize + Send, R: DeserializeOwned>(
-        &self,
-        method: &str,
-        params: P,
-    ) -> Result<R, ClientError> {
-        self.call_with_id(self.next_request_id(), method, params)
-            .await
-    }
-
-    async fn call_with_id<P: Serialize + Send, R: DeserializeOwned>(
-        &self,
-        id: RequestId,
-        method: &str,
-        params: P,
-    ) -> Result<R, ClientError> {
+    async fn call<P, R>(&self, method: &str, params: P) -> Result<R, ClientError>
+    where
+        P: Serialize + Send,
+        R: DeserializeOwned,
+    {
+        let id = RequestId::Integer(self.next_id.fetch_add(1, Ordering::Relaxed));
         let request = serde_json::to_string(&JsonRpcRequest {
             jsonrpc: JSON_RPC_VERSION.to_owned(),
             id: id.clone(),
@@ -556,38 +479,6 @@ where
         validate_response_identity(&response.jsonrpc, Some(&response.id), &id)?;
         Ok(response.result)
     }
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct VersionedRunParams<'a, P> {
-    protocol_version: &'static str,
-    #[serde(flatten)]
-    params: &'a P,
-}
-impl<'a, P> VersionedRunParams<'a, P> {
-    fn new(params: &'a P) -> Self {
-        Self {
-            protocol_version: PROTOCOL_VERSION,
-            params,
-        }
-    }
-}
-
-fn supports_physical_version(error: &ClientError) -> bool {
-    matches!(error, ClientError::Rpc(rpc) if rpc.data.as_ref().is_some_and(|d|
-        d.code == openengine_cluster_protocol::UNSUPPORTED_PROTOCOL_VERSION &&
-        d.details.as_ref().and_then(|d| d.get("supportedProtocolVersion")).and_then(Value::as_str) == Some(physical_runs::VERSION)))
-}
-
-fn physical_params<P: Serialize>(params: &P) -> Result<Value, ClientError> {
-    let mut params = serde_json::to_value(params)?;
-    if !physical_runs::write_request(&mut params) {
-        return Err(ClientError::InvalidResponse(
-            "target requires run-parts support to select a different part".to_owned(),
-        ));
-    }
-    Ok(params)
 }
 
 fn validate_response_identity(

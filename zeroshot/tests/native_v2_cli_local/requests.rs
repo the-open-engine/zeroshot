@@ -123,7 +123,6 @@ async fn request_answer_preserves_live_workspace_and_does_not_replay_worker() {
     let old = fixture.own_inbox(run).await;
     assert_eq!(old["state"], "answered");
     assert_eq!(old["successorPartId"], next);
-    assert_eq!(old["successorRunId"], next);
     let next_status = fixture.json(&["status", &next], "finish").await;
     assert_eq!(next_status["runId"], run);
     assert_eq!(next_status["currentPartId"], next);

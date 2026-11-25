@@ -37,10 +37,7 @@
           "name": "protocolVersion",
           "required": true,
           "schema": {
-            "enum": [
-              "openengine.cluster/v3",
-              "openengine.cluster/v2"
-            ],
+            "const": "openengine.cluster/v3",
             "type": "string"
           }
         }
@@ -568,14 +565,6 @@
           "schema": {
             "$ref": "schema.json#/$defs/RunSubmission"
           }
-        },
-        {
-          "description": "Select logical run IDs without initializing the connection.",
-          "name": "protocolVersion",
-          "required": false,
-          "schema": {
-            "const": "openengine.cluster/v3"
-          }
         }
       ],
       "result": {
@@ -593,16 +582,7 @@
     {
       "name": "run/list",
       "paramStructure": "by-name",
-      "params": [
-        {
-          "description": "Select logical run IDs without initializing the connection.",
-          "name": "protocolVersion",
-          "required": false,
-          "schema": {
-            "const": "openengine.cluster/v3"
-          }
-        }
-      ],
+      "params": [],
       "result": {
         "name": "runListResult",
         "schema": {
@@ -635,14 +615,6 @@
               "string",
               "null"
             ]
-          }
-        },
-        {
-          "description": "Select logical run IDs without initializing the connection.",
-          "name": "protocolVersion",
-          "required": false,
-          "schema": {
-            "const": "openengine.cluster/v3"
           }
         }
       ],
@@ -688,14 +660,6 @@
               "string",
               "null"
             ]
-          }
-        },
-        {
-          "description": "Select logical run IDs without initializing the connection.",
-          "name": "protocolVersion",
-          "required": false,
-          "schema": {
-            "const": "openengine.cluster/v3"
           }
         }
       ],
@@ -755,14 +719,6 @@
               "null"
             ]
           }
-        },
-        {
-          "description": "Select logical run IDs without initializing the connection.",
-          "name": "protocolVersion",
-          "required": false,
-          "schema": {
-            "const": "openengine.cluster/v3"
-          }
         }
       ],
       "result": {
@@ -808,14 +764,6 @@
             "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
             "type": "string"
           }
-        },
-        {
-          "description": "Select logical run IDs without initializing the connection.",
-          "name": "protocolVersion",
-          "required": false,
-          "schema": {
-            "const": "openengine.cluster/v3"
-          }
         }
       ],
       "result": {
@@ -850,14 +798,6 @@
               "string",
               "null"
             ]
-          }
-        },
-        {
-          "description": "Select logical run IDs without initializing the connection.",
-          "name": "protocolVersion",
-          "required": false,
-          "schema": {
-            "const": "openengine.cluster/v3"
           }
         }
       ],
@@ -916,14 +856,6 @@
           "schema": {
             "$ref": "schema.json#/$defs/RunSteerParams/properties/node"
           }
-        },
-        {
-          "description": "Select logical run IDs without initializing the connection.",
-          "name": "protocolVersion",
-          "required": false,
-          "schema": {
-            "const": "openengine.cluster/v3"
-          }
         }
       ],
       "result": {
@@ -958,14 +890,6 @@
               "string",
               "null"
             ]
-          }
-        },
-        {
-          "description": "Select logical run IDs without initializing the connection.",
-          "name": "protocolVersion",
-          "required": false,
-          "schema": {
-            "const": "openengine.cluster/v3"
           }
         }
       ],
@@ -1022,14 +946,6 @@
               "null"
             ]
           }
-        },
-        {
-          "description": "Select logical run IDs without initializing the connection.",
-          "name": "protocolVersion",
-          "required": false,
-          "schema": {
-            "const": "openengine.cluster/v3"
-          }
         }
       ],
       "result": {
@@ -1072,14 +988,6 @@
               "null"
             ]
           }
-        },
-        {
-          "description": "Select logical run IDs without initializing the connection.",
-          "name": "protocolVersion",
-          "required": false,
-          "schema": {
-            "const": "openengine.cluster/v3"
-          }
         }
       ],
       "result": {
@@ -1116,14 +1024,6 @@
               "string",
               "null"
             ]
-          }
-        },
-        {
-          "description": "Select logical run IDs without initializing the connection.",
-          "name": "protocolVersion",
-          "required": false,
-          "schema": {
-            "const": "openengine.cluster/v3"
           }
         }
       ],
@@ -1166,14 +1066,6 @@
           "required": true,
           "schema": {
             "$ref": "schema.json#/$defs/VectorId"
-          }
-        },
-        {
-          "description": "Select logical run IDs without initializing the connection.",
-          "name": "protocolVersion",
-          "required": false,
-          "schema": {
-            "const": "openengine.cluster/v3"
           }
         }
       ],
@@ -1239,14 +1131,6 @@
               "null"
             ]
           }
-        },
-        {
-          "description": "Select logical run IDs without initializing the connection.",
-          "name": "protocolVersion",
-          "required": false,
-          "schema": {
-            "const": "openengine.cluster/v3"
-          }
         }
       ],
       "result": {
@@ -1289,14 +1173,6 @@
           "required": true,
           "schema": {
             "$ref": "schema.json#/$defs/RunResumeRequirementsParams/properties/runtime"
-          }
-        },
-        {
-          "description": "Select logical run IDs without initializing the connection.",
-          "name": "protocolVersion",
-          "required": false,
-          "schema": {
-            "const": "openengine.cluster/v3"
           }
         }
       ],
@@ -1446,14 +1322,6 @@
             ],
             "description": "Person credited by a `Co-authored-by` trailer on every commit carrying the successor's\nchanges. Author and committer stay as `commitIdentity` selects."
           }
-        },
-        {
-          "description": "Select logical run IDs without initializing the connection.",
-          "name": "protocolVersion",
-          "required": false,
-          "schema": {
-            "const": "openengine.cluster/v3"
-          }
         }
       ],
       "result": {
@@ -1489,14 +1357,6 @@
               "string",
               "null"
             ]
-          }
-        },
-        {
-          "description": "Select logical run IDs without initializing the connection.",
-          "name": "protocolVersion",
-          "required": false,
-          "schema": {
-            "const": "openengine.cluster/v3"
           }
         }
       ],

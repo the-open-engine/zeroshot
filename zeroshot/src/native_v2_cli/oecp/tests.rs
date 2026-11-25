@@ -6,7 +6,7 @@ use openengine_cluster_client::{
     SubscriptionTransport, TransportError,
 };
 use openengine_cluster_protocol::{
-    ConnectionKey, ConnectionScope, EnvironmentVariableName, ExecutionRef, IdempotencyKey,
+    ConnectionKey, ConnectionScope, Cursor, EnvironmentVariableName, ExecutionRef, IdempotencyKey,
     StackSource, RequestId, RunId, RunProfileName, RunProfileScope, RunTitle, SourceBranchId,
     SourceRepositoryId, StaticConnectionValues, SubscriptionCloseReason, SubscriptionId,
 };
@@ -70,7 +70,6 @@ impl SubscriptionTransport for FailingTransport {
 struct StubConnector<T = FailingTransport> {
     transport: Arc<T>,
     hosted_status: Option<CliRunStatusResult>,
-    run_parts: bool,
 }
 
 impl StubConnector {
@@ -80,7 +79,6 @@ impl StubConnector {
                 requests: Arc::new(Mutex::new(Vec::new())),
             }),
             hosted_status,
-            run_parts: false,
         }
     }
 }
@@ -198,24 +196,6 @@ where
         _params: RunStatusParams,
     ) -> Result<Option<CliRunStatusResult>, NativeV2CliError> {
         Ok(self.hosted_status.clone())
-    }
-
-    async fn hosted_run_route(
-        &self,
-        name: &str,
-        params: RunStatusParams,
-        grouped_only: bool,
-    ) -> Result<Option<HostedRunRoute>, NativeV2CliError> {
-        if grouped_only && !self.run_parts {
-            return Ok(None);
-        }
-        Ok(self
-            .hosted_run_status(name, params)
-            .await?
-            .map(|status| HostedRunRoute {
-                status,
-                run_parts: self.run_parts,
-            }))
     }
 
     async fn connect_steering(
@@ -699,62 +679,6 @@ async fn wave7_cli_contract_oecp_subscription_framing_and_hosted_refusals_are_ex
 }
 
 #[tokio::test]
-async fn wave7_cli_contract_oecp_hosted_operations_and_task_cursors_fail_closed() {
-    let run_id = RunId::new("run-contract");
-    let hosted = NamedTargetCliBackend::new(StubConnector::new(Some(status("queued"))));
-    assert!(
-        hosted
-            .run_watch(
-                Some("prod"),
-                RunWatchParams {
-                    part_id: None,
-                    run_id: run_id.clone(),
-                    from_cursor: None,
-                },
-            )
-            .await
-            .assert_error()
-            .to_string()
-            .contains("did not provide its run watch")
-    );
-    assert!(
-        hosted
-            .run_logs(
-                Some("prod"),
-                RunLogsParams {
-                    part_id: None,
-                    run_id: run_id.clone(),
-                    from_cursor: None,
-                    execution: None,
-                },
-            )
-            .await
-            .assert_error()
-            .to_string()
-            .contains("did not provide its retained logs")
-    );
-    assert!(
-        hosted
-            .run_force(Some("prod"), RunForceParams::new(run_id))
-            .await
-            .assert_error()
-            .to_string()
-            .contains("did not provide its force operation")
-    );
-
-    assert!(task_is_active(&status("admitted").status));
-    assert!(!task_is_active(&status("queued").status));
-    assert_eq!(
-        task_cursor(Some(Cursor::new("v2:7")))
-            .assert_value()
-            .as_str(),
-        "v2:7"
-    );
-    assert!(task_cursor(Some(Cursor::new("cloud:7"))).is_none());
-    assert!(task_cursor(None).is_none());
-}
-
-#[tokio::test]
 async fn hosted_capsule_actions_use_the_selected_physical_part_and_refuse_stale_steers() {
     let root = RunId::new("run-contract");
     let child = RunId::new("second-part");
@@ -762,18 +686,14 @@ async fn hosted_capsule_actions_use_the_selected_physical_part_and_refuse_stale_
     active.current_part_id = child.clone();
     active.part_id = child.clone();
 
-    let mut connector = StubConnector::new(Some(active));
+    let connector = StubConnector::new(Some(active));
     let requests = connector.transport.requests.clone();
-    let physical = NamedTargetCliBackend::new(connector);
-    physical
+    let mut grouped = NamedTargetCliBackend::new(connector);
+    let observed = grouped
         .run_status(Some("prod"), RunStatusParams::new(root.clone()))
         .await
-        .assert_error();
-    assert_eq!(requests.lock().assert_value()[0]["method"], "run/status");
-
-    connector = physical.connector;
-    connector.run_parts = true;
-    let mut grouped = NamedTargetCliBackend::new(connector);
+        .assert_value();
+    assert_eq!(observed.part_id, child);
     let steer = openengine_cluster_protocol::RunSteerParams {
         run_id: root.clone(),
         part_id: None,
@@ -798,9 +718,9 @@ async fn hosted_capsule_actions_use_the_selected_physical_part_and_refuse_stale_
         .assert_error();
     {
         let calls = requests.lock().assert_value();
-        assert_eq!(calls[1]["method"], "run/steer");
-        assert_eq!(calls[2]["method"], "run/attach");
-        for call in &calls[1..] {
+        assert_eq!(calls[0]["method"], "run/steer");
+        assert_eq!(calls[1]["method"], "run/attach");
+        for call in calls.iter() {
             assert_eq!(call["params"]["runId"], child.as_str());
             assert_eq!(call["params"]["partId"], child.as_str());
         }
@@ -824,7 +744,7 @@ async fn hosted_capsule_actions_use_the_selected_physical_part_and_refuse_stale_
     assert!(
         matches!(error, NativeV2CliError::Remote { code, .. } if code == openengine_cluster_protocol::RUN_CONFLICT)
     );
-    assert_eq!(requests.lock().assert_value().len(), 3);
+    assert_eq!(requests.lock().assert_value().len(), 2);
 }
 
 async fn forward_watch_script(

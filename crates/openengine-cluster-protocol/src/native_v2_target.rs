@@ -34,9 +34,9 @@ pub const TARGET_SESSION_PATH: &str = "/native-v2/oecp-session";
 pub const TARGET_OECP_PATH: &str = "/native-v2/oecp";
 pub const TARGET_PRIVATE_BOOTSTRAP_PATH: &str = "/native-v2/private-bootstrap";
 pub const TARGET_OPERATOR_DIAGNOSTICS_PATH_PREFIX: &str = "/native-v2/operator-diagnostics/";
-pub const TARGET_DISCOVERY_KIND: &str = "zeroshot.native-v2-target/v3";
+pub const TARGET_DISCOVERY_KIND: &str = "zeroshot.native-v2-target/v4";
 pub const TARGET_CONTROLLER_AUDIENCE: &str = "controller";
-pub const HOSTED_RUNS_KIND: &str = "zeroshot.hosted-runs/v2";
+pub const HOSTED_RUNS_KIND: &str = "zeroshot.hosted-runs/v3";
 pub const RUN_HISTORY_KIND: &str = "zeroshot.run-history/v1";
 pub const CONNECTIONS_KIND: &str = "zeroshot.connections/v1";
 pub const STATIC_CONNECTION_KIND: &str = "static";
@@ -606,16 +606,6 @@ pub struct TargetWorkspaceCheckpointOptOutDiscovery {
     pub kind: String,
 }
 
-/// Set to `1` to request grouped identities on an HTTP run or browser history route.
-pub const RUN_PARTS_HEADER: &str = "x-zeroshot-run-parts";
-pub const RUN_PARTS_KIND: &str = "openengine.run-parts/v1";
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct TargetRunPartsDiscovery {
-    pub kind: String,
-}
-
 pub const WORKSPACE_RECOVERY_KIND: &str = "openengine.workspace-recovery/v1";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -735,8 +725,6 @@ pub struct TargetTaskResolutionDiscovery {
 #[serde(default, rename_all = "snake_case")]
 pub struct TargetDiscoveryExtensions {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub run_parts: Option<TargetRunPartsDiscovery>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub files: Option<crate::TargetFilesDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resume_runtime: Option<TargetResumeRuntimeDiscovery>,
@@ -832,8 +820,7 @@ impl TargetDiscoveryExtensions {
     }
 
     const fn controller_extensions_empty(&self) -> bool {
-        self.run_parts.is_none()
-            && self.run_suspension.is_none()
+        self.run_suspension.is_none()
             && self.steering.is_none()
             && self.hosted_run_controls.is_none()
             && self.run_vectors.is_none()
@@ -858,15 +845,6 @@ impl TargetDiscoveryExtensions {
 }
 
 impl TargetDiscoveryDocument {
-    /// The run API keeps one public identity across accepted continuations.
-    #[must_use]
-    pub fn with_run_parts(mut self) -> Self {
-        self.extensions.run_parts = Some(TargetRunPartsDiscovery {
-            kind: RUN_PARTS_KIND.to_owned(),
-        });
-        self
-    }
-
     /// Advertises explicit host support; omission preserves required workspace checkpoints.
     #[must_use]
     pub fn with_workspace_checkpoint_opt_out(mut self) -> Self {

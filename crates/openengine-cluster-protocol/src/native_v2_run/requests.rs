@@ -101,7 +101,6 @@ pub struct InboxShowResult {
     #[serde(
         default,
         rename = "successorPartId",
-        alias = "successorRunId",
         skip_serializing_if = "Option::is_none"
     )]
     pub successor_run_id: Option<RunId>,

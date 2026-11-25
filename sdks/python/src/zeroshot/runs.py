@@ -119,19 +119,7 @@ class FailureContext:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class _RunPart:
-    """Preserve the original constructor for observations of a single execution."""
-
-    run_id: str
-    part_id: str = ""
-
-    def __post_init__(self) -> None:
-        if not self.part_id:
-            object.__setattr__(self, "part_id", self.run_id)
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class RunResult(_RunPart):
+class RunResult:
     """Terminal outcome from Client.run(), Run.wait(), or Run.force_stop().
 
     Args:
@@ -144,6 +132,8 @@ class RunResult(_RunPart):
         context: Structured safe failure evidence, or None for older run data.
     """
 
+    run_id: str
+    part_id: str
     succeeded: bool
     output: JsonValue = None
     delivery_receipt: JsonValue = None
@@ -172,7 +162,7 @@ class ControllerObservation:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class RunStatus(_RunPart):
+class RunStatus:
     """Current durable projection for one run.
 
     Args:
@@ -201,6 +191,8 @@ class RunStatus(_RunPart):
             history carries its import time, not the original execution time. Cursor defines order.
     """
 
+    run_id: str
+    part_id: str
     current_part_id: str | None = None
     title: str
     source: ResolvedSource | None
@@ -223,7 +215,7 @@ class RunStatus(_RunPart):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class RunSummary(_RunPart):
+class RunSummary:
     """Inventory projection returned by Client.list_runs().
 
     Args:
@@ -246,7 +238,9 @@ class RunSummary(_RunPart):
         request: Human request contract when suspended for a request.
     """
 
-    current_part_id: str = ""
+    run_id: str
+    part_id: str
+    current_part_id: str
     title: str
     source: ResolvedSource | None
     size: str
@@ -262,14 +256,9 @@ class RunSummary(_RunPart):
     due_at: int | None = None
     request: HumanRequest | None = None
 
-    def __post_init__(self) -> None:
-        _RunPart.__post_init__(self)
-        if not self.current_part_id:
-            object.__setattr__(self, "current_part_id", self.part_id)
-
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class LogEvent(_RunPart):
+class LogEvent:
     """One safe durable native log record.
 
     Args:
@@ -284,6 +273,8 @@ class LogEvent(_RunPart):
         message: Bounded secret-safe message.
     """
 
+    run_id: str
+    part_id: str
     cursor: str
     timestamp: int
     execution: str | None
@@ -322,7 +313,7 @@ class RunSteer:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class RunVector(_RunPart):
+class RunVector:
     """One immutable entry in the run's ordered vector record.
 
     Args:
@@ -334,6 +325,8 @@ class RunVector(_RunPart):
         content: Complete kind-specific JSON fields.
     """
 
+    run_id: str
+    part_id: str
     id: str
     created_at: int
     kind: str
@@ -341,7 +334,7 @@ class RunVector(_RunPart):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class RunVectorsPage(_RunPart):
+class RunVectorsPage:
     """A bounded page of the vector record.
 
     Args:
@@ -351,6 +344,8 @@ class RunVectorsPage(_RunPart):
         next_after: Cursor for the next page, or None at the end.
     """
 
+    run_id: str
+    part_id: str
     vectors: tuple[RunVector, ...]
     next_after: str | None
 
@@ -375,7 +370,7 @@ class HumanRequest:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class InboxEntry(_RunPart):
+class InboxEntry:
     """One bounded request summary.
 
     Args:
@@ -387,6 +382,8 @@ class InboxEntry(_RunPart):
         state: Pending or expired; reading never applies expiry.
     """
 
+    run_id: str
+    part_id: str
     node: str
     created_at: int
     expires_at: int
@@ -407,7 +404,7 @@ class InboxPage:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class InboxRequest(_RunPart):
+class InboxRequest:
     """The request made by a run, including its disposition.
 
     Args:
@@ -417,16 +414,13 @@ class InboxRequest(_RunPart):
         created_at: Creation time in Unix epoch milliseconds.
         request: Complete question and answer contract.
         state: Pending, answered, expired, or stopped.
-        successor_run_id: Part created by the accepted continuation, if any.
+        successor_part_id: Part created by the accepted continuation, if any.
     """
 
+    run_id: str
+    part_id: str
     node: str
     created_at: int
     request: HumanRequest
     state: Literal["pending", "answered", "expired", "stopped"]
-    successor_run_id: str | None
-
-    @property
-    def successor_part_id(self) -> str | None:
-        """Return the part created by an accepted continuation."""
-        return self.successor_run_id
+    successor_part_id: str | None

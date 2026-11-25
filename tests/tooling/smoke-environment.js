@@ -262,9 +262,7 @@ async function resume(context) {
       .map((run) => run.currentPartId),
     [successorPartId]
   );
-  const page = await fetch(new URL(`/ui/api/runs/${successorPartId}`, context.origin), {
-    headers: { 'X-Zeroshot-Run-Parts': '1' },
-  });
+  const page = await fetch(new URL(`/ui/api/runs/${successorPartId}`, context.origin));
   assert.equal(page.status, 200);
   const detail = await page.json();
   assert.equal(detail.runId, request.runId);

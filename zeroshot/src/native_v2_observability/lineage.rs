@@ -41,10 +41,6 @@ pub(crate) struct RunLineage {
 }
 
 impl RunLineage {
-    pub(crate) fn single(part: RunId) -> Self {
-        Self { parts: vec![part] }
-    }
-
     pub(crate) async fn resolve<E, F, Fut>(id: &RunId, read: F) -> Result<Self, LineageError<E>>
     where
         F: Fn(RunId) -> Fut,

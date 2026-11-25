@@ -7,7 +7,6 @@ use openengine_cluster_protocol::{
 use reqwest::header::{ACCEPT, CACHE_CONTROL};
 
 use super::contract::{RunProfilesDescriptor, authority_error};
-use super::hosted_runs::HostedRunResponse;
 use super::{
     TargetHttpControlAuthority, RequestCapabilities, graph_has_worker,
     require_request_capabilities, require_git_transport,
@@ -83,7 +82,7 @@ impl TargetHttpControlAuthority {
         &self,
         target: &TargetRecord,
         input: &impl ProfileBody,
-    ) -> Result<(RunProfilesDescriptor, AccessToken, bool), TargetAuthorityError> {
+    ) -> Result<(RunProfilesDescriptor, AccessToken), TargetAuthorityError> {
         if matches!(target.access, TargetAccess::Direct) {
             return Err(authority_error(
                 "direct target does not advertise profile management",
@@ -114,7 +113,7 @@ impl TargetHttpControlAuthority {
         let access = self
             .access_token(target, &auth, &controller.audience)
             .await?;
-        Ok((routes, access, controller.run_parts))
+        Ok((routes, access))
     }
 
     async fn profile_json<I, O>(
@@ -127,33 +126,25 @@ impl TargetHttpControlAuthority {
         I: ProfileBody,
         O: serde::de::DeserializeOwned,
     {
-        let (routes, access, run_parts) = self.profile_access(target, input).await?;
+        let (routes, access) = self.profile_access(target, input).await?;
         let url = operation.route(&routes).clone();
         let builder = self
             .authorized(self.client.post(url.clone()), &access)?
             .header(ACCEPT, "application/json")
             .header(CACHE_CONTROL, "no-store")
             .json(input);
-        if matches!(operation, ProfileOperation::Run) {
-            return self
-                .hosted_run_json(
-                    (builder, &access),
-                    run_parts,
-                    HostedRunResponse::new(
-                        operation.label(),
-                        openengine_cluster_protocol::RUN_SUBMIT_METHOD,
-                    ),
-                )
-                .await
-                .map_err(TargetAuthorityError::submission);
+        let result = self
+            .hosted_json(
+                (builder, &access),
+                operation.label(),
+                matches!(&operation, ProfileOperation::Set | ProfileOperation::Show)
+                    .then_some(MAX_PROFILE_RESPONSE_BYTES),
+            )
+            .await;
+        match operation {
+            ProfileOperation::Run => result.map_err(TargetAuthorityError::submission),
+            _ => result,
         }
-        self.hosted_json(
-            (builder, &access),
-            operation.label(),
-            matches!(&operation, ProfileOperation::Set | ProfileOperation::Show)
-                .then_some(MAX_PROFILE_RESPONSE_BYTES),
-        )
-        .await
     }
 
     pub(super) async fn profile_list(

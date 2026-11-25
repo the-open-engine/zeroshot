@@ -8,12 +8,12 @@ use openengine_cluster_client::{
 };
 use openengine_cluster_protocol::{
     ConnectionDeleteRequest, ConnectionDeleteResult, ConnectionListRequest, ConnectionListResult,
-    ConnectionMutationResult, ConnectionSetRequest, Cursor, Stack, StackId,
-    RunAttachEventNotification, RunAttachParams, RunForceParams, RunListParams,
-    RunConnectionRequirements, RunLogEventNotification, RunLogsParams, RunProfile,
-    RunProfileDefaultRequest, RunProfileDefaultResult, RunProfileDeleteResult,
-    RunProfileListRequest, RunProfileListResult, RunProfileMutationResult, RunProfileSelector,
-    RunProfileSetRequest, RunStatus, RunStatusParams, RunSubmitResult, RunWatchParams,
+    ConnectionMutationResult, ConnectionSetRequest, Stack, StackId, RunAttachEventNotification,
+    RunAttachParams, RunForceParams, RunListParams, RunConnectionRequirements,
+    RunLogEventNotification, RunLogsParams, RunProfile, RunProfileDefaultRequest,
+    RunProfileDefaultResult, RunProfileDeleteResult, RunProfileListRequest, RunProfileListResult,
+    RunProfileMutationResult, RunProfileSelector, RunProfileSetRequest, RunStatus, RunStatusParams,
+    RunSubmitResult, RunWatchParams,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -64,48 +64,7 @@ impl<C> NamedTargetCliBackend<C> {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum RunLocation {
-    Direct,
-    Platform,
-    Task,
-}
-
-/// Routing advertised for a hosted status read. Older hosts hand active observation to the capsule.
-#[derive(Debug)]
-pub struct HostedRunRoute {
-    pub status: CliRunStatusResult,
-    pub run_parts: bool,
-}
-
-impl HostedRunRoute {
-    fn location(&self) -> RunLocation {
-        if !self.run_parts && task_is_active(&self.status.status) {
-            RunLocation::Task
-        } else {
-            RunLocation::Platform
-        }
-    }
-}
-
 impl<C: TargetConnector> NamedTargetCliBackend<C> {
-    async fn run_location(
-        &self,
-        target: &str,
-        run_id: &openengine_cluster_protocol::RunId,
-        part_id: Option<&openengine_cluster_protocol::RunId>,
-    ) -> Result<RunLocation, NativeV2CliError> {
-        let params = RunStatusParams {
-            run_id: run_id.clone(),
-            part_id: part_id.cloned(),
-        };
-        Ok(self
-            .connector
-            .hosted_run_route(target, params, false)
-            .await?
-            .map_or(RunLocation::Direct, |route| route.location()))
-    }
-
     async fn capsule_status(
         &self,
         target: &str,
@@ -116,11 +75,7 @@ impl<C: TargetConnector> NamedTargetCliBackend<C> {
             run_id: run_id.clone(),
             part_id: part_id.cloned(),
         };
-        let status = self
-            .connector
-            .hosted_run_route(target, selected, true)
-            .await?
-            .map(|route| route.status);
+        let status = self.connector.hosted_run_status(target, selected).await?;
         if let Some(status) = &status
             && part_id.is_some_and(|part| part != &status.part_id)
         {
@@ -404,11 +359,10 @@ where
         let target = require_named_target(target)?;
         if let Some(result) = self
             .connector
-            .hosted_run_route(target, params.clone(), false)
+            .hosted_run_status(target, params.clone())
             .await?
-            && result.location() == RunLocation::Platform
         {
-            return Ok(result.status);
+            return Ok(result);
         }
         let transport = self
             .connector
@@ -427,28 +381,13 @@ where
         params: RunWatchParams,
     ) -> Result<Self::Watch, NativeV2CliError> {
         let target = require_named_target(target)?;
-        let params = match self
-            .run_location(target, &params.run_id, params.part_id.as_ref())
+        if let Some(result) = self
+            .connector
+            .hosted_run_watch(target, params.clone())
             .await?
         {
-            RunLocation::Platform => {
-                return self
-                    .connector
-                    .hosted_run_watch(target, params)
-                    .await?
-                    .ok_or_else(|| {
-                        NativeV2CliError::Target(
-                            "hosted target did not provide its run watch".to_owned(),
-                        )
-                    });
-            }
-            RunLocation::Task => RunWatchParams {
-                part_id: None,
-                run_id: params.run_id,
-                from_cursor: task_cursor(params.from_cursor),
-            },
-            RunLocation::Direct => params,
-        };
+            return Ok(result);
+        }
         let transport = self
             .connector
             .connect(target, Some(params.run_id.clone()))
@@ -464,29 +403,13 @@ where
         params: RunLogsParams,
     ) -> Result<Self::Logs, NativeV2CliError> {
         let target = require_named_target(target)?;
-        let params = match self
-            .run_location(target, &params.run_id, params.part_id.as_ref())
+        if let Some(result) = self
+            .connector
+            .hosted_run_logs(target, params.clone())
             .await?
         {
-            RunLocation::Platform => {
-                return self
-                    .connector
-                    .hosted_run_logs(target, params)
-                    .await?
-                    .ok_or_else(|| {
-                        NativeV2CliError::Target(
-                            "hosted target did not provide its retained logs".to_owned(),
-                        )
-                    });
-            }
-            RunLocation::Task => RunLogsParams {
-                part_id: None,
-                run_id: params.run_id,
-                from_cursor: task_cursor(params.from_cursor),
-                execution: params.execution,
-            },
-            RunLocation::Direct => params,
-        };
+            return Ok(result);
+        }
         let transport = self
             .connector
             .connect(target, Some(params.run_id.clone()))
@@ -527,22 +450,12 @@ where
         params: RunForceParams,
     ) -> Result<CliRunForceResult, NativeV2CliError> {
         let target = require_named_target(target)?;
-        match self
-            .run_location(target, &params.run_id, params.part_id.as_ref())
+        if let Some(result) = self
+            .connector
+            .hosted_run_force(target, params.clone())
             .await?
         {
-            RunLocation::Platform => {
-                return self
-                    .connector
-                    .hosted_run_force(target, params)
-                    .await?
-                    .ok_or_else(|| {
-                        NativeV2CliError::Target(
-                            "hosted target did not provide its force operation".to_owned(),
-                        )
-                    });
-            }
-            RunLocation::Task | RunLocation::Direct => {}
+            return Ok(result);
         }
         let transport = self
             .connector
@@ -883,19 +796,6 @@ where
             .revoke_workspace_recovery(target, &result.part_id)?;
         Ok(result)
     }
-}
-
-fn task_is_active(status: &CliRunStatus) -> bool {
-    matches!(
-        status,
-        CliRunStatus::Target(
-            RunStatus::Admitted {} | RunStatus::Running { .. } | RunStatus::Stopping { .. }
-        )
-    )
-}
-
-fn task_cursor(cursor: Option<Cursor>) -> Option<Cursor> {
-    cursor.filter(|cursor| cursor.as_str().starts_with("v2:"))
 }
 
 pub(super) fn spawn_watch<T>(

@@ -426,22 +426,11 @@ async fn hosted_sessions_are_authenticated_and_run_scoped() {
     )
     .await;
     assert_eq!(accepted.status, 200);
-    let receipt: serde_json::Value = serde_json::from_slice(&accepted.body).assert_value();
-    assert_eq!(receipt, serde_json::json!({"runId": run_id()}));
-    let parts: TargetRunReceipt = reqwest::Client::new()
-        .post(format!("http://{address}{RUN_PATH}"))
-        .bearer_auth("control-token")
-        .header(openengine_cluster_protocol::RUN_PARTS_HEADER, "1")
-        .body(encoded)
-        .send()
-        .await
-        .assert_value()
-        .error_for_status()
-        .assert_value()
-        .json()
-        .await
-        .assert_value();
-    assert_eq!((parts.run_id, parts.current_part_id), (run_id(), run_id()));
+    let receipt: TargetRunReceipt = serde_json::from_slice(&accepted.body).assert_value();
+    assert_eq!(
+        (receipt.run_id, receipt.current_part_id),
+        (run_id(), run_id())
+    );
 
     let session_body = serde_json::to_vec(&TargetOecpSessionRequest {
         run_id: Some(run_id()),

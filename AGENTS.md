@@ -1154,8 +1154,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   advances the run. A failed preparation can retain its own diagnostic ledger. Group lists before
   pagination. Public history cursors identify a part and its local cursor. Ledgers, snapshots,
   provider execution references, checkpoint ownership and private archive exports remain per part.
-  SQLite keeps the released continuation event JSON readable and stores an explicit rewind's
-  checkpoint ID in the same row. Replay restores the ID before applying byte bounds or copying vectors.
+  Continuation vectors keep the selected checkpoint ID on explicit rewinds. Older continuations
+  without that field retain an unknown checkpoint.
   Aggregate only original work and usage. Imports seed the part's replay. A live logical watch
   follows suspension, while foreground observation returns control at the current suspension.
 - Failed and suspended local and direct-target runs retain an exclusively claimable workspace for a successor
@@ -1342,8 +1342,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Hosted factories advertise checkpoints only when they implement storage and restore. Snapshot
   restore requires exclusive workspace ownership and preserves the checkout root and Git identity.
 - Hosted workspace recovery advertises `resume`, `checkpoints`, and `discard_workspace` in the
-  separate `openengine.hosted-workspace-recovery/v1` outer discovery extension, leaving the strict
-  `zeroshot.hosted-runs/v2` route object unchanged. POST bodies and results match
+  `openengine.hosted-workspace-recovery/v1` outer discovery extension. POST bodies and results match
   the OECP `Run*Params`/`Run*Result` types. These authenticated Platform routes remain available after
   capsule disposal. Platform resolves the admitted connection references freshly; hosted recovery does
   not depend on local direct-target authorization or read local provider environment values.
@@ -1975,26 +1974,17 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 
 ## CLI and target contracts
 
-- OECP initialization negotiates `openengine.cluster/v3` for logical runs and
-  `openengine.cluster/v2` for physical runs. Direct and hosted HTTP discovery retain
-  `zeroshot.native-v2-target/v3`, and hosted observation retains `zeroshot.hosted-runs/v2`.
-  Keep strict payloads for each negotiated version, existing paths and protocol artifact locations. The
-  isolated `crates/openengine-cluster-testkit/tests/released-wire-contract` workspace pins the
-  untouched v16.0.0 client/server sources for early-rejection controls without adding duplicate
-  package identities to the product workspace. The protocol's `native_v2_observation` integration
-  suite invokes its locked controls and the current runtime/HTTP wire tests through the existing
-  Linux/Windows and macOS CI entry points; child Cargo commands never select that parent suite.
-  It also covers optional hosted checkpoint discovery, client gating, admission and recovery refusal.
-  Separate current/released workspaces under `target/wire-contract` preserve the surrounding CLI's
-  feature profile and keep each Cargo workspace's build artifacts independent.
-  Child commands clear the parent package's Cargo metadata so Windows can reuse its leaf-test
-  prebuilds inside the bounded native execution host.
-
-  Targets advertise `openengine.run-parts/v1`. HTTP run and browser history clients request
-  logical identity with `X-Zeroshot-Run-Parts: 1`; unmarked requests retain physical responses.
-  Legacy HTTP translation may address only the physical run being acted on.
-  Grouped hosts own observation and force in every phase. Live attachment and steering mint
-  exact-part sessions after the host resolves membership. Steering retains the observed head guard.
+- OECP uses `openengine.cluster/v3`. Direct and hosted HTTP discovery use
+  `zeroshot.native-v2-target/v4`, with `zeroshot.hosted-runs/v3` for hosted observation.
+  Run and browser history routes group confirmed successors under the original run ID.
+  The isolated `crates/openengine-cluster-testkit/tests/released-wire-contract` workspace pins
+  v17.1.1 to test version mismatch at initialization and reading its continuation records.
+  The protocol's `native_v2_observation` integration suite invokes these controls and the current
+  runtime/HTTP wire tests through the Linux, Windows and macOS CI entry points. Child Cargo
+  commands clear the parent package's Cargo metadata and use independent build directories.
+  Hosted observation and force use the canonical run in every phase. Live attachment and
+  steering mint exact-part sessions after the host resolves membership. Steering retains
+  the observed head guard.
 
 - `target list` and `target remove` manage local named-target state, including the built-in
   `platform` listing. Inventory exposes only name, origin and hosted/direct kind. Removal refuses

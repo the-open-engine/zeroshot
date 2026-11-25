@@ -80,7 +80,7 @@ mod wire_contract {
                                 (selected, _) = expand_profile_imports(selected, runtime(), Some(&parent), |name| Ok(catalog.get(name).cloned())).assert_value();
                                 assert!(serde_json::to_string(&selected).assert_value().contains("call.nested.host_done"));
                             }
-                            json!({"runId":"018f5e78-7f95-7c22-8d98-3f15af20c991"}).to_string()
+                            json!({"runId":"018f5e78-7f95-7c22-8d98-3f15af20c991","currentPartId":"018f5e78-7f95-7c22-8d98-3f15af20c991"}).to_string()
                         }
                         _ => panic!("unexpected client request {} {}", request.method, request.path),
                     };

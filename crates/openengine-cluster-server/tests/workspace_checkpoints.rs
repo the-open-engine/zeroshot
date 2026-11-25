@@ -76,12 +76,7 @@ impl ClusterBackend for CheckpointBackend {
     }
 }
 
-async fn call<B: ClusterBackend>(
-    dispatcher: &Dispatcher<B>,
-    method: &str,
-    mut params: Value,
-) -> Value {
-    params["protocolVersion"] = json!(openengine_cluster_protocol::PROTOCOL_VERSION);
+async fn call<B: ClusterBackend>(dispatcher: &Dispatcher<B>, method: &str, params: Value) -> Value {
     let request = json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
     serde_json::from_str(&dispatcher.dispatch(&request.to_string()).await).assert_value()
 }

@@ -18,16 +18,9 @@ impl NativeV2PlatformController {
 
     pub(in crate::native_v2_platform) async fn run_families(
         &self,
-        physical: bool,
     ) -> Result<Vec<RunLineage>, NativeV2PlatformError> {
         let mut included = BTreeSet::new();
         let inventory = self.list().await?;
-        if physical {
-            return Ok(inventory
-                .into_iter()
-                .map(|entry| RunLineage::single(entry.run_id))
-                .collect());
-        }
         let mut families = BTreeMap::new();
         for entry in &inventory {
             if included.contains(&entry.run_id) {
@@ -118,24 +111,15 @@ impl NativeV2PlatformController {
         Ok(Some(guard))
     }
 
-    async fn addressed_family(
-        &self,
-        context: &ConnectionContext,
-        run: &RunId,
-    ) -> Result<RunLineage, BackendError> {
-        if context.physical_run_ids() {
-            return Ok(RunLineage::single(run.clone()));
-        }
-        self.run_lineage(run).await.map_err(platform_backend_error)
-    }
-
     pub(super) async fn read_target(
         &self,
-        context: &ConnectionContext,
         run: &RunId,
         selected: Option<&RunId>,
     ) -> Result<(RunLineage, RunId), BackendError> {
-        let family = self.addressed_family(context, run).await?;
+        let family = self
+            .run_lineage(run)
+            .await
+            .map_err(platform_backend_error)?;
         let part = selected_part(&family, selected)
             .map_err(platform_backend_error)?
             .clone();
@@ -144,11 +128,13 @@ impl NativeV2PlatformController {
 
     pub(super) async fn current_target(
         &self,
-        context: &ConnectionContext,
         run: &RunId,
         expected: Option<&RunId>,
     ) -> Result<(RunLineage, RunId), BackendError> {
-        let family = self.addressed_family(context, run).await?;
+        let family = self
+            .run_lineage(run)
+            .await
+            .map_err(platform_backend_error)?;
         if expected.is_some_and(|expected| expected != family.current()) {
             return Err(platform_backend_error(NativeV2PlatformError::StalePart(
                 family.current().clone(),

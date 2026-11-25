@@ -30,7 +30,6 @@ CREATE TABLE IF NOT EXISTS v2_run_events (
     sequence INTEGER NOT NULL,
     event_json TEXT NOT NULL,
     recorded_at_ms INTEGER,
-    continuation_checkpoint_id TEXT,
     PRIMARY KEY (run_id, sequence),
     FOREIGN KEY (run_id) REFERENCES v2_runs(run_id) ON DELETE CASCADE
 ) STRICT;
@@ -48,55 +47,10 @@ const VECTOR_CURSOR_QUERY: &str = "SELECT sequence FROM v2_run_events
         AND json_extract(event_json, '$.vector.id') = ?2
     ORDER BY sequence LIMIT 1";
 
-/// Read-only ledgers retain their original schema. Prepare the matching projection once per open.
-#[derive(Clone, Copy, PartialEq)]
-struct EventColumns {
-    recorded_at: bool,
-    continuation_checkpoint: bool,
-}
-
-impl EventColumns {
-    const CURRENT: Self = Self {
-        recorded_at: true,
-        continuation_checkpoint: true,
-    };
-
-    fn inspect(connection: &Connection) -> Result<Self, RunLedgerError> {
-        connection
-            .query_row(
-                "SELECT count(*) FILTER (WHERE name = 'recorded_at_ms'),
-                        count(*) FILTER (WHERE name = 'continuation_checkpoint_id')
-                 FROM pragma_table_info('v2_run_events')",
-                [],
-                |row| {
-                    Ok(Self {
-                        recorded_at: row.get(0)?,
-                        continuation_checkpoint: row.get(1)?,
-                    })
-                },
-            )
-            .map_err(sqlite_error)
-    }
-
-    fn replay_query(self) -> Arc<str> {
-        let event = if self.continuation_checkpoint {
-            "CASE WHEN continuation_checkpoint_id IS NULL THEN event_json
-               ELSE json_set(event_json, '$.vector.checkpointId', continuation_checkpoint_id) END"
-        } else {
-            "event_json"
-        };
-        let time = if self.recorded_at {
-            "recorded_at_ms"
-        } else {
-            "NULL"
-        };
-        format!(
-            "SELECT sequence, {event}, {time} FROM v2_run_events
-                 WHERE run_id = ?1 AND sequence > ?2 ORDER BY sequence LIMIT ?3"
-        )
-        .into()
-    }
-}
+/// Ledgers created before recorded times existed lack the nullable `recorded_at_ms` column;
+/// their rows stay NULL.
+const HAS_RECORDED_AT_QUERY: &str =
+    "SELECT COUNT(*) FROM pragma_table_info('v2_run_events') WHERE name = 'recorded_at_ms'";
 
 #[path = "sqlite/readonly.rs"]
 mod readonly;
@@ -115,7 +69,9 @@ struct LedgerConnection {
 pub struct SqliteRunLedger {
     connection: Arc<Mutex<LedgerConnection>>,
     clock: LedgerClock,
-    replay_query: Arc<str>,
+    /// Whether events carry recorded times: fixed once open, since writable opens migrate first
+    /// and read-only opens never change schema.
+    recorded_at: bool,
 }
 
 impl SqliteRunLedger {
@@ -135,7 +91,7 @@ impl SqliteRunLedger {
     /// Opens retained history without creating a database, changing schema, or admitting writes.
     pub fn open_read_only(path: impl AsRef<Path>) -> Result<Self, RunLedgerError> {
         let connection = readonly::open(path.as_ref())?;
-        let columns = EventColumns::inspect(&connection.connection).map_err(|error| {
+        let recorded_at = has_recorded_at_column(&connection.connection).map_err(|error| {
             storage_context(error, Some(&connection.connection), || {
                 available_space(connection.path.as_deref())
             })
@@ -143,7 +99,7 @@ impl SqliteRunLedger {
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),
             clock: system_clock(),
-            replay_query: columns.replay_query(),
+            recorded_at,
         })
     }
 
@@ -158,7 +114,7 @@ impl SqliteRunLedger {
     ) -> Result<Self, RunLedgerError> {
         let initialized = (|| {
             connection.execute_batch(SCHEMA).map_err(sqlite_error)?;
-            add_event_columns(&mut connection)
+            add_recorded_at_column(&mut connection)
         })();
         initialized.map_err(|error| {
             storage_context(error, Some(&connection), || {
@@ -172,7 +128,7 @@ impl SqliteRunLedger {
                 _snapshot: None,
             })),
             clock: system_clock(),
-            replay_query: EventColumns::CURRENT.replay_query(),
+            recorded_at: true,
         })
     }
 
@@ -391,9 +347,9 @@ impl RunLedger for SqliteRunLedger {
     ) -> Result<SnapshotAndTail, RunLedgerError> {
         let run_id = run_id.clone();
         let after = after.cloned();
-        let query = Arc::clone(&self.replay_query);
+        let recorded_at = self.recorded_at;
         self.with_connection(move |connection| {
-            snapshot_page(connection, &query, &run_id, after.as_ref())
+            snapshot_page(connection, recorded_at, &run_id, after.as_ref())
         })
         .await
     }
@@ -412,7 +368,7 @@ impl RunLedger for SqliteRunLedger {
 
 fn snapshot_page(
     connection: &Connection,
-    query: &str,
+    recorded_at: bool,
     run_id: &RunId,
     after: Option<&Cursor>,
 ) -> Result<SnapshotAndTail, RunLedgerError> {
@@ -422,6 +378,14 @@ fn snapshot_page(
         return Err(RunLedgerError::CursorAhead);
     }
     let after = i64::try_from(after).map_err(|_| RunLedgerError::CursorAhead)?;
+    // Read-only opens never migrate, so retained pre-column ledgers read every time as unknown.
+    let query = if recorded_at {
+        "SELECT sequence, event_json, recorded_at_ms FROM v2_run_events
+              WHERE run_id = ?1 AND sequence > ?2 ORDER BY sequence LIMIT ?3"
+    } else {
+        "SELECT sequence, event_json, NULL FROM v2_run_events
+              WHERE run_id = ?1 AND sequence > ?2 ORDER BY sequence LIMIT ?3"
+    };
     Ok(SnapshotAndTail {
         snapshot: stored.snapshot,
         events: read_page(connection, query, run_id, after)?,
@@ -482,25 +446,26 @@ fn decode_recorded_at(milliseconds: i64) -> Result<UnixTimestampMillis, RunLedge
         .ok_or(RunLedgerError::Corrupt)
 }
 
-/// Acquire the write lock only when a migration is needed. Recheck under the lock because
-/// another opener can complete it first. Capture native SQLite evidence before rollback.
-fn add_event_columns(connection: &mut Connection) -> Result<(), RunLedgerError> {
-    if EventColumns::inspect(connection)? == EventColumns::CURRENT {
+fn has_recorded_at_column(connection: &Connection) -> Result<bool, RunLedgerError> {
+    connection
+        .query_row(HAS_RECORDED_AT_QUERY, [], |row| row.get::<_, i64>(0))
+        .map(|count| count > 0)
+        .map_err(sqlite_error)
+}
+
+/// Adds the nullable column under a write lock so concurrent opens migrate exactly once.
+/// Current ledgers return after a read, so ordinary opens never contend for the write lock.
+fn add_recorded_at_column(connection: &mut Connection) -> Result<(), RunLedgerError> {
+    if has_recorded_at_column(connection)? {
         return Ok(());
     }
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(sqlite_error)?;
-    let columns =
-        EventColumns::inspect(&transaction).map_err(|error| system_error(error, &transaction))?;
-    if !columns.recorded_at {
+    // Rollback changes SQLite's current error state; retain native evidence first.
+    if !has_recorded_at_column(&transaction).map_err(|error| system_error(error, &transaction))? {
         transaction
             .execute_batch("ALTER TABLE v2_run_events ADD COLUMN recorded_at_ms INTEGER")
-            .map_err(|error| system_error(sqlite_error(error), &transaction))?;
-    }
-    if !columns.continuation_checkpoint {
-        transaction
-            .execute_batch("ALTER TABLE v2_run_events ADD COLUMN continuation_checkpoint_id TEXT")
             .map_err(|error| system_error(sqlite_error(error), &transaction))?;
     }
     transaction.commit().map_err(sqlite_error)
@@ -604,25 +569,15 @@ fn insert_event(
 ) -> Result<(), RunLedgerError> {
     let sequence = i64::try_from(sequence).map_err(|_| RunLedgerError::Storage)?;
     let event_json = serde_json::to_string(&stored.event).map_err(|_| RunLedgerError::Storage)?;
-    // Old readers decode event_json strictly. Store the optional rewind identity beside it,
-    // including for vectors inherited by later successors, in this same atomic row.
-    let checkpoint = if let RunEvent::Vector { vector } = &stored.event
-        && let openengine_cluster_protocol::RunVectorContent::Continuation { checkpoint_id, .. } =
-            &vector.content
-    {
-        checkpoint_id.as_ref().map(|id| id.as_str())
-    } else {
-        None
-    };
     let recorded_at = stored
         .recorded_at
         .map(|time| i64::try_from(time.get()).map_err(|_| RunLedgerError::Storage))
         .transpose()?;
     transaction
         .execute(
-            "INSERT INTO v2_run_events (run_id, sequence, event_json, recorded_at_ms, continuation_checkpoint_id)
-             VALUES (?1, ?2, CASE WHEN ?5 IS NULL THEN ?3 ELSE json_remove(?3, '$.vector.checkpointId') END, ?4, ?5)",
-            params![run_id.as_str(), sequence, event_json, recorded_at, checkpoint],
+            "INSERT INTO v2_run_events (run_id, sequence, event_json, recorded_at_ms)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![run_id.as_str(), sequence, event_json, recorded_at],
         )
         .map_err(sqlite_error)?;
     Ok(())
@@ -776,7 +731,7 @@ fn restore_active_start_times(
     if !snapshot
         .active_executions()
         .any(|node| node.started_recorded_at.is_none())
-        || !EventColumns::inspect(connection)?.recorded_at
+        || !has_recorded_at_column(connection)?
     {
         return Ok(());
     }

@@ -2176,10 +2176,7 @@
       "additionalProperties": false,
       "properties": {
         "protocolVersion": {
-          "enum": [
-            "openengine.cluster/v3",
-            "openengine.cluster/v2"
-          ],
+          "const": "openengine.cluster/v3",
           "type": "string"
         }
       },
@@ -2194,10 +2191,7 @@
           "$ref": "#/$defs/ServerCapabilities"
         },
         "protocolVersion": {
-          "enum": [
-            "openengine.cluster/v3",
-            "openengine.cluster/v2"
-          ],
+          "const": "openengine.cluster/v3",
           "type": "string"
         },
         "status": {

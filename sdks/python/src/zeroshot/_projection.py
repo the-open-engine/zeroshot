@@ -561,7 +561,7 @@ def _inbox_request(value: object) -> InboxRequest:
                 request, "state", {"pending", "answered", "expired", "stopped"}, "inbox request"
             ),
         ),
-        successor_run_id=_nullable_string(
+        successor_part_id=_nullable_string(
             {"successorPartId": request.get("successorPartId")}, "successorPartId", "inbox request"
         ),
     )

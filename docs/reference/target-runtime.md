@@ -8,21 +8,16 @@ description: 'Target discovery, local harness configuration, permissions and wor
 
 ## Wire compatibility
 
-OECP initialization negotiates `openengine.cluster/v3` for grouped runs and
-`openengine.cluster/v2` for physical runs. Direct and hosted discovery use
-`zeroshot.native-v2-target/v3`.
+OECP uses `openengine.cluster/v3`. Direct and hosted discovery use
+`zeroshot.native-v2-target/v4`. Update the client and target together when upgrading
+from a release that addresses run parts separately.
 
-Targets that group run parts advertise `run_parts: {"kind":"openengine.run-parts/v1"}`.
-Clients opt in on HTTP requests with `X-Zeroshot-Run-Parts: 1`. Requests without that
-header receive physical identities, including bare cursors on browser history pages.
-A grouped status returns the original `runId`, the selected `partId` and `currentPartId`.
+Run status returns the original `runId`, the selected `partId` and `currentPartId`.
 Resume includes the observed `partId` and the proposed `successorPartId`. A stale source
-returns `RUN_CONFLICT` with the current part ID. Grouped log and watch cursors include the
+returns `RUN_CONFLICT` with the current part ID. Log and watch cursors include the
 originating part and can be passed back unchanged.
 
-Hosted run routes use `zeroshot.hosted-runs/v2`. A host without the run-parts capability continues addressing
-physical runs. A request selecting a different part requires a host advertising the capability.
-Grouped hosts serve status, watch, logs and force through their hosted routes across every phase.
+Hosted run routes use `zeroshot.hosted-runs/v3` for status, watch, logs and force in every phase.
 For attach and steer, the CLI opens an OECP session scoped to the selected physical part.
 A guarded steer must still address the current part when the host accepts it.
 
@@ -373,7 +368,7 @@ outer discovery extension alongside the existing `hosted_runs` extension:
 
 `TargetWorkspaceExportDiscovery` is the authoritative Rust type. The extension object is strict;
 unknown outer extension keys remain compatible with older clients. Do not add export fields to
-`zeroshot.hosted-runs/v2` or `openengine.hosted-workspace-recovery/v1`. Export requires the exact
+`zeroshot.hosted-runs/v3` or `openengine.hosted-workspace-recovery/v1`. Export requires the exact
 kind above; an absent or unfamiliar kind disables it without a fallback operation.
 
 The route uses the same-origin `hosted_runs.base_url`, including any installation path prefix,

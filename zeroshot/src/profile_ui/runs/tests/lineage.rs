@@ -5,7 +5,6 @@ use crate::v2_run_ledger::vector_event;
 async fn get(client: &reqwest::Client, server: &str, path: &str) -> Value {
     let response = client
         .get(format!("http://{server}/ui/api/runs{path}"))
-        .header(openengine_cluster_protocol::RUN_PARTS_HEADER, "1")
         .send()
         .await
         .assert_value()
@@ -98,7 +97,6 @@ async fn logical_detail_paging_and_follow_cross_a_confirmed_local_handoff() {
     let stream = client
         .get(format!("http://{address}/ui/api/runs/{root}/events"))
         .header("last-event-id", format!("{root}@v2:3"))
-        .header(openengine_cluster_protocol::RUN_PARTS_HEADER, "1")
         .send()
         .await
         .assert_value();
@@ -127,20 +125,6 @@ async fn logical_detail_paging_and_follow_cross_a_confirmed_local_handoff() {
         "{body}"
     );
     assert!(body.contains("\"finished\":true"));
-    let legacy_page: Value = client
-        .get(format!(
-            "http://{address}/ui/api/runs/{}/history",
-            child.as_str()
-        ))
-        .send()
-        .await
-        .assert_value()
-        .json()
-        .await
-        .assert_value();
-    assert!(legacy_page.get("runId").is_none());
-    assert_eq!(legacy_page["nextCursor"], "v2:4");
-    assert!(legacy_page.get("partId").is_none());
     let detail = get(&client, &address, &format!("/{}", child.as_str())).await;
     assert_eq!(detail["runId"], root);
     assert_eq!(detail["parts"], json!([root, child.as_str()]));
@@ -186,7 +170,6 @@ async fn logical_detail_paging_and_follow_cross_a_confirmed_local_handoff() {
         .get(format!(
             "http://{address}/ui/api/runs/{root}/events?partId={root}"
         ))
-        .header(openengine_cluster_protocol::RUN_PARTS_HEADER, "1")
         .send()
         .await
         .assert_value()
@@ -200,7 +183,6 @@ async fn logical_detail_paging_and_follow_cross_a_confirmed_local_handoff() {
         .get(format!(
             "http://{address}/ui/api/runs/{root}/history?after={foreign}@v2:1"
         ))
-        .header(openengine_cluster_protocol::RUN_PARTS_HEADER, "1")
         .send()
         .await
         .assert_value();

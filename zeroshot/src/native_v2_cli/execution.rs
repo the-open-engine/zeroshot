@@ -265,12 +265,7 @@ where
                     },
                 )
                 .await?;
-            write_linked_run(
-                output,
-                &request,
-                "successorRunId",
-                request.successor_run_id.as_ref(),
-            )?;
+            write_json(output, &request)?;
             return Ok(CliOutcome::Completed);
         }
         NativeV2CliCommand::Resume(run) => {
@@ -491,7 +486,7 @@ where
             command.discard_workspace_changes,
         )
         .await?;
-    write_linked_run(output, &result, "resumedFrom", Some(&result.resumed_from))?;
+    write_json(output, &result)?;
     let detach = signal.wait();
     tokio::pin!(detach);
     RunFailure::read(
@@ -1132,24 +1127,6 @@ fn watched_outcome(status: &CliRunStatus) -> Option<CliOutcome> {
         }) => Some(CliOutcome::Failed),
         _ => None,
     }
-}
-
-/// Existing CLI consumers can continue reading the physical predecessor and successor keys.
-fn write_linked_run(
-    output: &mut impl Write,
-    result: &impl Serialize,
-    alias: &'static str,
-    part: Option<&RunId>,
-) -> Result<(), NativeV2CliError> {
-    #[derive(Serialize)]
-    struct LinkedRun<'a, T> {
-        #[serde(flatten)]
-        result: &'a T,
-        #[serde(flatten)]
-        links: std::collections::BTreeMap<&'static str, &'a RunId>,
-    }
-    let links = part.map(|id| (alias, id)).into_iter().collect();
-    write_json(output, &LinkedRun { result, links })
 }
 
 fn write_json(output: &mut impl Write, value: &impl Serialize) -> Result<(), NativeV2CliError> {

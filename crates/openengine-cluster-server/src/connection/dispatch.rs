@@ -51,8 +51,8 @@ pub(crate) struct DispatchCtx<'a, B> {
 /// `id`/`params`.
 async fn spawn_subscription_task<B, F, Fut>(
     ctx: &mut DispatchCtx<'_, B>,
-    (id, mut params): (RequestId, Value),
-    run_method: Option<&str>,
+    id: RequestId,
+    params: Value,
     run: F,
 ) where
     B: ClusterBackend,
@@ -68,18 +68,7 @@ async fn spawn_subscription_task<B, F, Fut>(
         ctx.state.in_flight_ids.lock().remove(&id);
         return;
     };
-    let task_dispatcher = if let Some(method) = run_method {
-        match ctx.dispatcher.run_dispatcher(&id, method, &mut params) {
-            Ok(dispatcher) => dispatcher,
-            Err(error) => {
-                ctx.state.in_flight_ids.lock().remove(&id);
-                let _ = ctx.state.outbound_tx.send(error).await;
-                return;
-            }
-        }
-    } else {
-        ctx.dispatcher.clone()
-    };
+    let task_dispatcher = ctx.dispatcher.clone();
     let task_state = ctx.state.clone();
     ctx.tasks.spawn(async move {
         let _permit = permit;
@@ -127,49 +116,25 @@ async fn dispatch_subscription<B>(
 ) where
     B: ClusterBackend,
 {
-    let request = (id, params);
     match kind {
         SubscriptionKind::Watch => {
-            spawn_subscription_task(ctx, request, None, run_watch_subscription).await;
+            spawn_subscription_task(ctx, id, params, run_watch_subscription).await;
         }
         SubscriptionKind::Logs => {
-            spawn_subscription_task(ctx, request, None, logs::run_logs_subscription).await;
+            spawn_subscription_task(ctx, id, params, logs::run_logs_subscription).await;
         }
         SubscriptionKind::AgentAttach => {
-            spawn_subscription_task(
-                ctx,
-                request,
-                None,
-                agent_attach::run_agent_attach_subscription,
-            )
-            .await;
+            spawn_subscription_task(ctx, id, params, agent_attach::run_agent_attach_subscription)
+                .await;
         }
         SubscriptionKind::RunWatch => {
-            spawn_subscription_task(
-                ctx,
-                request,
-                Some(openengine_cluster_protocol::RUN_WATCH_METHOD),
-                native_v2::run_run_watch_subscription,
-            )
-            .await;
+            spawn_subscription_task(ctx, id, params, native_v2::run_run_watch_subscription).await;
         }
         SubscriptionKind::RunLogs => {
-            spawn_subscription_task(
-                ctx,
-                request,
-                Some(openengine_cluster_protocol::RUN_LOGS_METHOD),
-                native_v2::run_run_logs_subscription,
-            )
-            .await;
+            spawn_subscription_task(ctx, id, params, native_v2::run_run_logs_subscription).await;
         }
         SubscriptionKind::RunAttach => {
-            spawn_subscription_task(
-                ctx,
-                request,
-                Some(openengine_cluster_protocol::RUN_ATTACH_METHOD),
-                native_v2::run_run_attach_subscription,
-            )
-            .await;
+            spawn_subscription_task(ctx, id, params, native_v2::run_run_attach_subscription).await;
         }
     }
 }

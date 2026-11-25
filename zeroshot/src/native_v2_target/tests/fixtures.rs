@@ -321,11 +321,7 @@ impl TargetControlAuthority for FakeAuthority {
         &self,
         _target: &TargetRecord,
         _params: RunStatusParams,
-        grouped_only: bool,
-    ) -> Result<Option<HostedRunRoute>, TargetAuthorityError> {
-        if grouped_only {
-            return Ok(None);
-        }
+    ) -> Result<CliRunStatusResult, TargetAuthorityError> {
         Err(TargetAuthorityError::new(
             "fake hosted lifecycle is unavailable",
         ))

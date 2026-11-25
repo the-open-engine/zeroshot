@@ -22,9 +22,9 @@ async fn wire_contract_mismatch_stops_submission_and_observation_at_http_discove
                 serde_json::from_str::<serde_json::Value>(&hosted_discovery(origin)).assert_value()
             };
             if variant == "hosted-runs" {
-                wire["extensions"]["hosted_runs"]["kind"] = json!("zeroshot.hosted-runs/v1");
+                wire["extensions"]["hosted_runs"]["kind"] = json!("zeroshot.hosted-runs/v2");
             } else {
-                wire["kind"] = json!("zeroshot.native-v2-target/v2");
+                wire["kind"] = json!("zeroshot.native-v2-target/v3");
             }
             ("200 OK", wire.to_string())
         })
@@ -265,17 +265,8 @@ async fn matching_hosted_wire_contract_preserves_producer_status_mixed_list_and_
         .map(|line| serde_json::from_str::<serde_json::Value>(line).assert_value()["event"].clone())
         .collect::<Vec<_>>();
     let server = RecordingTarget::spawn(move |request, origin, index| {
-        if request.path.starts_with("/native-v2/runs") {
-            assert!(request.run_parts);
-        }
         let body = match request.path.as_str() {
-            "/.well-known/zeroshot-native-v2" => {
-                let wire =
-                    serde_json::from_str::<TargetDiscoveryDocument>(&hosted_discovery(origin))
-                        .assert_value()
-                        .with_run_parts();
-                serde_json::to_string(&wire).assert_value()
-            }
+            "/.well-known/zeroshot-native-v2" => hosted_discovery(origin),
             "/oauth/metadata" => oauth_metadata(origin),
             "/oauth/token" => token_response(index),
             "/session" => {

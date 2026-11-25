@@ -28,7 +28,7 @@ const TOKEN: (&str, &str) = ("POST", "/oauth/token");
 const SESSION: (&str, &str) = ("GET", "/session");
 const RUN: (&str, &str) = ("POST", "/native-v2/run");
 const PROFILE_SET: (&str, &str) = ("POST", "/native-v2/profiles/set");
-const RUN_RECEIPT: &str = r#"{"runId":"018f5e78-7f95-7c22-8d98-3f15af20c991"}"#;
+const RUN_RECEIPT: &str = r#"{"runId":"018f5e78-7f95-7c22-8d98-3f15af20c991","currentPartId":"018f5e78-7f95-7c22-8d98-3f15af20c991"}"#;
 
 pub(super) struct RecordingTarget {
     pub(super) origin: String,

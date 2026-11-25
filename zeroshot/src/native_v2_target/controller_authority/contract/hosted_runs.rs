@@ -18,7 +18,6 @@ use openengine_cluster_protocol::HOSTED_RUNS_KIND;
 
 #[derive(Clone)]
 pub(in super::super) struct HostedRunsDescriptor {
-    pub(in super::super) run_parts: bool,
     base_url: Url,
     list: HostedRunRoute,
     status: HostedRunRoute,
@@ -351,7 +350,6 @@ fn compile_hosted_run_routes(
     routes: &TargetHostedRunRoutes,
 ) -> Result<HostedRunsDescriptor, TargetAuthorityError> {
     Ok(HostedRunsDescriptor {
-        run_parts: false,
         base_url,
         list: compile_hosted_run_route(&routes.list, false, &[])?,
         status: compile_hosted_run_route(&routes.status, true, &[])?,

@@ -402,17 +402,7 @@ impl NativeV2TargetServer {
             return invalid_request_response("target run ID must be a canonical UUIDv7");
         }
         match self.target.submit(submission).await {
-            Ok(receipt)
-                if request
-                    .head
-                    .header_exact(openengine_cluster_protocol::RUN_PARTS_HEADER)
-                    == Some("1") =>
-            {
-                HttpResponse::private_json(200, &receipt)
-            }
-            Ok(receipt) => {
-                HttpResponse::private_json(200, &serde_json::json!({"runId": receipt.run_id}))
-            }
+            Ok(receipt) => HttpResponse::private_json(200, &receipt),
             Err(error) => run_error_response(error),
         }
     }
@@ -503,7 +493,6 @@ impl NativeV2TargetServer {
 
     fn discovery_document(&self) -> TargetDiscoveryDocument {
         let mut document = TargetDiscoveryDocument::direct(self.access.authentication())
-            .with_run_parts()
             .with_node_runtime_lanes()
             .with_decision_models()
             .with_steering();

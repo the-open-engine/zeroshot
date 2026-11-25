@@ -139,10 +139,6 @@ test('profile and history services remain on the injected mount and forward canc
       'https://example.test/org/acme/workspace/api/runs/opaque%2Frun/history?after=v2%3A23',
     ]
   );
-  assert.deepEqual(
-    requests.map(({ init }) => new Headers(init?.headers).get('X-Zeroshot-Run-Parts')),
-    [null, null, '1', '1']
-  );
   assert.ok(requests.every(({ init }) => init?.signal === controller.signal));
 });
 

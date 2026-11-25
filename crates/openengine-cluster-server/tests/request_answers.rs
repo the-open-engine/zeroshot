@@ -54,7 +54,6 @@ impl ClusterBackend for AnswerBackend {
 
 fn answer_frame(fill_allowance: bool) -> String {
     let mut request = json!({"jsonrpc":"2.0","id":1,"method":"run/resume","params":{
-        "protocolVersion":openengine_cluster_protocol::PROTOCOL_VERSION,
         "runId":"prior","partId":"prior","successorPartId":"successor",
         "from":{"kind":"answer","signals":{"decision":"approved"},"output":{"feedback":"x".repeat(1_048_000)}},
         "githubToken":"x".repeat(4096)

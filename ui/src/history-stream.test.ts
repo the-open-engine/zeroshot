@@ -113,7 +113,6 @@ test('network and pending stream failures resume after the last accepted cursor'
   first.disconnect();
   await until(() => requests.length === 2);
   assert.equal(new Headers(requests[1].headers).get('Last-Event-ID'), 'v2:1');
-  assert.equal(new Headers(requests[1].headers).get('X-Zeroshot-Run-Parts'), '1');
   second.send(
     'event: history_error\ndata: {"code":"history_pending","message":"History is still being prepared."}\n\n'
   );

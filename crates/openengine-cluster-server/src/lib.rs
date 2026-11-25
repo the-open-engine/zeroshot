@@ -49,7 +49,6 @@ pub const SERVER_BUSY: &str = "SERVER_BUSY";
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConnectionContext {
     identity: ConnectionIdentity,
-    physical_run_ids: bool,
     pub cancellation: admission::CancellationSignal,
 }
 
@@ -58,15 +57,8 @@ impl ConnectionContext {
     pub fn new(identity: ConnectionIdentity, cancellation: admission::CancellationSignal) -> Self {
         Self {
             identity,
-            physical_run_ids: false,
             cancellation,
         }
-    }
-
-    /// True only for wire requests using the physical, one-ledger-per-run contract.
-    #[must_use]
-    pub fn physical_run_ids(&self) -> bool {
-        self.physical_run_ids
     }
 
     #[must_use]
@@ -483,7 +475,6 @@ pub trait ClusterBackend: Send + Sync + 'static {
 }
 
 pub struct Dispatcher<B> {
-    run_parts: Arc<std::sync::atomic::AtomicBool>,
     backend: Arc<B>,
     context: ConnectionContext,
 }
@@ -491,7 +482,6 @@ pub struct Dispatcher<B> {
 impl<B> Clone for Dispatcher<B> {
     fn clone(&self) -> Self {
         Self {
-            run_parts: Arc::clone(&self.run_parts),
             backend: Arc::clone(&self.backend),
             context: self.context.clone(),
         }
