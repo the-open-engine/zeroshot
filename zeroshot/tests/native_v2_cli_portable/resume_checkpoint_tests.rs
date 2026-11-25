@@ -274,6 +274,9 @@ fn assert_suspended_resume(sdk: bool, interrupted: bool) {
     assert!(!String::from_utf8_lossy(&resumed.stderr).contains("Selected checkpoint"));
     let resumed: Value = serde_json::from_slice(&resumed.stdout).unwrap();
     wait_finished(&fixture, resumed["runId"].as_str().unwrap(), "succeeded");
+    if interrupted {
+        assert!(!fixture.root.path("missing-temporary-directory").exists());
+    }
     assert_eq!(fs::read_to_string(receipts).unwrap().lines().count(), 2);
     assert_eq!(
         fs::read_to_string(fixture.workspace.join("later-edit")).unwrap(),

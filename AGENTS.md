@@ -1262,6 +1262,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   removes the full stage. Capture does not sync each copied workspace file or directory;
   metadata and catalogs retain their durable writes. Small catalogs atomically map logical
   checkpoint IDs to Restic snapshots.
+  Restic's `TMPDIR`, `TMP` and `TEMP` use its existing private checkpoint repository root,
+  independently of the controller's ambient temporary directory.
   Restic drains progress and private stderr completely with bounded memory, retaining only the
   latest summary under a per-record size bound. Errors identify the operation and failure stage
   or exit status without private child output; failed backups never replace a published checkpoint.
