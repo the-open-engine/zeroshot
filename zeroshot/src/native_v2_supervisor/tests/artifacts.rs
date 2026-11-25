@@ -526,7 +526,9 @@ async fn production_restart_after_committed_publication(request: bool, committed
                         &mut bytes,
                     )
                     .unwrap();
-                let out = tempfile::tempdir().unwrap();
+                // macOS's temporary root may be a symlink; extraction deliberately refuses it.
+                let out =
+                    tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
                 let mut transfer = tempfile::tempfile().unwrap();
                 std::io::Write::write_all(&mut transfer, &bytes).unwrap();
                 std::io::Seek::rewind(&mut transfer).unwrap();

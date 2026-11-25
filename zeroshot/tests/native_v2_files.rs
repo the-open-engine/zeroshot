@@ -55,7 +55,8 @@ impl Fixture {
     }
     async fn serve(&self, listen: std::net::SocketAddr) -> Child {
         let mut command = self.command();
-        let child = command
+        let stderr = self.root.path().join("serve.stderr");
+        let mut child = command
             .args([
                 "target",
                 "serve",
@@ -67,12 +68,15 @@ impl Fixture {
             ])
             .arg(self.root.path().join("volume"))
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(std::fs::File::create(&stderr).unwrap())
             .spawn()
             .unwrap();
         let client = reqwest::Client::builder().no_proxy().build().unwrap();
         tokio::time::timeout(Duration::from_secs(30), async {
             loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    panic!("direct target exited {status}: {}", startup_stderr(&stderr));
+                }
                 if client
                     .get(format!("http://{listen}/.well-known/zeroshot-native-v2"))
                     .send()
@@ -85,9 +89,25 @@ impl Fixture {
             }
         })
         .await
-        .unwrap();
+        .unwrap_or_else(|error| {
+            panic!(
+                "direct target did not listen: {error}: {}",
+                startup_stderr(&stderr)
+            )
+        });
         child
     }
+}
+
+fn startup_stderr(path: &Path) -> String {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .unwrap()
+        .take(4096)
+        .read_to_end(&mut bytes)
+        .unwrap();
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 fn binary_data() -> Vec<u8> {

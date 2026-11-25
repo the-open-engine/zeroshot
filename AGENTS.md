@@ -2576,8 +2576,12 @@ python -m mkdocs build --strict
   leases protect active stages from restart reclamation. Directory capabilities anchor staging,
   publication and cleanup to opened parents: Unix uses descriptor-relative operations; Windows
   guards deny ancestor write/delete sharing. Root stages are siblings of their final names;
-  Windows publishes with a simple native rename in the same parent, avoiding a Win32 parent reopen
-  that conflicts with those guards. Release only the stage's own guard before directory publication.
+  Windows file publication and private-state commits share the simple native rename in the same
+  parent, avoiding a Win32 parent reopen that conflicts with those guards. A live file host must
+  permit UI/profile state creation and replacement without releasing ancestor guards; the Windows
+  compiled-test inventory requires this regression. Release only the stage's own guard before
+  directory publication. Direct-target file-store preparation retains the hosting storage error
+  category. Secure extraction fixtures use canonical temporary parents, including on macOS.
   Transfer indexes retain original wire offsets even
   when validated headers are canonicalized. Bound both incoming and normalized metadata/transfer
   sizes before publication; valid JSON number encodings can expand during normalization. Response

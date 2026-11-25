@@ -19,8 +19,8 @@ async fn response(
     };
     let source = SCRIPT
         .replace(
-            "set -eu\n",
-            "set -eu\n/usr/bin/printf 'uid=%s\\n' \"$(/usr/bin/id -u)\" >> \"$CAPTURE_PATH\"\n",
+            "  /usr/bin/printf '%s\\n' '---'\n",
+            "  /usr/bin/printf '%s\\n' '---'\n  /usr/bin/printf 'uid=%s\\n' \"$(/usr/bin/id -u)\"\n",
         )
         .replace(r#"\"answer\":42"#, &replace_answer(initial))
         .replace(r#"\"answer\":43"#, &replace_answer(corrected))
@@ -67,7 +67,7 @@ async fn response(
         ],
     )
     .await;
-    let (_, outcome) = complete_with_logs(handle).await;
+    let (logs, outcome) = complete_with_logs(handle).await;
     let capture = fs::read_to_string(directory.child("capture")).assert_value();
     let expected_uid = format!(
         "uid={}",
@@ -81,7 +81,17 @@ async fn response(
         .lines()
         .filter(|line| line.starts_with("uid="))
         .collect::<Vec<_>>();
-    assert_eq!(identities.len(), 1 + capture.matches("arg=resume").count());
+    // Check every actual invocation, including any provider startup retries. Correction counts
+    // are checked separately below; they do not determine how many provider processes started.
+    assert!(
+        !identities.is_empty(),
+        "fixture capture:\n{capture}\nprovider logs:\n{logs}"
+    );
+    assert_eq!(
+        identities.len(),
+        capture.lines().filter(|line| *line == "arg=exec").count(),
+        "fixture capture:\n{capture}\nprovider logs:\n{logs}"
+    );
     assert!(
         identities.iter().all(|identity| *identity == expected_uid),
         "provider identities: {identities:?}"
