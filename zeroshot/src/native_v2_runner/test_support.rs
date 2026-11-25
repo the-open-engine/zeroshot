@@ -121,6 +121,7 @@ pub(crate) fn admitted() -> AdmittedRun {
         })
         .collect();
     AdmittedRun {
+        workspace: None,
         context_sources: Vec::new(),
         environment: None,
         title: RunTitle::new("Runner test run").assert_value(),

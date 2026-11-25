@@ -1333,7 +1333,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   restore requires exclusive workspace ownership and preserves the checkout root and Git identity.
 - Hosted workspace recovery advertises `resume`, `checkpoints`, and `discard_workspace` in the
   separate `openengine.hosted-workspace-recovery/v1` outer discovery extension, leaving the strict
-  `zeroshot.hosted-runs/v2` route object unchanged. POST bodies and results match
+  `zeroshot.hosted-runs/v3` route object unchanged. POST bodies and results match
   the OECP `Run*Params`/`Run*Result` types. These authenticated Platform routes remain available after
   capsule disposal. Platform resolves the admitted connection references freshly; hosted recovery does
   not depend on local direct-target authorization or read local provider environment values.
@@ -1954,8 +1954,35 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 
 ## CLI and target contracts
 
-- The current wire contract uses `openengine.cluster/v2` at OECP initialization,
-  `zeroshot.native-v2-target/v3` at target discovery, and `zeroshot.hosted-runs/v2` for hosted
+- Optional `workspace` on ordinary and saved-profile submissions explicitly selects source-free,
+  delivery-free execution; omission preserves repository behavior. Validate expanded graphs and
+  reject Git source options and context repositories before source access or allocation. Named
+  targets negotiate `openengine.run-workspaces/v1` and accept managed placement only. Local
+  workspace runs default to the exact invoking/selected folder in place, without Git-root expansion;
+  explicit managed copies and file selections use immutable file-store admission pins. The
+  host-owned `WorkspaceFiles` namespace retains the first submission identity and original inputs
+  across lost acknowledgements, library replacement and restart. Its admission lock checks existing
+  submission and run manifests before publishing either identity or any pins; a new submission key
+  cannot claim a recorded run, and a replay never replaces its frozen run manifest.
+  Materialize before startup, keep
+  managed roots disjoint from sources/state, and dispose only managed roots. Workspace identity
+  travels with admitted definitions, status, history and recovery. In-place progress uses durable
+  metadata without snapshotting, resetting or deleting the user's folder; file restore is refused.
+  Checkpoint-free fresh managed local restarts rebuild the original pins, while continuations keep
+  the live copy. Workspace mode has graph memory only and creates no repository-memory identity.
+  Managed root copies and every pinned file selection validate captured bytes, including each
+  destination basename, before admission. Recognize Git administrative layouts by HEAD plus
+  objects/refs or commondir regardless of directory name, including layouts assembled from multiple
+  seeds; collect their markers from immutable pins before validating config and links. Refuse
+  external Git administrative links and Git config
+  worktree/include identifiers conservatively (also in comments/values); never follow includes or
+  require Git to validate file-only inputs. Keyed workspace
+  replay checks the original request fingerprint before requiring a live source folder. Recoverable
+  controller shutdown preserves managed folders; explicit force-stop also disposes retained managed
+  folders after suspension/reconstruction under the folder lease.
+
+- The current wire contract uses `openengine.cluster/v3` at OECP initialization,
+  `zeroshot.native-v2-target/v4` at target discovery, and `zeroshot.hosted-runs/v3` for hosted
   observation. These protocol-owned identifiers gate incompatible peers before submission or
   observation; upgrade clients (including Python wheels), targets and hosted gateways together.
   Keep one strict timed payload format, existing paths and protocol artifact locations. The

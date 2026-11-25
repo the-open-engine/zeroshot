@@ -507,6 +507,9 @@ impl NativeV2TargetServer {
         if let Some(catalog) = self.target.runtime_harnesses() {
             document = document.with_runtime_harnesses(catalog);
         }
+        if self.target.supports_run_workspaces() {
+            document = document.with_run_workspaces();
+        }
         if self.target.supports_git_transport() {
             document = document.with_git_transport();
         }

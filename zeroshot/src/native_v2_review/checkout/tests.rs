@@ -115,6 +115,7 @@ mod local_auth {
         declared: bool,
     ) -> PortableControllerBootstrap {
         let submission = RunSubmission {
+            workspace: None,
             context_sources: Vec::new(),
             title: admitted.title.clone(),
             graph: BuiltinGraphTemplate::IssueReview
@@ -150,6 +151,7 @@ mod local_auth {
         }
         let environment = RunEnvironment::exact_for_admitted(admitted, values).assert_value();
         PortableControllerBootstrap {
+            managed_restart: false,
             predecessor: None,
             request_resolution: None,
             delivery_receipt: None,

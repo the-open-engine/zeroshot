@@ -387,6 +387,7 @@ pub(crate) fn live_hosting_config(root: &TempRoot, lane: LiveLane) -> Production
         )
     };
     ProductionHostingConfig {
+        workspace_files: None,
         suspension: None,
         request_ask: false,
         agent_context: None,

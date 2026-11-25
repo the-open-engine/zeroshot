@@ -738,6 +738,7 @@ async fn assert_admissible(
     let admitted = NativeV2Admission
         .validate_intent(
             &RunSubmissionIntent {
+                workspace: None,
                 environment: None,
                 title: RunTitle::new("Built-in template admission").assert_value(),
                 graph,
@@ -779,6 +780,7 @@ async fn verified_software_template(
     };
     let admitted = NativeV2Admission
         .admit(RunSubmission {
+            workspace: None,
             context_sources: Vec::new(),
             environment: None,
             title: RunTitle::new("Template behavior").assert_value(),

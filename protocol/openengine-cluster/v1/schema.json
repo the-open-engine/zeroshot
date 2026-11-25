@@ -1059,6 +1059,89 @@
       ],
       "type": "object"
     },
+    "FileAddress": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/FilePath"
+        },
+        "scope": {
+          "$ref": "#/$defs/FileScope"
+        }
+      },
+      "required": [
+        "scope",
+        "path"
+      ],
+      "type": "object"
+    },
+    "FilePath": {
+      "description": "Portable slash-separated names, with no aliases on supported filesystems. Empty denotes the\nselected root only; addresses require a nonempty path. Case collisions within a tree are invalid.",
+      "type": "string"
+    },
+    "FileScope": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "user",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "org",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "run",
+              "type": "string"
+            },
+            "runId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "runId"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "FileSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "$ref": "#/$defs/FileAddress"
+        },
+        "member": {
+          "$ref": "#/$defs/FilePath"
+        }
+      },
+      "required": [
+        "address",
+        "member"
+      ],
+      "type": "object"
+    },
     "GetParams": {
       "additionalProperties": false,
       "properties": {
@@ -2166,7 +2249,7 @@
       "additionalProperties": false,
       "properties": {
         "protocolVersion": {
-          "const": "openengine.cluster/v2",
+          "const": "openengine.cluster/v3",
           "type": "string"
         }
       },
@@ -2181,7 +2264,7 @@
           "$ref": "#/$defs/ServerCapabilities"
         },
         "protocolVersion": {
-          "const": "openengine.cluster/v2",
+          "const": "openengine.cluster/v3",
           "type": "string"
         },
         "status": {
@@ -5351,6 +5434,16 @@
           "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
           "type": "string"
         },
+        "workspace": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunWorkspace"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "workspaceRecovery": {
           "$ref": "#/$defs/WorkspaceRecovery"
         }
@@ -6102,6 +6195,16 @@
           "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
           "type": "string"
         },
+        "workspace": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunWorkspace"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "workspaceRecovery": {
           "$ref": "#/$defs/WorkspaceRecovery"
         }
@@ -6278,6 +6381,16 @@
           "minLength": 1,
           "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
           "type": "string"
+        },
+        "workspace": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunWorkspace"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -6943,6 +7056,16 @@
           "minLength": 1,
           "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
           "type": "string"
+        },
+        "workspace": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunWorkspace"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -6991,6 +7114,35 @@
         "subscriptionId",
         "runId",
         "atCursor"
+      ],
+      "type": "object"
+    },
+    "RunWorkspace": {
+      "additionalProperties": false,
+      "properties": {
+        "copyRoot": {
+          "description": "Local only: freeze the selected working folder's contents at the managed root.",
+          "type": "boolean"
+        },
+        "localDirectory": {
+          "description": "Exact local working folder; absent on contained placements.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "placement": {
+          "$ref": "#/$defs/WorkspacePlacement"
+        },
+        "seeds": {
+          "items": {
+            "$ref": "#/$defs/FileSelection"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "placement"
       ],
       "type": "object"
     },
@@ -8197,6 +8349,13 @@
           "type": "object"
         }
       ]
+    },
+    "WorkspacePlacement": {
+      "enum": [
+        "in_place",
+        "managed"
+      ],
+      "type": "string"
     },
     "WorkspaceRecovery": {
       "additionalProperties": false,

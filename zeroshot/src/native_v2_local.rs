@@ -133,6 +133,7 @@ pub enum LocalCompositionError {
 
 /// Host-assigned immutable inputs for one local controller process.
 pub struct PreparedLocalRun {
+    pub managed_restart: bool,
     pub run_id: RunId,
     pub delivery_run_id: RunId,
     pub submission: RunSubmission,
@@ -192,7 +193,15 @@ pub fn prepare_local_run(
 ) -> Result<PreparedLocalRun, LocalCompositionError> {
     validate_local_environment(request.intent.environment.as_ref())?;
     let (workspace, source) = prepare_local_source(&request, current_directory, git_program)?;
-    let submission = local_submission(&request.intent, source);
+    let mut submission = local_submission(&request.intent, source);
+    if let Some(config) = &mut submission.workspace {
+        config.local_directory = Some(
+            workspace
+                .to_str()
+                .ok_or(LocalCompositionError::Workspace)?
+                .into(),
+        );
+    }
     let environment = RunEnvironment::exact_for_submission(&submission, request.connections)?;
     let mut native_environment = capture_local_native_environment(current_directory)?;
     let (github_token, github_token_file) = take_github_authority(
@@ -203,6 +212,7 @@ pub fn prepare_local_run(
     )?;
     let delivery_validator = take_delivery_validator(&mut native_environment, &workspace)?;
     Ok(PreparedLocalRun {
+        managed_restart: false,
         local_branch: if request.worktree.is_some()
             || !crate::native_v2_admission::delivery_capabilities(&submission.graph.root).is_empty()
         {
@@ -226,17 +236,43 @@ pub fn prepare_local_run(
     })
 }
 
+pub(crate) fn selected_local_directory(
+    request: &PreparedRunRequest,
+    invoking_directory: &Path,
+) -> PathBuf {
+    let selected = request
+        .cwd
+        .as_deref()
+        .or_else(|| {
+            request
+                .intent
+                .workspace
+                .as_ref()
+                .and_then(|workspace| workspace.local_directory.as_deref())
+                .map(Path::new)
+        })
+        .unwrap_or(invoking_directory);
+    if selected.is_absolute() {
+        selected.to_owned()
+    } else {
+        invoking_directory.join(selected)
+    }
+}
+
 pub(crate) fn prepare_local_source(
     request: &PreparedRunRequest,
     invoking_directory: &Path,
     git_program: &Path,
 ) -> Result<(PathBuf, Option<ResolvedSource>), LocalCompositionError> {
-    let selected = request.cwd.as_deref().unwrap_or(invoking_directory);
-    let selected = if selected.is_absolute() {
-        selected.to_owned()
-    } else {
-        invoking_directory.join(selected)
-    };
+    let selected = selected_local_directory(request, invoking_directory);
+    if request.intent.workspace.is_some() {
+        let workspace =
+            std::fs::canonicalize(&selected).map_err(|_| LocalCompositionError::Workspace)?;
+        if !workspace.is_dir() {
+            return Err(LocalCompositionError::Workspace);
+        }
+        return Ok((workspace, None));
+    }
     let workspace = resolve_workspace(&selected, git_program)?;
     let required =
         !crate::native_v2_admission::delivery_capabilities(&request.intent.graph.root).is_empty();
@@ -264,6 +300,7 @@ pub(crate) fn local_submission(
         initial_input: intent.initial_input.clone(),
         runtime: intent.runtime.clone(),
         environment: intent.environment.clone(),
+        workspace: intent.workspace.clone(),
         source,
         context_sources: Vec::new(),
         submission_key: intent.submission_key.clone(),

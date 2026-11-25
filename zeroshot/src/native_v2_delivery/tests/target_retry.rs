@@ -85,6 +85,7 @@ async fn admitted_legacy_delivery(
     }
     NativeV2Admission
         .admit(RunSubmission {
+            workspace: None,
             context_sources: Vec::new(),
             environment: None,
             title: original.title,

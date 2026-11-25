@@ -61,7 +61,7 @@ async fn interrupted_submission_preserves_operation_without_claiming_it_was_reje
         write_http_response(
             &mut stream,
             &json!({
-                "kind":"zeroshot.native-v2-target/v3", "authentication":"none",
+                "kind":"zeroshot.native-v2-target/v4", "authentication":"none",
                 "runPath":"/native-v2/run", "sessionPath":"/native-v2/oecp-session",
                 "oecpPath":"/native-v2/oecp", "audience":"controller"
             })

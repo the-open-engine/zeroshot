@@ -345,6 +345,7 @@ async fn named_remote_tip_rejects_filesystem_and_missing_remotes() {
 
 fn test_run_command() -> RunCommand {
     RunCommand {
+        workspace: None,
         controller: Default::default(),
         environment: None,
         target: None,
@@ -1326,6 +1327,7 @@ async fn context_sources_pin_explicit_and_default_branches_and_name_missing_repo
     let mut request = PreparedRunRequest {
         run_id: openengine_cluster_protocol::RunId::new("context-cli"),
         intent: crate::native_v2_contract::RunSubmissionIntent {
+    workspace: None,
             title: RunTitle::new("Context pinning").assert_value(), graph, initial_input: serde_json::Value::Null,
             runtime: openengine_cluster_protocol::RuntimePlan::new(openengine_cluster_protocol::RuntimeLane::new("codex", "openai").assert_value(), None, Default::default()),
             environment: Some(serde_json::from_value(serde_json::json!({"contextRepositories":[{"repository":"acme/library","branch":"stable"},{"repository":"acme/contracts"}]})).assert_value()),

@@ -60,6 +60,15 @@ fn local_restore_selection(
     recovery: &LocalRecoveryDocument,
     discard_workspace_changes: bool,
 ) -> Result<Option<CheckpointRestoreSelection>, NativeV2CliError> {
+    if recovery
+        .submission
+        .workspace
+        .as_ref()
+        .is_some_and(|workspace| workspace.is_in_place())
+        && (discard_workspace_changes || matches!(from, Some(RunResumeFrom::Checkpoint { .. })))
+    {
+        return Err(NativeV2CliError::Usage("in-place workspaces cannot restore snapshots; use a plain resume to keep the current folder contents".into()));
+    }
     if !recovery.workspace_checkpoints_enabled()
         && (discard_workspace_changes || matches!(from, Some(RunResumeFrom::Checkpoint { .. })))
     {
@@ -576,6 +585,32 @@ impl LocalCliBackend {
             resumed_from: params.run_id,
         })
     }
+    async fn managed_restart_required(
+        &self,
+        params: &openengine_cluster_protocol::RunResumeParams,
+        recovery: &LocalRecoveryDocument,
+    ) -> Result<bool, NativeV2CliError> {
+        if !matches!(params.from, None | Some(RunResumeFrom::Restart {}))
+            || !recovery
+                .submission
+                .workspace
+                .as_ref()
+                .is_some_and(|workspace| !workspace.is_in_place())
+            || recovery.workspace_checkpoints_enabled()
+        {
+            return Ok(false);
+        }
+        let status = self
+            .status_local(RunStatusParams {
+                run_id: params.run_id.clone(),
+            })
+            .await?;
+        Ok(!matches!(
+            status.status,
+            openengine_cluster_protocol::RunStatus::Suspended { .. }
+        ))
+    }
+
     async fn prepare_successor(
         &self,
         params: &openengine_cluster_protocol::RunResumeParams,
@@ -646,6 +681,7 @@ impl LocalCliBackend {
             git_credentials,
             workspace: recovery.workspace.clone(),
             native_environment,
+            managed_restart: self.managed_restart_required(params, recovery).await?,
         })
     }
 }

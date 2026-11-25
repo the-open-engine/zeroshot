@@ -894,6 +894,7 @@ fn submission(
     identity: &str,
 ) -> Result<RunSubmission, AcpServeError> {
     Ok(RunSubmission {
+        workspace: None,
         context_sources: Vec::new(),
         title: RunTitle::new("ACP turn").map_err(|_| AcpServeError::Profile("invalid title"))?,
         graph: profile.graph.clone(),

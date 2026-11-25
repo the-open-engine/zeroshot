@@ -69,6 +69,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
             .collect(),
     );
     let admitted = admit(RunSubmission {
+        workspace: None,
         context_sources: Vec::new(),
         environment: None,
         title: RunTitle::new("Run version logs").assert_value(),

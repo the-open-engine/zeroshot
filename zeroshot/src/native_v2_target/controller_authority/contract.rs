@@ -74,6 +74,7 @@ pub(super) struct ControllerDescriptor {
     pub(super) request_ask: bool,
     pub(super) decision_models: bool,
     pub(super) git_transport: bool,
+    pub(super) run_workspaces: bool,
     pub(super) comment_delivery: bool,
     pub(super) task_resolution: Option<Url>,
 }
@@ -111,6 +112,11 @@ pub(super) fn build_controller_descriptor(
             Ok::<_, TargetAuthorityError>(catalog.clone())
         })
         .transpose()?;
+    let run_workspaces = wire
+        .extensions
+        .run_workspaces
+        .as_ref()
+        .is_some_and(|marker| marker.kind == openengine_cluster_protocol::RUN_WORKSPACES_KIND);
     let decision_models = wire
         .extensions
         .decision_models
@@ -179,6 +185,7 @@ pub(super) fn build_controller_descriptor(
             .is_some_and(|marker| marker.kind == openengine_cluster_protocol::REQUEST_WAIT_KIND),
         decision_models,
         git_transport,
+        run_workspaces,
         comment_delivery,
         task_resolution,
     })

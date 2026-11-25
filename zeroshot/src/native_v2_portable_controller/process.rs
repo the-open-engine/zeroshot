@@ -46,6 +46,8 @@ struct PortableBootstrapDocument {
     delivery_receipt: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     checkpoint: Option<crate::native_v2_supervisor::checkpoints::CheckpointRestore>,
+    #[serde(default)]
+    managed_restart: bool,
     preparation_timeout_ms: u64,
     run_id: RunId,
     delivery_run_id: RunId,
@@ -103,6 +105,7 @@ impl PortableBootstrapDocument {
             return Err(PortableControllerError::Bootstrap);
         }
         Ok(PortableControllerBootstrap {
+            managed_restart: self.managed_restart,
             predecessor: self.predecessor,
             request_resolution: self.request_resolution,
             delivery_receipt: self.delivery_receipt,
@@ -305,6 +308,7 @@ fn encode_bootstrap(
         .filter(|milliseconds| *milliseconds > 0)
         .ok_or(PortableControllerError::Bootstrap)?;
     let document = PortableBootstrapDocument {
+        managed_restart: bootstrap.managed_restart,
         predecessor: bootstrap.predecessor.clone(),
         request_resolution: bootstrap.request_resolution.clone(),
         delivery_receipt: bootstrap.delivery_receipt.clone(),

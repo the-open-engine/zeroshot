@@ -431,6 +431,7 @@ async fn wave8_cli_contract_validate_only_preflight_materializes_without_backend
     )
     .assert_value();
     let run = RunCommand {
+        workspace: None,
         controller: Default::default(),
         cwd: None,
         worktree: None,
@@ -728,6 +729,7 @@ fn connection_selection_keeps_present_utf8_fields_and_rejects_non_utf8_values() 
 
 fn intent_command(selection: RunSelection) -> RunCommand {
     RunCommand {
+        workspace: None,
         controller: Default::default(),
         environment: None,
         target: None,
@@ -907,6 +909,7 @@ fn named_comment_request(url: &str) -> (RunCommand, PreparedRunRequest) {
         context_sources: Vec::new(),
         run_id: openengine_cluster_protocol::RunId::new("source-less-comment"),
         intent: TargetRunIntent {
+            workspace: None,
             title: run.title.clone(),
             graph,
             initial_input: serde_json::json!({

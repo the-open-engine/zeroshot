@@ -9,8 +9,8 @@ description: 'Target discovery, local harness configuration, permissions and wor
 ## Wire compatibility
 
 Clients and targets must implement the same current wire contract. OECP initialization requires
-`openengine.cluster/v2`; target discovery requires `zeroshot.native-v2-target/v3`; hosted run
-observation requires `zeroshot.hosted-runs/v2`. These are wire identifiers, independent of package
+`openengine.cluster/v3`; target discovery requires `zeroshot.native-v2-target/v4`; hosted run
+observation requires `zeroshot.hosted-runs/v3`. These are wire identifiers, independent of package
 versions. The discovery URL, HTTP routes and JSON-RPC method names are unchanged.
 
 An incompatible client or target stops at discovery or initialization, before submitting or
@@ -64,6 +64,28 @@ independently of their harness/provider lanes; zeroshot defines no AWS shapes or
 Official local builds include contributed adapters; Platform and the default target image enable
 only core adapters. See [Harness adapters](../project/harness-adapters.md) for availability and
 provider support.
+
+## File workspaces
+
+Targets supporting source-free execution advertise
+`extensions.run_workspaces: {"kind":"openengine.run-workspaces/v1"}`. Clients require that exact
+marker before sending a workspace run, including a saved-profile selector request. Both ordinary
+submissions and saved-profile runs accept `"workspace":{"placement":"managed"}` in place of a
+Git source. Omission retains repository mode. Targets reject local folder paths and in-place
+placement; local runs also support `"placement":"in_place"` with their exact selected folder.
+
+The optional `seeds` array contains target-file selections. Inputs are pinned at acceptance under
+the submission key, so retrying after a lost acknowledgement keeps the same bytes. Each selection
+lands at its basename in the fresh root, with folders preserving their descendants and empty
+folders. Duplicate or unrepresentable root names fail admission. Local `copyRoot` instead freezes
+the selected working folder's contents at the new root. These forms require managed placement.
+
+Validation follows saved-profile expansion and rejects delivery nodes, Git source options and
+environment `contextRepositories` before source access or allocation. Setup/startup remain owned
+by the run environment; inputs are installed before startup. Status and history carry workspace
+identity independently of the optional Git source. Workspace runs use graph memory only.
+
+For CLI examples and recovery behavior, see [File workspaces](../concepts/execution.md#file-workspaces).
 
 ## Saved-profile imports
 
@@ -366,7 +388,7 @@ outer discovery extension alongside the existing `hosted_runs` extension:
 
 `TargetWorkspaceExportDiscovery` is the authoritative Rust type. The extension object is strict;
 unknown outer extension keys remain compatible with older clients. Do not add export fields to
-`zeroshot.hosted-runs/v2` or `openengine.hosted-workspace-recovery/v1`. Export requires the exact
+`zeroshot.hosted-runs/v3` or `openengine.hosted-workspace-recovery/v1`. Export requires the exact
 kind above; an absent or unfamiliar kind disables it without a fallback operation.
 
 The route uses the same-origin `hosted_runs.base_url`, including any installation path prefix,

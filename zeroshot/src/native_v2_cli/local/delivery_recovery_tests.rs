@@ -148,6 +148,7 @@ async fn confirmed_review_survives_failed_delivery_and_a_crash_without_a_settled
         .assert_value();
         recorder(&review, false).assert_value();
         let prepared = PreparedLocalRun {
+            managed_restart: false,
             run_id: RunId::new("0199f33f-3b44-7d21-9000-0000000000d6"),
             delivery_run_id: run.clone(),
             environment: RunEnvironment::exact(&submission.runtime, None, Default::default())
@@ -254,6 +255,7 @@ async fn local_resume_recovers_the_owned_review_across_successors_without_delive
     }
     let submission = submission("resume-review");
     let mut prepared = PreparedLocalRun {
+        managed_restart: false,
         run_id: RunId::new("0199f33f-3b44-7d21-9000-0000000000d3"),
         delivery_run_id: first,
         environment: RunEnvironment::exact(

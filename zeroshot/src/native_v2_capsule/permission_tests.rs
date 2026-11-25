@@ -244,6 +244,7 @@ async fn admission(harness: &str, verifier: bool, binding: NodeRuntimeBinding) -
         )
     };
     admit(RunSubmission {
+        workspace: None,
         context_sources: Vec::new(),
         environment: None,
         title: RunTitle::new("Hosted permissions").assert_value(),

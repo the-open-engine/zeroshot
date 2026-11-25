@@ -478,13 +478,12 @@ where
         let source = request
             .source
             .as_ref()
-            .ok_or_else(|| {
-                NativeV2CliError::Usage(
-                    "named target submission requires a resolved worktree source".to_owned(),
-                )
-            })?
-            .resolved
-            .clone();
+            .map(|source| source.resolved.clone());
+        if source.is_none() && request.intent.workspace.is_none() {
+            return Err(NativeV2CliError::Usage(
+                "named target submission requires a resolved worktree source".into(),
+            ));
+        }
         let recovery_requirements =
             self.record_initial_recovery_authorization(&target, &request)?;
         let receipt = if let Some(profile) = request.profile {
@@ -494,6 +493,7 @@ where
                 environment: request.intent.environment,
                 title: request.intent.title,
                 initial_input: request.intent.initial_input,
+                workspace: request.intent.workspace,
                 source,
                 context_sources: request.context_sources,
                 submission_key: request.intent.submission_key,
@@ -514,7 +514,8 @@ where
                     initial_input: request.intent.initial_input,
                     runtime: request.intent.runtime,
                     environment: request.intent.environment,
-                    source: Some(source),
+                    source,
+                    workspace: request.intent.workspace,
                     context_sources: request.context_sources,
                     submission_key: request.intent.submission_key,
                 },

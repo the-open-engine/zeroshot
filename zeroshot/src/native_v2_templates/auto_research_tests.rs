@@ -25,6 +25,7 @@ impl ResearchProbe {
         );
         let admitted = NativeV2Admission
             .admit(RunSubmission {
+                workspace: None,
                 context_sources: Vec::new(),
                 title: RunTitle::new("Research control probe").assert_value(),
                 graph,
@@ -399,6 +400,7 @@ async fn research_rejects_invalid_iteration_limits_and_unsupported_delivery() {
         );
         let error = NativeV2Admission
             .admit(RunSubmission {
+                workspace: None,
                 context_sources: Vec::new(),
                 title: RunTitle::new("Invalid count").assert_value(),
                 graph,

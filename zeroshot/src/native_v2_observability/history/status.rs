@@ -114,6 +114,7 @@ impl RuntimeStatusReader {
                     run_id: status.run_id,
                     title: status.title,
                     source: status.source,
+                    workspace: status.workspace,
                     context_sources: status.context_sources,
                     size: status.size,
                     at_cursor: status.at_cursor,

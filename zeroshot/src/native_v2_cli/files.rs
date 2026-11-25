@@ -28,6 +28,12 @@ pub enum FileCommandTransfer {
 pub fn local_file_store() -> Result<(DiskFileStore, ConnectionIdentity, PathBuf), NativeV2CliError>
 {
     let root = super::default_local_state_root()?;
+    local_file_store_at(&root)
+}
+
+pub(crate) fn local_file_store_at(
+    root: &std::path::Path,
+) -> Result<(DiskFileStore, ConnectionIdentity, PathBuf), NativeV2CliError> {
     let identity = ConnectionIdentity::new(ConnectionIdentityConfig {
         principal: PrincipalId::new("local"),
         tenant: TenantId::new("local"),
@@ -46,4 +52,16 @@ pub fn local_file_store() -> Result<(DiskFileStore, ConnectionIdentity, PathBuf)
     let transfers = root.join("file-transfers");
     crate::native_v2_files::reclaim_transfers(&transfers)?;
     Ok((store, identity, transfers))
+}
+
+pub(crate) fn workspace_files(
+    root: &std::path::Path,
+) -> Result<crate::native_v2_files::WorkspaceFiles, NativeV2CliError> {
+    let (host, identity, _) = local_file_store_at(root)?;
+    Ok(crate::native_v2_files::WorkspaceFiles {
+        host: Arc::new(host),
+        identity,
+        target: "local".into(),
+        directory: root.join("workspace-inputs"),
+    })
 }

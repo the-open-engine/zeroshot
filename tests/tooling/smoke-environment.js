@@ -72,7 +72,7 @@ async function connect(origin) {
       pending.set(id, { resolve, reject, timer });
       socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
     });
-  await rpc('initialize', { protocolVersion: 'openengine.cluster/v2' });
+  await rpc('initialize', { protocolVersion: 'openengine.cluster/v3' });
   return { rpc, logs, close: () => socket.close() };
 }
 

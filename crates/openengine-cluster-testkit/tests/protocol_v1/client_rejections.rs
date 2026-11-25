@@ -25,7 +25,7 @@ fn initialize_response(id: &str, version: &str) -> String {
 async fn client_rejects_a_response_with_the_wrong_id() {
     let client = ClusterClient::new(FixedResponseTransport(initialize_response(
         r#""id":2,"#,
-        "openengine.cluster/v2",
+        "openengine.cluster/v3",
     )));
 
     let error = client.initialize().await.assert_error();
@@ -55,7 +55,7 @@ async fn client_rejects_a_success_with_the_wrong_protocol_version() {
 async fn client_rejects_a_success_that_does_not_echo_the_requested_version() {
     let client = ClusterClient::new(FixedResponseTransport(initialize_response(
         r#""id":1,"#,
-        "openengine.cluster/v2",
+        "openengine.cluster/v3",
     )));
 
     let error = client
@@ -66,7 +66,7 @@ async fn client_rejects_a_success_that_does_not_echo_the_requested_version() {
         error,
         ClientError::InvalidResponse(message)
             if message.contains("requested openengine.cluster/v0")
-                && message.contains("received openengine.cluster/v2")
+                && message.contains("received openengine.cluster/v3")
     );
     assert!(rejected);
 }
@@ -74,8 +74,8 @@ async fn client_rejects_a_success_that_does_not_echo_the_requested_version() {
 #[tokio::test]
 async fn client_rejects_success_responses_without_a_non_null_id() {
     for response in [
-        initialize_response("", "openengine.cluster/v2"),
-        initialize_response(r#""id":null,"#, "openengine.cluster/v2"),
+        initialize_response("", "openengine.cluster/v3"),
+        initialize_response(r#""id":null,"#, "openengine.cluster/v3"),
     ] {
         let client = ClusterClient::new(FixedResponseTransport(response));
         assert!(matches!(

@@ -712,3 +712,8 @@ mod resume_runtime;
 pub use resume_runtime::{
     RunResumeRuntime, UniformRuntimePlan, RunResumeRequirementsParams, RunResumeRequirementsResult,
 };
+
+mod workspace;
+pub use workspace::{
+    RunWorkspacesDiscovery, RunWorkspace, WorkspacePlacement, RUN_WORKSPACES_KIND, seed_name,
+};

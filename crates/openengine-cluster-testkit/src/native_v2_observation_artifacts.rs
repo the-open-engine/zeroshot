@@ -139,6 +139,7 @@ pub fn native_v2_source_fixture() -> ResolvedSource {
 
 fn status() -> RunStatusResult {
     RunStatusResult {
+        workspace: None,
         context_sources: Vec::new(),
         steering: Default::default(),
         run_id: run_id(),
@@ -181,6 +182,7 @@ fn watch_fixture() -> Value {
             at_cursor: cursor(7),
         },
         "event": RunWatchEventNotification {
+    workspace: None,
         context_sources: Vec::new(),
             recorded_at: Some(UnixTimestampMillis::new(1_725_000_000_999).assert_value()),
             subscription_id: SubscriptionId::new("watch-1"),
@@ -291,6 +293,7 @@ fn force_fixture() -> Value {
     json!({
             "params": RunForceParams { run_id: run_id() },
             "result": RunForceResult {
+    workspace: None,
         context_sources: Vec::new(),
     steering: Default::default(),
     run_id: result.run_id,

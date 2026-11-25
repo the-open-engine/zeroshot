@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 mod disk;
 mod paths;
 mod transfer;
+mod workspaces;
+pub use workspaces::{WorkspaceFiles, FreezeWorkspace};
 pub use disk::DiskFileStore;
 pub use transfer::{pack, unpack, validate_transfer};
 
@@ -158,6 +160,8 @@ pub trait TargetFileHost: Send + Sync {
         pin: &FilePin,
         input: &mut dyn Read,
     ) -> Result<FilePin>;
+    /// Check an admission pin without rereading its mutable original.
+    fn pin_exists(&self, access: &FileAccess<'_>, pin: &FilePin) -> Result<bool>;
     fn read_pin(
         &self,
         access: &FileAccess<'_>,

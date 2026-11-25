@@ -48,6 +48,10 @@ impl ProfileOperation {
 }
 
 trait ProfileBody: serde::Serialize + Sync {
+    fn requires_workspaces(&self) -> bool {
+        false
+    }
+
     fn stored_plan(&self) -> Option<(&GraphSpec, &RuntimePlan)> {
         None
     }
@@ -61,8 +65,13 @@ impl ProfileBody for RunProfileListRequest {}
 impl ProfileBody for RunProfileSelector {}
 impl ProfileBody for RunProfileDefaultRequest {}
 impl ProfileBody for RunProfileRunRequest {
+    fn requires_workspaces(&self) -> bool {
+        self.workspace.is_some()
+    }
     fn requires_git_transport(&self) -> bool {
-        self.source.requires_git_transport()
+        self.source
+            .as_ref()
+            .is_some_and(openengine_cluster_protocol::ResolvedSource::requires_git_transport)
             || self
                 .context_sources
                 .iter()
@@ -109,6 +118,13 @@ impl TargetHttpControlAuthority {
                 },
             )?;
         }
+        require_request_capabilities(
+            &controller,
+            RequestCapabilities {
+                run_workspaces: input.requires_workspaces(),
+                ..RequestCapabilities::default()
+            },
+        )?;
         require_git_transport(&controller, input.requires_git_transport())?;
         let access = self
             .access_token(target, &auth, &controller.audience)

@@ -95,7 +95,7 @@ enum CliCommand {
     ///
     /// Local runs use --cwd or the invoking folder; Git worktrees use their root. Local Git delivery
     /// requires an attached, committed branch and an HTTPS/SSH remote. PR/merge also require a
-    /// supported forge. Named targets require a committed Git source. Local workspaces must not
+    /// supported forge. Named repository runs require a committed Git source. Local workspaces must not
     /// overlap Zeroshot state.
     /// Local delivery commits on the checked-out branch and pushes that same branch, including
     /// existing unpushed commits. PR/merge targets a different upstream branch, or the remote's
@@ -107,6 +107,17 @@ enum CliCommand {
     /// Preparation verifies the target before agents start. Worktrees contain committed files only;
     /// dependencies and untracked resources are not copied or installed. Resume reuses the same
     /// workspace and attached branch without rewinding shared refs. Remove worktrees explicitly.
+    ///
+    /// Select --workspace for delivery-free file work without a Git source. Locally it uses the
+    /// exact invoking folder or --cwd in place, including a Git subfolder. --copy-workspace freezes
+    /// that folder's contents into a disposable managed copy. --workspace-placement managed starts
+    /// empty, or accepts repeated --workspace-seed user:PATH / org:PATH selections from target files
+    /// (append #MEMBER to select a subtree). Files keep their basename; folders keep their name and
+    /// descendants. Named targets always use managed placement. Inputs are pinned before acceptance;
+    /// later library edits do not change the run. Workspace mode rejects delivery, Git source flags,
+    /// and context repositories. Managed copies reject external Git administration such as linked
+    /// worktree .git pointers; use in-place placement or select files without Git metadata.
+    /// Only graph memory applies.
     ///
     /// A foreground run follows NDJSON events until completion or suspension. Suspension exits 0.
     /// --detach returns after submission.
@@ -241,6 +252,9 @@ enum UtilityCommand {
     /// Restarting a successor restores the conversations it started with; restarting a submitted
     /// run, and execution-scoped agents, start new ones. Token usage starts at zero.
     /// Services and Docker state are not restored.
+    /// In-place workspace runs always keep the original folder's current contents and cannot
+    /// restore file snapshots. Managed local runs with checkpoints disabled restart from their
+    /// original pinned inputs; suspension continues the current managed copy.
     Resume(RunResumeArgs),
 
     /// List one page of a run's saved workspace checkpoints as JSON.
@@ -682,8 +696,8 @@ ENVIRONMENT PREPARATION
     Hook failures stop the run before agents start and use no graph retry attempts.
     Inspect `zeroshot logs RUN_ID --target NAME` for preparation output.
     Omit both flags to allow host defaults; direct Docker defaults to the base environment.
-    --no-environment sends {} to bypass host defaults. Local runs use the invoking machine and
-    reject hooks and hook connections.
+    --no-environment sends {} to bypass host defaults. Linux/macOS local hooks run as the invoking
+    user in the selected workspace. Windows local runs reject hooks and hook connections.
 
     Installation, services, limits, and recovery:
     https://the-open-engine.github.io/zeroshot/current/guides/runtime-environments/
@@ -752,6 +766,22 @@ struct RunArgs {
     /// Working folder (default: invoking folder). File arguments stay relative to the invoking folder.
     #[arg(long, value_name = "FOLDER")]
     cwd: Option<PathBuf>,
+
+    /// Execute without a Git source or delivery.
+    #[arg(long)]
+    workspace: bool,
+
+    /// Workspace placement; defaults to in-place locally and managed on targets.
+    #[arg(long, value_parser = ["in-place", "managed"], requires = "workspace")]
+    workspace_placement: Option<String>,
+
+    /// Seed from a target library path, USER:PATH or ORG:PATH (optionally #MEMBER). Repeatable.
+    #[arg(long, value_name = "SCOPE:PATH", requires = "workspace")]
+    workspace_seed: Vec<String>,
+
+    /// Copy the selected local folder's contents into a disposable managed workspace.
+    #[arg(long, requires = "workspace", conflicts_with = "target")]
+    copy_workspace: bool,
 
     /// Run in a retained Git worktree on a new managed branch. Local runs only.
     #[arg(long, conflicts_with = "target")]

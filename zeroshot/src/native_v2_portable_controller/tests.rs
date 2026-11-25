@@ -66,6 +66,8 @@ fn checkpoint_cleanup_fixture(
     std::fs::create_dir(&directory).assert_value();
     std::fs::create_dir(&repository).assert_value();
     let cleanup = PortableCheckpointCleanup {
+        managed_workspace: None,
+
         stopping: None,
         inner: Arc::new(super::engine::ConfirmedCleanup),
         directory: directory.clone(),
@@ -141,6 +143,7 @@ async fn checkpoint_scratch_gc_failure_does_not_reject_confirmed_runtime_cleanup
 
 pub(super) fn submission(key: &str) -> RunSubmission {
     RunSubmission {
+        workspace: None,
         context_sources: Vec::new(),
         environment: None,
         title: RunTitle::new("Portable controller test").assert_value_with("title"),
@@ -176,6 +179,7 @@ pub(super) fn bootstrap(
     )
     .assert_value_with("exact empty environment");
     PortableControllerBootstrap {
+        managed_restart: false,
         predecessor: None,
         request_resolution: None,
         delivery_receipt: None,
@@ -643,4 +647,31 @@ async fn local_portable_controller_admits_contributed_runtime_without_native_pro
     })
     .await
     .assert_value();
+}
+
+#[tokio::test]
+async fn managed_cleanup_distinguishes_explicit_stop_from_recoverable_shutdown() {
+    for shutdown in [false, true] {
+        for exit in [
+            RunRuntimeExit::Completed,
+            RunRuntimeExit::Failed,
+            RunRuntimeExit::ForceStopped,
+            RunRuntimeExit::RuntimeLost,
+        ] {
+            let root = TestDirectory::new("managed-cleanup");
+            let (_, _, mut cleanup) = checkpoint_cleanup_fixture(&root);
+            let workspace = root.child("managed");
+            std::fs::create_dir(&workspace).assert_value();
+            std::fs::write(workspace.join("edit"), b"retain").assert_value();
+            let (_sender, receiver) = tokio::sync::watch::channel(shutdown);
+            cleanup.stopping = Some(receiver);
+            cleanup.managed_workspace = Some(workspace.clone());
+            cleanup.destroy_or_confirm_absent(exit).await.assert_value();
+            assert_eq!(
+                workspace.exists(),
+                !matches!(exit, RunRuntimeExit::Completed)
+                    && (shutdown || !matches!(exit, RunRuntimeExit::ForceStopped))
+            );
+        }
+    }
 }

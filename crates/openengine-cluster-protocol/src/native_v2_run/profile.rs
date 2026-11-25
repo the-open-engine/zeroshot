@@ -103,7 +103,10 @@ pub struct RunProfileRunRequest {
     pub profile: RunProfileSelector,
     pub title: RunTitle,
     pub initial_input: serde_json::Value,
-    pub source: ResolvedSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<ResolvedSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<super::RunWorkspace>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub context_sources: Vec<ResolvedSource>,
     pub submission_key: IdempotencyKey,

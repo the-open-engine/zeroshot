@@ -8,6 +8,7 @@ pub(super) fn status_result(
         run_id: snapshot.run_id.clone(),
         title: snapshot.title.clone(),
         source: snapshot.source.clone(),
+        workspace: snapshot.workspace.clone(),
         context_sources: snapshot.context_sources.clone(),
         size: snapshot.size.clone(),
         at_cursor: snapshot.cursor.clone(),

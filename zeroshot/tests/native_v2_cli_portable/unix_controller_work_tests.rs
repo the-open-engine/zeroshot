@@ -270,6 +270,7 @@ fn review_bootstrap(fixture: &Fixture, bin: &Path) -> PortableControllerBootstra
             "nodes":{"reviewer":{"kind":"agent", "model":"fixture"}, "deliver":{"kind":"comment_delivery"}}}
     })).unwrap();
     PortableControllerBootstrap {
+        managed_restart: false,
         predecessor: None,
         request_resolution: None,
         delivery_receipt: None,

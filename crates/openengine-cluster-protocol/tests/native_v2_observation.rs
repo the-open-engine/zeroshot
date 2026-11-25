@@ -1,3 +1,6 @@
+#[path = "native_v2_observation/previous_workspace_reader.rs"]
+mod previous_workspace_reader;
+
 #[path = "support/assert_value.rs"]
 mod assert_value;
 
@@ -90,6 +93,8 @@ fn graph_result_round_trips_only_in_unfinished_started_phases() {
 #[test]
 fn status_exposes_every_parallel_execution_without_private_identity() {
     let mut result = RunStatusResult {
+        workspace: None,
+
         steering: Default::default(),
         context_sources: Vec::new(),
         run_id: RunId::new("run-1"),
@@ -224,6 +229,8 @@ fn durable_events_carry_run_and_stable_cursor() {
         "passed": true
     });
     let watch = RunWatchEventNotification {
+        workspace: None,
+
         recorded_at: None,
         context_sources: Vec::new(),
         subscription_id: SubscriptionId::new("watch-1"),
@@ -347,6 +354,8 @@ fn force_is_the_only_stop_shape_and_returns_durable_status() {
     );
 
     let result = RunForceResult {
+        workspace: None,
+
         steering: Default::default(),
         context_sources: Vec::new(),
         run_id: RunId::new("run-1"),
@@ -386,6 +395,8 @@ fn controller_availability_is_optional_observation_metadata() {
     use openengine_cluster_protocol::{ControllerObservation, ControllerState};
     for state in [ControllerState::Lost, ControllerState::Unknown] {
         let result = RunStatusResult {
+            workspace: None,
+
             steering: Default::default(),
             context_sources: Vec::new(),
             run_id: RunId::new("run-1"),

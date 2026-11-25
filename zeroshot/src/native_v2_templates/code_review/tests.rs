@@ -63,6 +63,7 @@ async fn graph(delivery: TemplateDelivery) -> VerifiedGraph {
     let admitted = NativeV2Admission
         .admit_with_policy(
             RunSubmission {
+                workspace: None,
                 context_sources: Vec::new(),
                 title: RunTitle::new("Code review").assert_value(),
                 graph: code_review_graph(delivery).assert_value(),

@@ -741,6 +741,7 @@ impl ClusterBackend for LiveController {
         }
         let stopped = self.stopped.clone();
         Ok(RunForceResult {
+            workspace: None,
             steering: Default::default(),
             context_sources: Vec::new(),
             run_id: stopped.run_id,

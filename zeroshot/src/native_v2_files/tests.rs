@@ -830,3 +830,6 @@ fn windows_directory_junctions_are_refused() {
 }
 
 mod regressions;
+
+#[path = "tests/workspaces.rs"]
+mod workspaces;

@@ -331,8 +331,27 @@ impl LocalCliBackend {
             .await
             .map_err(NativeV2CliError::InvalidRun)?;
 
+        let workspace_digest = if request.intent.workspace.is_some() {
+            let selected =
+                crate::native_v2_local::selected_local_directory(&request, &self.current_directory);
+            let bytes = serde_json::to_vec(&("workspace-request/v1", &request.intent, selected))
+                .map_err(local_error)?;
+            let digest =
+                Sha256Digest::new(format!("{:x}", Sha256::digest(bytes))).map_err(local_error)?;
+            let _lock = self.acquire_submission_lock().await?;
+            if let Some(run_id) = self
+                .existing_local_request(&request.intent.submission_key, &digest, None)
+                .await?
+            {
+                return Ok(run_id);
+            }
+            Some(digest)
+        } else {
+            None
+        };
         let worktree = request.worktree;
-        let prepared = self.prepare_run(request).await?;
+        let mut prepared = self.prepare_run(request).await?;
+        prepared.request_digest = workspace_digest;
         self.submit_prepared(prepared, worktree).await
     }
 
@@ -399,6 +418,9 @@ impl LocalCliBackend {
         request: &mut PreparedRunRequest,
         environment: &std::collections::BTreeMap<String, String>,
     ) -> Result<(), NativeV2CliError> {
+        if request.intent.workspace.is_some() {
+            return Ok(());
+        }
         let selected = request.cwd.as_deref().unwrap_or(&self.current_directory);
         let selected = if selected.is_absolute() {
             selected.to_owned()
@@ -439,9 +461,32 @@ impl LocalCliBackend {
         &self,
         prepared: PreparedLocalRun,
     ) -> Result<RunId, NativeV2CliError> {
-        self.start_prepared_controller_with_lineage(prepared, None, None)
+        let managed = prepared
+            .submission
+            .workspace
+            .as_ref()
+            .filter(|workspace| !workspace.is_in_place())
+            .map(|_| (prepared.run_id.clone(), prepared.workspace.clone()));
+        let result = self
+            .start_prepared_controller_with_lineage(prepared, None, None)
             .await
-            .map_err(|failure| failure.error)
+            .map_err(|failure| failure.error);
+        if result.is_err()
+            && let Some((run_id, workspace)) = managed
+        {
+            let paths = self.paths(&run_id)?;
+            if self
+                .successor_claim_is_live_or_admitted(&run_id, paths.storage(), Duration::ZERO)
+                .await
+                .is_ok_and(|owned| !owned)
+            {
+                let _ =
+                    crate::native_v2_supervisor::checkpoints::filesystem::remove_disposable_tree(
+                        &workspace,
+                    );
+            }
+        }
+        result
     }
 
     async fn start_prepared_controller_with_lineage(
@@ -517,6 +562,7 @@ impl LocalCliBackend {
             let checkpoint_repository = self.checkpoint_repository(&prepared.delivery_run_id)?;
             let bootstrap_path = storage.join(BOOTSTRAP_FILE);
             let bootstrap = PortableControllerBootstrap {
+                managed_restart: prepared.managed_restart,
                 request_resolution,
                 predecessor: resumed_from,
                 delivery_receipt,
@@ -648,46 +694,6 @@ impl LocalCliBackend {
                 Err(error) => return Err(local_error(error)),
             }
         }
-    }
-
-    /// The request precedes remote default/base resolution. Replays use its frozen recovery
-    /// fingerprint so a moved remote or dirty retained worktree cannot start another run.
-    async fn existing_local_request(
-        &self,
-        prepared: &PreparedLocalRun,
-        digest: &Sha256Digest,
-    ) -> Result<Option<RunId>, NativeV2CliError> {
-        for run_id in self.local_run_ids()? {
-            if !self.recovery_path(&run_id)?.is_file() {
-                continue;
-            }
-            let recovery = self.read_recovery_document(&run_id)?;
-            if recovery.submission.submission_key != prepared.submission.submission_key {
-                continue;
-            }
-            let Some(saved) = &recovery.request_digest else {
-                continue;
-            };
-            if saved != digest
-                || recovery
-                    .invoking_workspace
-                    .as_ref()
-                    .unwrap_or(&recovery.workspace)
-                    != &prepared.workspace
-            {
-                return Err(NativeV2CliError::SubmissionConflict {
-                    existing_run_id: run_id.as_str().to_owned(),
-                });
-            }
-            let final_digest = submission_digest(&recovery.submission).map_err(local_error)?;
-            if let Some(run_id) = self
-                .matching_submission(run_id, &recovery.submission.submission_key, &final_digest)
-                .await?
-            {
-                return Ok(Some(run_id));
-            }
-        }
-        Ok(None)
     }
 
     async fn existing_submission(
@@ -1182,6 +1188,7 @@ impl LocalCliBackend {
             run_id: status.run_id,
             title: status.title,
             source: status.source,
+            workspace: status.workspace,
             size: status.size,
             at_cursor: status.at_cursor,
             status: status.status,
@@ -1227,6 +1234,7 @@ impl LocalCliBackend {
                 run_id: recorded.run_id,
                 title: recorded.title,
                 source: recorded.source,
+                workspace: recorded.workspace,
                 size: recorded.size,
                 at_cursor: recorded.at_cursor,
                 status: recorded.status,

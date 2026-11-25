@@ -342,6 +342,28 @@ impl ProductionCapsuleAllocator {
         } else {
             Vec::new()
         };
+        if request.install_source
+            && request.admitted.workspace.is_some()
+            && request.retained_restore.is_none()
+        {
+            if let Some(files) = self.config.workspace_files.clone() {
+                let run_id = request.delivery_run_id.clone();
+                let workspace = filesystem.workspace.clone();
+                // Like filesystem preparation, finish before yielding cleanup authority. A
+                // cancelled allocation must not leave a background workspace writer.
+                files
+                    .materialize(&run_id, &workspace)
+                    .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+                transfer_retained_workspace_to_writer(&filesystem.workspace, active_process_pool)?;
+            } else if request
+                .admitted
+                .workspace
+                .as_ref()
+                .is_some_and(|workspace| !workspace.seeds.is_empty())
+            {
+                return Err(CapsuleAllocationUnavailable::Runtime);
+            }
+        }
         self.install_capsule_source(request, &filesystem, active_process_pool)
             .await?;
         let hosted_workspace = self
@@ -539,6 +561,9 @@ impl ProductionCapsuleAllocator {
         filesystem: &CapsuleFilesystem,
         process_pool: HostedProcessPool,
     ) -> Result<(), CapsuleAllocationUnavailable> {
+        if request.admitted.workspace.is_some() {
+            return Ok(());
+        }
         let resolved = request
             .admitted
             .source

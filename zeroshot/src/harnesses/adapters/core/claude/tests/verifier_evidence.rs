@@ -37,6 +37,7 @@ async fn verifier_evidence_redacts_the_same_declared_and_ambient_auth_marker_bef
         source_graph["root"]["children"][1] =
             json!({"kind":"fail","name":"halt","reason":"needs_followup"});
         let admitted = admit(RunSubmission {
+            workspace: None,
             context_sources: Vec::new(),
             environment: None,
             title: RunTitle::new("Verifier credential regression").assert_value(),

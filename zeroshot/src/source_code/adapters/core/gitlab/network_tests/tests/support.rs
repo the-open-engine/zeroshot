@@ -51,6 +51,7 @@ impl TlsFixture {
         }
         native_environment.extend(self.ca_environment());
         crate::native_v2_local::PreparedLocalRun {
+            managed_restart: false,
             run_id: openengine_cluster_protocol::RunId::new("forge-preflight"),
             delivery_run_id: openengine_cluster_protocol::RunId::new("forge-preflight"),
             submission,
@@ -77,6 +78,7 @@ impl TlsFixture {
         use crate::native_v2_supervisor::checkpoints::{CheckpointRestore, CheckpointRestoreSelection};
         let prepared = self.prepared(mode, "test-private-token");
         crate::native_v2_portable_controller::PortableControllerBootstrap {
+            managed_restart: false,
             predecessor: None,
             request_resolution: None,
             delivery_receipt: None,

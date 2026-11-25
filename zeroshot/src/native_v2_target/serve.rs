@@ -156,7 +156,25 @@ async fn prepare_target(
     ),
     TargetServeError,
 > {
+    let workspace_files = if config.bootstrap_key_file.is_none() {
+        Some(zeroshot_engine::native_v2_files::WorkspaceFiles {
+            host: Arc::new(zeroshot_engine::native_v2_files::DiskFileStore::open(
+                config.storage.join("files"),
+                "direct-target".into(),
+                Arc::new(zeroshot_engine::native_v2_files::SingleAccountFiles {
+                    principal: "direct-target".into(),
+                    tenant: "direct-target".into(),
+                }),
+            )?),
+            target: "direct-target".into(),
+            identity: direct_identity(),
+            directory: config.storage.join("workspace-inputs"),
+        })
+    } else {
+        None
+    };
     let hosting = ProductionHostingConfig {
+        workspace_files,
         run_sizes: config
             .bootstrap_key_file
             .is_none()
