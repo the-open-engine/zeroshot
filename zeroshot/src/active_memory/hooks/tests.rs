@@ -99,6 +99,7 @@ async fn steer_carrier_capabilities_retire_across_65536_launches_without_affecti
         openengine_cluster_protocol::RunSteerParams {
             node: None,
             mode: Default::default(),
+            part_id: None,
             run_id: run.clone(),
             text: "Direction after many launches".into(),
         },
@@ -701,6 +702,7 @@ pub(super) async fn record_steer(
         ledger,
         openengine_cluster_protocol::RunSteerParams {
             node: None,
+            part_id: None,
             run_id: run.clone(),
             text: text.into(),
             mode: Default::default(),
@@ -726,6 +728,7 @@ async fn steer_callback_requires_carrier_receipt_and_reoffers_without_it() {
         openengine_cluster_protocol::RunSteerParams {
             node: None,
             mode: Default::default(),
+            part_id: None,
             run_id: run.clone(),
             text: "Human direction".into(),
         },
@@ -830,6 +833,7 @@ async fn steer_maximum_callback_batches_whole_entries_before_memory_in_record_or
             openengine_cluster_protocol::RunSteerParams {
                 node: None,
                 mode: Default::default(),
+                part_id: None,
                 run_id: run.clone(),
                 text: text.clone(),
             },
@@ -971,6 +975,7 @@ async fn steer_failed_prompt_lookup_retries_at_next_tool_callback() {
         openengine_cluster_protocol::RunSteerParams {
             node: None,
             mode: Default::default(),
+            part_id: None,
             run_id: run.clone(),
             text: "Retry at the next callback".into(),
         },

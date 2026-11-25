@@ -4,6 +4,8 @@ import type { WorkflowNodeObservation } from './workflow-observation';
 
 /** Derived by the canonical reducer at a durable cursor; these are not worker executions. */
 export type ControlRecord = {
+  partId?: string;
+  runCursor?: string;
   cursor: string;
   node: string;
   mapIndices: number[];
@@ -78,6 +80,10 @@ export function controlVisitLabel(visit: ControlVisit): string {
   ].join(' · ');
 }
 
+function recordKey(record: ControlRecord): string {
+  return record.partId ? `${record.partId}@${record.visitId}` : record.visitId;
+}
+
 function validControlRecord(record: ControlRecord): boolean {
   return (
     !!record &&
@@ -105,7 +111,7 @@ export function appendControlHistory(
   const positions = new Map(page.events.map((event, index) => [event.cursor, index]));
   const accepted = new Set(acceptedEvents.map((event) => event.cursor));
   const identities = new Map(
-    previous.map((record) => [record.visitId, JSON.stringify([record.node, record.mapIndices])])
+    previous.map((record) => [recordKey(record), JSON.stringify([record.node, record.mapIndices])])
   );
   let position = -1;
   for (const record of page.control) {
@@ -113,9 +119,9 @@ export function appendControlHistory(
     const next = positions.get(record.cursor);
     if (next === undefined || next < position) return fail();
     const identity = JSON.stringify([record.node, record.mapIndices]);
-    if (identities.has(record.visitId) && identities.get(record.visitId) !== identity)
+    if (identities.has(recordKey(record)) && identities.get(recordKey(record)) !== identity)
       return fail();
-    identities.set(record.visitId, identity);
+    identities.set(recordKey(record), identity);
     position = next;
   }
   const oldByCursor = new Map<string, ControlRecord[]>();
@@ -156,11 +162,11 @@ export function projectControlHistory(
   for (const record of records) {
     const index = positions.get(record.cursor);
     if (index === undefined) continue;
-    const previous = visits.get(record.visitId);
+    const previous = visits.get(recordKey(record));
     const scope = JSON.stringify([record.node, record.mapIndices]);
     const visit = previous?.visit ?? (counts.get(scope) ?? 0) + 1;
     counts.set(scope, Math.max(counts.get(scope) ?? 0, visit));
-    visits.set(record.visitId, {
+    visits.set(recordKey(record), {
       ...previous,
       ...record,
       visit,

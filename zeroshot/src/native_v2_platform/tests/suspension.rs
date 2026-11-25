@@ -82,8 +82,20 @@ struct SuspensionAllocator {
     runtime: Arc<FakeAllocator>,
     policy: crate::native_v2_wait::WaitPolicy,
     store: Arc<SuspensionStore>,
-    successor: StdMutex<Option<RunId>>,
+    successors: StdMutex<BTreeMap<RunId, RunId>>,
     preparation_gate: Option<watch::Sender<bool>>,
+}
+
+impl SuspensionAllocator {
+    fn new(runtime: Arc<FakeAllocator>) -> Self {
+        Self {
+            runtime,
+            policy: Default::default(),
+            store: Arc::new(SuspensionStore::default()),
+            successors: StdMutex::default(),
+            preparation_gate: None,
+        }
+    }
 }
 
 #[async_trait]
@@ -117,15 +129,15 @@ impl CapsuleAllocator for SuspensionAllocator {
     }
     async fn reserve_retained_workspace(
         &self,
-        _source: &RunId,
+        source: &RunId,
         run_id: &RunId,
         _selection: &CheckpointRestoreSelection,
     ) -> Result<(), RetainedAllocationUnavailable> {
-        let mut successor = self.successor.lock().assert_value();
-        if successor.is_some() {
+        let mut successors = self.successors.lock().assert_value();
+        if successors.contains_key(source) {
             return Err(CapsuleAllocationUnavailable::Runtime.into());
         }
-        *successor = Some(run_id.clone());
+        successors.insert(source.clone(), run_id.clone());
         Ok(())
     }
     async fn allocate_from_retained(
@@ -141,7 +153,10 @@ impl CapsuleAllocator for SuspensionAllocator {
             }
         );
         assert_eq!(
-            self.successor.lock().assert_value().as_ref(),
+            self.successors
+                .lock()
+                .assert_value()
+                .get(request.source_run_id),
             Some(request.run_id)
         );
         if let Some(gate) = &self.preparation_gate {
@@ -163,11 +178,16 @@ impl CapsuleAllocator for SuspensionAllocator {
         .await
         .map_err(Into::into)
     }
-    async fn workspace_recovery(&self, _: &RunId) -> WorkspaceRecovery {
-        let successor = self.successor.lock().assert_value().clone();
+    async fn workspace_recovery(&self, id: &RunId) -> WorkspaceRecovery {
+        let links = self.successors.lock().assert_value();
+        let successor = links.get(id).cloned();
+        let resumed_from = links
+            .iter()
+            .find_map(|(source, next)| (next == id).then(|| source.clone()));
         WorkspaceRecovery {
             recoverable: successor.is_none(),
             successor_run_id: successor,
+            resumed_from,
             ..Default::default()
         }
     }
@@ -210,6 +230,7 @@ fn wait_request() -> RunSubmitParams {
 fn resume_params(run: &RunId) -> RunResumeParams {
     RunResumeParams {
         runtime: None,
+        part_id: run.clone(),
         run_id: run.clone(),
         successor_run_id: RunId::new("wait-successor"),
         from: None,
@@ -229,13 +250,7 @@ fn resume_params(run: &RunId) -> RunResumeParams {
 async fn hosted_checkpointless_runs_refuse_manual_suspend_without_changing_history() {
     let driver = Arc::new(FakeDriver::new(Behavior::Hang));
     let (ledger, _, runtime) = runtime_parts(driver.clone());
-    let allocator = Arc::new(SuspensionAllocator {
-        runtime,
-        policy: Default::default(),
-        store: Arc::new(SuspensionStore::default()),
-        successor: StdMutex::new(None),
-        preparation_gate: None,
-    });
+    let allocator = Arc::new(SuspensionAllocator::new(runtime));
     let controller = NativeV2PlatformController::new_with_delivery_policy(
         ledger.clone(),
         allocator,
@@ -251,9 +266,7 @@ async fn hosted_checkpointless_runs_refuse_manual_suspend_without_changing_histo
         .assert_value();
     driver.wait_started().await;
     let error = controller
-        .suspend(RunSuspendParams {
-            run_id: receipt.run_id.clone(),
-        })
+        .suspend(RunSuspendParams::new(receipt.run_id.clone()))
         .await
         .assert_error();
     assert!(matches!(error, NativeV2PlatformError::InvalidRequest(_)));
@@ -266,9 +279,7 @@ async fn hosted_checkpointless_runs_refuse_manual_suspend_without_changing_histo
     assert!(!stored.snapshot.suspend_requested);
     assert!(stored.snapshot.suspension.is_none());
     controller
-        .force(RunForceParams {
-            run_id: receipt.run_id,
-        })
+        .force(RunForceParams::new(receipt.run_id))
         .await
         .assert_value();
 }
@@ -277,13 +288,7 @@ async fn hosted_checkpointless_runs_refuse_manual_suspend_without_changing_histo
 async fn hosted_checkpointless_failure_keeps_history_but_refuses_recovery_before_allocation() {
     let driver = Arc::new(FakeDriver::new(Behavior::Complete));
     let (ledger, _, runtime) = runtime_parts(driver.clone());
-    let allocator = Arc::new(SuspensionAllocator {
-        runtime,
-        policy: Default::default(),
-        store: Arc::new(SuspensionStore::default()),
-        successor: StdMutex::new(None),
-        preparation_gate: None,
-    });
+    let allocator = Arc::new(SuspensionAllocator::new(runtime));
     let controller = NativeV2PlatformController::new_with_delivery_policy(
         ledger.clone(),
         allocator.clone(),
@@ -299,11 +304,14 @@ async fn hosted_checkpointless_failure_keeps_history_but_refuses_recovery_before
         .append(&request.run_id, vec![RunEvent::RunStarted])
         .await
         .assert_value();
-    let stored = ledger
-        .get(&request.run_id)
-        .await
-        .assert_value()
-        .assert_value();
+    let read_source = async || {
+        ledger
+            .get(&request.run_id)
+            .await
+            .assert_value()
+            .assert_value()
+    };
+    let stored = read_source().await;
     let live_error = controller
         .resume(resume_params(&request.run_id))
         .await
@@ -320,15 +328,9 @@ async fn hosted_checkpointless_failure_keeps_history_but_refuses_recovery_before
     )
     .await
     .assert_value();
-    let before = ledger
-        .get(&request.run_id)
-        .await
-        .assert_value()
-        .assert_value();
+    let before = read_source().await;
     let status = controller
-        .status(RunStatusParams {
-            run_id: request.run_id.clone(),
-        })
+        .status(RunStatusParams::new(request.run_id.clone()))
         .await
         .assert_value();
     assert!(matches!(status.status, RunStatus::Finished { .. }));
@@ -345,17 +347,17 @@ async fn hosted_checkpointless_failure_keeps_history_but_refuses_recovery_before
         assert!(matches!(error, NativeV2PlatformError::InvalidRequest(_)));
         assert!(error.to_string().contains("workspaceCheckpoints is false"));
     }
-    let after = ledger
-        .get(&request.run_id)
-        .await
-        .assert_value()
-        .assert_value();
+    let after = read_source().await;
     assert_eq!(after.snapshot, before.snapshot);
-    assert!(allocator.successor.lock().assert_value().is_none());
+    assert!(allocator.successors.lock().assert_value().is_empty());
     assert_eq!(driver.starts.load(Ordering::SeqCst), 0);
     assert_eq!(controller.list().await.assert_value().len(), 1);
 
-    *allocator.successor.lock().assert_value() = Some(RunId::new("claimed-successor"));
+    allocator
+        .successors
+        .lock()
+        .assert_value()
+        .insert(request.run_id.clone(), RunId::new("claimed-successor"));
     let claimed_error = controller
         .resume(resume_params(&request.run_id))
         .await
@@ -396,7 +398,7 @@ async fn pending_continuation_reserves_source_against_duplicate_resume_and_force
         runtime,
         policy: Default::default(),
         store: Arc::new(SuspensionStore::default()),
-        successor: StdMutex::new(None),
+        successors: StdMutex::default(),
         preparation_gate: Some(gate.clone()),
     });
     let controller = NativeV2PlatformController::new_with_delivery_policy(
@@ -411,9 +413,7 @@ async fn pending_continuation_reserves_source_against_duplicate_resume_and_force
         .await
         .assert_value();
     let before = controller
-        .status(RunStatusParams {
-            run_id: source.clone(),
-        })
+        .status(RunStatusParams::new(source.clone()))
         .await
         .assert_value();
     assert_eq!(
@@ -427,14 +427,12 @@ async fn pending_continuation_reserves_source_against_duplicate_resume_and_force
     assert!(error.to_string().contains(first.run_id.as_str()), "{error}");
     assert_eq!(ledger.list().await.assert_value().len(), 2);
     let forced = controller
-        .force(RunForceParams {
-            run_id: source.clone(),
-        })
+        .force(RunForceParams::new(source.clone()))
         .await
         .assert_value();
     assert_eq!(forced.status, before.status);
     let after = controller
-        .status(RunStatusParams { run_id: source })
+        .status(RunStatusParams::new(source))
         .await
         .assert_value();
     assert_eq!(
@@ -473,7 +471,7 @@ async fn suspension_restart_due_guard_and_continuation_preserve_state_and_vector
     let allocator = Arc::new(SuspensionAllocator {
         runtime,
         store: Arc::new(SuspensionStore::default()),
-        successor: StdMutex::new(None),
+        successors: StdMutex::default(),
         preparation_gate: None,
         policy: crate::native_v2_wait::WaitPolicy {
             in_place_threshold: Some(Duration::from_secs(3600)),
@@ -495,9 +493,7 @@ async fn suspension_restart_due_guard_and_continuation_preserve_state_and_vector
     let status = tokio::time::timeout(Duration::from_secs(2), async {
         loop {
             let status = controller
-                .status(RunStatusParams {
-                    run_id: receipt.run_id.clone(),
-                })
+                .status(RunStatusParams::new(receipt.run_id.clone()))
                 .await
                 .assert_value();
             if matches!(status.status, RunStatus::Suspended { .. }) {
@@ -538,9 +534,7 @@ async fn suspension_restart_due_guard_and_continuation_preserve_state_and_vector
     clock.fetch_add(1, Ordering::SeqCst);
     assert!(
         controller
-            .status(RunStatusParams {
-                run_id: receipt.run_id.clone()
-            })
+            .status(RunStatusParams::new(receipt.run_id.clone()))
             .await
             .assert_value()
             .workspace_recovery
@@ -558,6 +552,7 @@ async fn suspension_restart_due_guard_and_continuation_preserve_state_and_vector
     );
     let page = controller
         .vectors(RunVectorsParams {
+            part_id: None,
             run_id: resumed.run_id,
             after: None,
             limit: None,
@@ -584,9 +579,7 @@ async fn suspension_restart_due_guard_and_continuation_preserve_state_and_vector
     assert!(error.to_string().contains("wait-successor"));
     assert!(matches!(
         controller
-            .force(RunForceParams {
-                run_id: receipt.run_id
-            })
+            .force(RunForceParams::new(receipt.run_id))
             .await
             .assert_value()
             .status,
@@ -605,7 +598,7 @@ async fn default_host_waits_in_place_until_command_suspension_and_force_is_final
             ..Default::default()
         },
         store: Arc::new(SuspensionStore::default()),
-        successor: StdMutex::new(None),
+        successors: StdMutex::default(),
         preparation_gate: None,
     });
     let controller = NativeV2PlatformController::new_with_delivery_policy(
@@ -623,7 +616,7 @@ async fn default_host_waits_in_place_until_command_suspension_and_force_is_final
         .run_id;
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
-            let status = controller.status(RunStatusParams {run_id:run.clone()}).await.assert_value();
+            let status = controller.status(RunStatusParams::new(run.clone())).await.assert_value();
             if matches!(status.status, RunStatus::Running {ref active_executions, ..} if active_executions.iter().any(|execution| execution.node.as_str() == "wait")) {
                 break;
             }
@@ -634,17 +627,13 @@ async fn default_host_waits_in_place_until_command_suspension_and_force_is_final
     // A stop signal may stop live work; it must leave a suspension alone.
     assert!(!controller.holds_suspension(&run).await);
     controller
-        .suspend(RunSuspendParams {
-            run_id: run.clone(),
-        })
+        .suspend(RunSuspendParams::new(run.clone()))
         .await
         .assert_value();
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
             let status = controller
-                .status(RunStatusParams {
-                    run_id: run.clone(),
-                })
+                .status(RunStatusParams::new(run.clone()))
                 .await
                 .assert_value();
             if matches!(
@@ -677,14 +666,12 @@ async fn default_host_waits_in_place_until_command_suspension_and_force_is_final
     // Without its workspace the attempt could never continue, yet would stay suspended.
     assert!(matches!(
         controller
-            .discard_workspace(RunDiscardWorkspaceParams { run_id: run.clone() })
+            .discard_workspace(RunDiscardWorkspaceParams { part_id: None, run_id: run.clone() })
             .await,
         Err(NativeV2PlatformError::InvalidRequest(message)) if message.contains("force-stop")
     ));
     let forced = controller
-        .force(RunForceParams {
-            run_id: run.clone(),
-        })
+        .force(RunForceParams::new(run.clone()))
         .await
         .assert_value();
     assert!(
@@ -693,6 +680,7 @@ async fn default_host_waits_in_place_until_command_suspension_and_force_is_final
     assert!(controller.resume(params).await.is_err());
     controller
         .discard_workspace(RunDiscardWorkspaceParams {
+            part_id: None,
             run_id: run.clone(),
         })
         .await
@@ -700,6 +688,7 @@ async fn default_host_waits_in_place_until_command_suspension_and_force_is_final
     let late = controller
         .steer(openengine_cluster_protocol::RunSteerParams {
             node: None,
+            part_id: None,
             run_id: run,
             text: "late".to_owned(),
             mode: openengine_cluster_protocol::SteeringMode::Standing,
@@ -729,9 +718,7 @@ async fn hosts_without_opt_in_refuse_wait_plans_and_suspend_without_effects() {
     assert!(matches!(
         harness
             .controller
-            .suspend(RunSuspendParams {
-                run_id: receipt.run_id.clone()
-            })
+            .suspend(RunSuspendParams::new(receipt.run_id.clone()))
             .await,
         Err(NativeV2PlatformError::InvalidRequest(_))
     ));
@@ -747,9 +734,7 @@ async fn hosts_without_opt_in_refuse_wait_plans_and_suspend_without_effects() {
     );
     harness
         .controller
-        .force(RunForceParams {
-            run_id: receipt.run_id,
-        })
+        .force(RunForceParams::new(receipt.run_id))
         .await
         .assert_value();
 }

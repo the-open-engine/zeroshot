@@ -141,6 +141,8 @@ fn status() -> RunStatusResult {
     RunStatusResult {
         context_sources: Vec::new(),
         steering: Default::default(),
+        part_id: run_id(),
+        current_part_id: run_id(),
         run_id: run_id(),
         title: title(),
         source: Some(native_v2_source_fixture()),
@@ -172,6 +174,7 @@ fn status() -> RunStatusResult {
 fn watch_fixture() -> Value {
     json!({
         "params": RunWatchParams {
+            part_id: None,
             run_id: run_id(),
             from_cursor: Some(cursor(7)),
         },
@@ -181,6 +184,7 @@ fn watch_fixture() -> Value {
             at_cursor: cursor(7),
         },
         "event": RunWatchEventNotification {
+            part_id: run_id(),
         context_sources: Vec::new(),
             recorded_at: Some(UnixTimestampMillis::new(1_725_000_000_999).assert_value()),
             subscription_id: SubscriptionId::new("watch-1"),
@@ -229,6 +233,7 @@ fn graph_result_fixture() -> Value {
 fn logs_fixture() -> Value {
     json!({
         "params": RunLogsParams {
+            part_id: None,
             run_id: run_id(),
             from_cursor: Some(cursor(7)),
             execution: Some(execution("opaque-verifier-b")),
@@ -239,6 +244,7 @@ fn logs_fixture() -> Value {
             at_cursor: cursor(7),
         },
         "event": RunLogEventNotification {
+            part_id: run_id(),
             map_indices: Vec::new(), subscription_id: SubscriptionId::new("logs-1"),
             run_id: run_id(),
             cursor: cursor(9),
@@ -256,15 +262,18 @@ fn logs_fixture() -> Value {
 fn attach_fixture() -> Value {
     json!({
         "params": RunAttachParams {
+            part_id: None,
             run_id: run_id(),
             execution: execution("opaque-verifier-b"),
         },
         "result": RunAttachResult {
+            part_id: run_id(),
             subscription_id: SubscriptionId::new("attach-1"),
             run_id: run_id(),
             execution: execution("opaque-verifier-b"),
         },
         "event": RunAttachEventNotification {
+            part_id: run_id(),
             subscription_id: SubscriptionId::new("attach-1"),
             run_id: run_id(),
             execution: execution("opaque-verifier-b"),
@@ -290,8 +299,10 @@ fn force_fixture() -> Value {
         graph_result: None,
     };
     json!({
-            "params": RunForceParams { run_id: run_id() },
+            "params": RunForceParams::new(run_id()),
             "result": RunForceResult {
+            part_id: result.part_id,
+            current_part_id: result.current_part_id,
         context_sources: Vec::new(),
     steering: Default::default(),
     run_id: result.run_id,

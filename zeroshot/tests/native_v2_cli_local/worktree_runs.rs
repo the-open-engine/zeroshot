@@ -197,7 +197,8 @@ async fn failed_worktree_run_resumes_in_the_retained_attached_worktree() {
     let resumed = fixture
         .json(&["resume", run_id, "--restart"], "finish")
         .await;
-    let successor = resumed["runId"].as_str().unwrap();
+    assert_eq!(resumed["runId"], run_id);
+    let successor = resumed["currentPartId"].as_str().unwrap();
     fixture.wait_succeeded(successor, "finish").await;
     wait_for_exit(fixture.ready_pid(successor)).await;
     let recovered: Value = serde_json::from_slice(

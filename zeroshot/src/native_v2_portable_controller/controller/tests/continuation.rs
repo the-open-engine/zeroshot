@@ -115,6 +115,7 @@ async fn successor_preparation_inherits_every_vector_and_only_suspended_executio
         assert_eq!(
             continuation.content,
             RunVectorContent::Continuation {
+                checkpoint_id: None,
                 resumed_from: predecessor.clone()
             }
         );
@@ -189,13 +190,14 @@ async fn local_controller_accepts_steers_during_suspension_cleanup_and_after_reo
                 ..PortableRuntime::new(Arc::new(NeverDispatched))
             }),
         ).await.assert_value();
-        while !matches!(controller.inner.status(RunStatusParams { run_id: run_id.clone() }).await.assert_value().status,
+        while !matches!(controller.inner.status(RunStatusParams::new(run_id.clone())).await.assert_value().status,
             RunStatus::Running { ref active_executions, .. } if active_executions.iter().any(|e| e.node.as_str() == "wait")) {
             tokio::task::yield_now().await;
         }
-        controller.inner.suspend(RunSuspendParams { run_id: run_id.clone() }).await.assert_value();
+        controller.inner.suspend(RunSuspendParams::new(run_id.clone())).await.assert_value();
         cleanup.disposing.notified().await;
         let first = controller.inner.steer(RunSteerParams {
+            part_id: None,
             run_id: run_id.clone(), node: None, text: "during-local-cleanup".into(), mode: SteeringMode::Standing,
         }).await.assert_value();
         cleanup.disposal_release.notify_one();
@@ -203,6 +205,7 @@ async fn local_controller_accepts_steers_during_suspension_cleanup_and_after_reo
         drop(controller);
         let controller = PortableRunController::open_observer(paths.clone(), run_id.clone()).await.assert_value();
         let second = controller.inner.steer(RunSteerParams {
+            part_id: None,
             run_id: run_id.clone(), node: None, text: "after-local-reopen".into(), mode: SteeringMode::Standing,
         }).await.assert_value();
         let ledger = SqliteRunLedger::open(paths.ledger()).assert_value();

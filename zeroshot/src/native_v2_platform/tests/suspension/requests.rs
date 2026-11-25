@@ -29,9 +29,7 @@ pub(super) async fn suspended(
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let status = controller
-                .status(RunStatusParams {
-                    run_id: run.clone(),
-                })
+                .status(RunStatusParams::new(run.clone()))
                 .await
                 .assert_value();
             if matches!(status.status, RunStatus::Suspended { .. }) {
@@ -62,7 +60,7 @@ async fn request_answer_at_deadline_is_timeout_and_before_it_is_accepted_once() 
                 ..Default::default()
             },
             store: Arc::new(SuspensionStore::default()),
-            successor: StdMutex::new(None),
+            successors: StdMutex::default(),
             preparation_gate: None,
         });
         let controller = NativeV2PlatformController::new_with_delivery_policy(
@@ -124,11 +122,13 @@ async fn request_answer_at_deadline_is_timeout_and_before_it_is_accepted_once() 
             }
         );
         // Retained workspace ownership is published before the successor ledger is created.
-        *allocator.successor.lock().assert_value() = Some(params.successor_run_id.clone());
+        allocator
+            .successors
+            .lock()
+            .assert_value()
+            .insert(run.clone(), params.successor_run_id.clone());
         let starting = controller
-            .inbox_show(RunStatusParams {
-                run_id: run.clone(),
-            })
+            .inbox_show(RunStatusParams::new(run.clone()))
             .await
             .assert_value();
         assert_eq!(starting.state, list.requests[0].state);
@@ -144,7 +144,15 @@ async fn request_answer_at_deadline_is_timeout_and_before_it_is_accepted_once() 
                 .assert_value()
                 .is_none()
         );
-        *allocator.successor.lock().assert_value() = None;
+        assert_public_request_has_no_successor(&controller, &run).await;
+        assert!(
+            controller
+                .protected_file_runs()
+                .await
+                .assert_value()
+                .contains(&run)
+        );
+        allocator.successors.lock().assert_value().remove(&run);
         let result = controller.resume(params.clone()).await;
         if expired {
             let error = result.unwrap_err();
@@ -173,12 +181,17 @@ async fn request_answer_at_deadline_is_timeout_and_before_it_is_accepted_once() 
             usize::from(expired)
         );
         let old = controller
-            .inbox_show(RunStatusParams {
-                run_id: run.clone(),
-            })
+            .inbox_show(RunStatusParams::new(run.clone()))
             .await
             .assert_value();
         assert_eq!(old.successor_run_id, Some(params.successor_run_id.clone()));
+        assert!(
+            !controller
+                .protected_file_runs()
+                .await
+                .assert_value()
+                .contains(&run)
+        );
         assert_eq!(
             old.state,
             if expired {
@@ -197,14 +210,13 @@ async fn request_answer_at_deadline_is_timeout_and_before_it_is_accepted_once() 
         );
         assert!(
             controller
-                .inbox_show(RunStatusParams {
-                    run_id: params.successor_run_id.clone()
-                })
+                .inbox_show(RunStatusParams::new(params.successor_run_id.clone()))
                 .await
                 .is_err()
         );
         let vectors = controller
             .vectors(RunVectorsParams {
+                part_id: None,
                 run_id: params.successor_run_id.clone(),
                 after: None,
                 limit: None,
@@ -227,6 +239,25 @@ async fn request_answer_at_deadline_is_timeout_and_before_it_is_accepted_once() 
         assert_eq!(ledger.list().await.assert_value().len(), 2);
     }
 }
+async fn assert_public_request_has_no_successor(
+    controller: &NativeV2PlatformController,
+    run: &RunId,
+) {
+    let context = ConnectionContext::default();
+    let list = ClusterBackend::run_list(controller, &context, RunListParams::default())
+        .await
+        .assert_value();
+    assert_eq!(list.runs.len(), 1);
+    let head = &list.runs[0];
+    assert_eq!(&head.current_part_id, run);
+    assert!(head.workspace_recovery.successor_run_id.is_none());
+    let request =
+        ClusterBackend::inbox_show(controller, &context, RunStatusParams::new(run.clone()))
+            .await
+            .assert_value();
+    assert!(request.successor_run_id.is_none());
+}
+
 #[tokio::test]
 async fn host_requires_the_independent_request_opt_in() {
     let harness = harness(Behavior::Hang).await;
@@ -245,7 +276,7 @@ async fn lost_answer_successor_restarts_after_the_answer() {
         runtime: runtime.clone(),
         policy: Default::default(),
         store: store.clone(),
-        successor: StdMutex::new(None),
+        successors: StdMutex::default(),
         preparation_gate: None,
     });
     let controller = NativeV2PlatformController::new_with_delivery_policy(
@@ -289,7 +320,6 @@ async fn lost_answer_successor_restarts_after_the_answer() {
     assert!(!lost.snapshot.execution_seed.is_empty());
 
     // The restart begins where the lost successor began: the request stays answered.
-    *allocator.successor.lock().assert_value() = None;
     store.restart.store(true, Ordering::SeqCst);
     let mut restart = resume_params(&answer.successor_run_id);
     restart.successor_run_id = RunId::new("restart");
@@ -315,6 +345,7 @@ async fn lost_answer_successor_restarts_after_the_answer() {
     );
     let vectors = controller
         .vectors(RunVectorsParams {
+            part_id: None,
             run_id: restart.successor_run_id.clone(),
             after: None,
             limit: None,
@@ -337,9 +368,7 @@ async fn lost_answer_successor_restarts_after_the_answer() {
         1
     );
     controller
-        .force(RunForceParams {
-            run_id: restart.successor_run_id,
-        })
+        .force(RunForceParams::new(restart.successor_run_id))
         .await
         .assert_value();
 }

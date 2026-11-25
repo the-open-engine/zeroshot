@@ -1,4 +1,5 @@
 import { ApiError, type ApiClient } from './api';
+import { appendGroupedHistory, runPosition } from './grouped-history';
 import { watchHistoryEvents, type HistoryObserver } from './history-stream';
 import { historyRetryDelay } from './history-response';
 import type { HistoryRetryDelay } from './history-readiness';
@@ -16,8 +17,9 @@ import type { HistoryEvent, HistoryPage, RunDetail, RunSummary } from './run-his
 export interface RunHistoryReader {
   /** Sources may identify transient read failures without exposing their transport to the viewer. */
   retryDelay?: HistoryRetryDelay;
+  forPart?(partId: string): RunHistoryReader;
   detail(id: string, signal?: AbortSignal): Promise<RunDetail>;
-  page(id: string, after: string, signal?: AbortSignal): Promise<HistoryPage>;
+  page(id: string, after?: string, signal?: AbortSignal): Promise<HistoryPage>;
   watch?(id: string, after: string, observer: HistoryObserver, signal?: AbortSignal): () => void;
 }
 export interface RunHistorySource extends RunHistoryReader {
@@ -28,7 +30,11 @@ export interface RunHistorySource extends RunHistoryReader {
 }
 
 /** A definition and its projection must agree before any history is replayed. */
-export function readRunDetail(value: unknown, requestedRunId: string): RunDetail {
+export function readRunDetail(
+  value: unknown,
+  requestedRunId: string,
+  requestedPartId?: string
+): RunDetail {
   const detail = value as Partial<RunDetail> | null;
   if (detail?.version !== 1 || detail?.projectionVersion !== 1)
     throw new ApiError(
@@ -36,11 +42,24 @@ export function readRunDetail(value: unknown, requestedRunId: string): RunDetail
       'incompatible_history',
       'This run uses incompatible definition or history versions. Reload after updating Zeroshot.'
     );
-  if (detail.runId !== requestedRunId)
+  if (
+    detail.runId !== requestedRunId &&
+    !(
+      detail.parts?.[0] === detail.runId &&
+      detail.parts?.at(-1) === detail.currentPartId &&
+      detail.parts?.includes(requestedRunId)
+    )
+  )
     throw new ApiError(
       200,
       'run_identity_mismatch',
       'The server returned a different run. Reload to try again.'
+    );
+  if (requestedPartId && (detail.partId !== requestedPartId || !detail.partView))
+    throw new ApiError(
+      200,
+      'run_identity_mismatch',
+      'The server returned a different run part. Reload to try again.'
     );
   readObservation(detail.observation);
   if (detail.terminal?.status === 'failed')
@@ -65,39 +84,39 @@ function validateDefinitionRuntimeFailure(detail: Partial<RunDetail>) {
 export function createRunHistorySource(
   api: ApiClient,
   base: URL,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  partId?: string
 ): RunHistorySource {
+  const path = (id: string, route = '', after?: string) => {
+    const query = new URLSearchParams();
+    if (after !== undefined) query.set('after', after);
+    if (partId) query.set('partId', partId);
+    return `runs/${encodeURIComponent(id)}${route}${query.size ? '?' + query : ''}`;
+  };
   return {
+    forPart: partId ? undefined : (part) => createRunHistorySource(api, base, fetcher, part),
     retryDelay: historyRetryDelay,
     list: (after, signal) =>
       api(`runs${after ? `?after=${encodeURIComponent(after)}` : ''}`, undefined, signal),
-    detail: async (id, signal) =>
-      readRunDetail(await api(`runs/${encodeURIComponent(id)}`, undefined, signal), id),
+    detail: async (id, signal) => readRunDetail(await api(path(id), undefined, signal), id, partId),
     page: async (id, after, signal) => {
-      const page = await api<HistoryPage>(
-        `runs/${encodeURIComponent(id)}/history?after=${encodeURIComponent(after)}`,
-        undefined,
-        signal
-      );
+      const page = await api<HistoryPage>(path(id, '/history', after), undefined, signal);
       readPageRuntimeFailure(page);
       readObservation(page.observation);
       return page;
     },
     watch: (id, after, observer, signal) =>
-      watchHistoryEvents(
-        new URL(`runs/${encodeURIComponent(id)}/events?after=${encodeURIComponent(after)}`, base),
-        observer,
-        signal,
-        fetcher
-      ),
+      watchHistoryEvents(new URL(path(id, '/events', after), base), observer, signal, fetcher),
   };
 }
-type Example = { detail: RunDetail; events: HistoryEvent[] };
+type Example = { detail: RunDetail } & ({ events: HistoryEvent[] } | { pages: HistoryPage[] });
 function exampleSummary(detail: RunDetail): RunSummary {
   const terminal: RunSummary['terminal'] =
     detail.terminal?.status === 'succeeded' ? { status: 'succeeded' } : detail.terminal;
   return {
     runId: detail.runId,
+    currentPartId: detail.currentPartId,
+    partCount: detail.parts?.length,
     title: detail.title,
     phase: detail.phase,
     suspension: detail.suspension,
@@ -133,6 +152,13 @@ export function createExampleRunHistory(
         });
     return examplesPromise;
   }
+  async function selected(id: string) {
+    const example = (await examples()).find(
+      ({ detail }) => detail.runId === id || detail.parts?.includes(id)
+    );
+    if (!example) throw new Error('Example not found.');
+    return example;
+  }
   return {
     async list() {
       return {
@@ -141,13 +167,28 @@ export function createExampleRunHistory(
       };
     },
     async detail(id) {
-      const example = (await examples()).find(({ detail }) => detail.runId === id);
-      if (!example) throw new Error('Example not found.');
+      const example = await selected(id);
       return { ...readRunDetail(example.detail, id), example: true };
     },
     async page(id, after) {
-      const example = (await examples()).find(({ detail }) => detail.runId === id);
-      if (!example) throw new Error('Example not found.');
+      const example = await selected(id);
+      after ??= example.detail.history.initialCursor;
+      if ('pages' in example) {
+        const position = runPosition(after) ?? { part: id, cursor: after };
+        const page = example.pages.find((page) => page.partId === position.part);
+        const from = cursorSequence(position.cursor);
+        if (!page || from > cursorSequence(page.partHeadCursor!))
+          throw new Error('Unknown example cursor.');
+        if (position.cursor === page.partAfterCursor) return page;
+        const later = (cursor: string) => cursorSequence(cursor) > from;
+        return {
+          ...page,
+          partAfterCursor: position.cursor,
+          events: page.events.filter((record) => later(record.cursor)),
+          imports: page.imports?.filter((record) => later(record.cursor)),
+          omittedCursors: page.omittedCursors?.filter(later),
+        };
+      }
       const start =
         after === 'v2:0' ? 0 : example.events.findIndex((event) => event.cursor === after) + 1;
       if (after !== 'v2:0' && start === 0) throw new Error('Unknown example cursor.');
@@ -172,9 +213,11 @@ function withoutRecordedAt({ recordedAt: _recordedAt, ...event }: HistoryEvent):
 /** Merge a contiguous replay prefix, accepting identical retransmitted events only. */
 export function appendHistory(
   previous: readonly HistoryEvent[],
-  page: HistoryPage
+  page: HistoryPage,
+  expected?: string
 ): HistoryEvent[] {
   readPageRuntimeFailure(page);
+  if (page.partAfterCursor) return appendGroupedHistory(previous, page, expected);
   const seen = new Map<string, HistoryEvent>();
   let sequence = 0n;
   let latestRecordedAt = 0;

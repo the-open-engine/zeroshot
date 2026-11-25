@@ -161,6 +161,7 @@ async fn dead_controller_reconciles_delivery_before_successor_claim_and_generati
         let result = controller
             .resume(RunResumeParams {
                 runtime: None,
+                part_id: submitted.run_id.clone(),
                 run_id: submitted.run_id,
                 successor_run_id: successor.clone(),
                 from: None,

@@ -111,7 +111,7 @@ async fn request_history_hides_preparation_and_keeps_attachments_in_the_authoriz
             );
             let status = serde_json::to_value(
                 observations
-                    .status(RunStatusParams { run_id: id.clone() })
+                    .status(RunStatusParams::new(id.clone()))
                     .await
                     .assert_value(),
             )

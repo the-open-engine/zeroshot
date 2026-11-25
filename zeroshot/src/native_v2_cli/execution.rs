@@ -193,7 +193,10 @@ where
                 &backend
                     .run_suspend(
                         run.target.as_deref(),
-                        openengine_cluster_protocol::RunSuspendParams { run_id: run.run_id },
+                        openengine_cluster_protocol::RunSuspendParams {
+                            part_id: run.part_id,
+                            run_id: run.run_id,
+                        },
                     )
                     .await?,
             )?;
@@ -206,6 +209,7 @@ where
                     .run_vectors(
                         command.run.target.as_deref(),
                         openengine_cluster_protocol::RunVectorsParams {
+                            part_id: command.run.part_id.clone(),
                             run_id: command.run.run_id,
                             after: command.after,
                             limit: command.limit,
@@ -222,6 +226,7 @@ where
                     .run_vector(
                         run.target.as_deref(),
                         openengine_cluster_protocol::RunVectorParams {
+                            part_id: run.part_id.clone(),
                             run_id: run.run_id,
                             id,
                         },
@@ -252,16 +257,17 @@ where
             return Ok(CliOutcome::Completed);
         }
         NativeV2CliCommand::InboxShow(run) => {
-            write_json(
-                output,
-                &context
-                    .backend
-                    .inbox_show(
-                        run.target.as_deref(),
-                        openengine_cluster_protocol::InboxShowParams { run_id: run.run_id },
-                    )
-                    .await?,
-            )?;
+            let request = context
+                .backend
+                .inbox_show(
+                    run.target.as_deref(),
+                    openengine_cluster_protocol::InboxShowParams {
+                        part_id: run.part_id,
+                        run_id: run.run_id,
+                    },
+                )
+                .await?;
+            write_json(output, &request)?;
             return Ok(CliOutcome::Completed);
         }
         NativeV2CliCommand::Resume(run) => {
@@ -287,9 +293,8 @@ where
     execute_run_subscription(command, backend, signal, output).await
 }
 
-async fn prepare_resume_runtime<B: NativeV2CliBackend>(
+fn prepare_resume_runtime(
     command: &RunResumeCommand,
-    context: &CliExecutionContext<'_, B>,
 ) -> Result<Option<openengine_cluster_protocol::RunResumeRuntime>, NativeV2CliError> {
     let mut runtime = command
         .runtime
@@ -312,16 +317,40 @@ async fn prepare_resume_runtime<B: NativeV2CliBackend>(
         };
         crate::native_v2_runtime_config::materialize_access(runtime, placement)
             .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
-        context
-            .backend
-            .validate_resume_runtime(
-                &command.run,
-                runtime,
-                command.run.target.is_none() && read_github_token(context.environment)?.is_some(),
-            )
-            .await?;
     }
     Ok(runtime)
+}
+
+fn check_suspended_resume(
+    command: &RunResumeCommand,
+    suspension: &openengine_cluster_protocol::RunSuspension,
+    answering: bool,
+) -> Result<(), NativeV2CliError> {
+    if !answering {
+        if matches!(
+            suspension,
+            openengine_cluster_protocol::RunSuspension::Request { .. }
+        ) {
+            return Err(request_error(format!(
+                "run requires zeroshot answer {} --input FILE",
+                command.run.run_id.as_str()
+            )));
+        }
+        if command.from.is_some() || command.discard_workspace_changes {
+            return Err(NativeV2CliError::Usage(
+                "suspended runs accept only default resume".to_owned(),
+            ));
+        }
+    }
+    if let Some(due) = suspension.due_at()
+        && crate::native_v2_runner::current_timestamp() < due
+    {
+        return Err(NativeV2CliError::Usage(format!(
+            "wait is due at {}",
+            due.get()
+        )));
+    }
+    Ok(())
 }
 
 async fn execute_resume<B, S, W>(
@@ -335,13 +364,24 @@ where
     S: DetachSignal,
     W: Write,
 {
-    let runtime = prepare_resume_runtime(&command, context).await?;
+    let runtime = prepare_resume_runtime(&command)?;
+    if let Some(runtime) = &runtime {
+        context
+            .backend
+            .validate_resume_runtime(
+                &command.run,
+                runtime,
+                command.run.target.is_none() && read_github_token(context.environment)?.is_some(),
+            )
+            .await?;
+    }
     let run = &command.run;
     let status = context
         .backend
         .run_resume_status(
             run.target.as_deref(),
             RunStatusParams {
+                part_id: run.part_id.clone(),
                 run_id: run.run_id.clone(),
             },
         )
@@ -353,45 +393,31 @@ where
                 | openengine_cluster_protocol::RunResumeFrom::Expiry {}
         )
     );
+    if run
+        .part_id
+        .as_ref()
+        .is_some_and(|part| part != &status.current_part_id)
+    {
+        return Err(stale_part(&status.current_part_id));
+    }
     if let Some(successor) = &status.workspace_recovery.successor_run_id {
         return Err(NativeV2CliError::Usage(format!(
             "run already has successor {}",
             successor.as_str()
         )));
     }
-    if let CliRunStatus::Target(RunStatus::Suspended {
-        suspension: openengine_cluster_protocol::RunSuspension::Request { .. },
-        ..
-    }) = &status.status
-    {
-        if !answering {
-            return Err(request_error(format!(
-                "run requires zeroshot answer {} --input FILE",
-                run.run_id.as_str()
-            )));
-        }
-    }
     if let CliRunStatus::Target(RunStatus::Suspended { suspension, .. }) = &status.status {
-        if !answering && (command.from.is_some() || command.discard_workspace_changes) {
-            return Err(NativeV2CliError::Usage(
-                "suspended runs accept only default resume".to_owned(),
-            ));
-        }
-        if let Some(due) = suspension.due_at()
-            && crate::native_v2_runner::current_timestamp() < due
-        {
-            return Err(NativeV2CliError::Usage(format!(
-                "wait is due at {}",
-                due.get()
-            )));
-        }
+        check_suspended_resume(&command, suspension, answering)?;
     }
     if !status.workspace_recovery.recoverable && !answering {
         return Err(NativeV2CliError::Usage(
             "run does not have a recoverable workspace".to_owned(),
         ));
     }
+    let root = status.run_id.clone();
+    command.run.part_id = Some(status.current_part_id.clone());
     resume_selection::apply_default(&mut command, &status.status, context.backend).await?;
+    command.run.run_id = status.current_part_id.clone();
     context.backend.validate_resume_selection(&command).await?;
     let run = command.run;
     let requirements = context
@@ -455,7 +481,8 @@ where
             run.target.as_deref(),
             RunResumeParams {
                 runtime,
-                run_id: run.run_id,
+                part_id: status.current_part_id,
+                run_id: root,
                 successor_run_id: RunId::new(uuid::Uuid::now_v7().to_string()),
                 from: command.from,
                 connections,
@@ -477,7 +504,10 @@ where
     RunFailure::read(
         context.backend,
         run.target.as_deref(),
-        result.run_id,
+        RunStatusParams {
+            run_id: result.run_id,
+            part_id: Some(result.current_part_id),
+        },
         detach.as_mut(),
     )
     .await
@@ -498,6 +528,7 @@ where
         .run_checkpoints(
             command.run.target.as_deref(),
             RunCheckpointsParams {
+                part_id: command.run.part_id.clone(),
                 run_id: command.run.run_id,
                 after: command.after,
                 limit: command.limit,
@@ -520,7 +551,10 @@ where
     let result = backend
         .run_discard_workspace(
             run.target.as_deref(),
-            RunDiscardWorkspaceParams { run_id: run.run_id },
+            RunDiscardWorkspaceParams {
+                part_id: run.part_id,
+                run_id: run.run_id,
+            },
         )
         .await?;
     write_json(output, &result)?;
@@ -548,7 +582,10 @@ where
             let result = backend
                 .run_status(
                     run.target.as_deref(),
-                    RunStatusParams { run_id: run.run_id },
+                    RunStatusParams {
+                        part_id: run.part_id,
+                        run_id: run.run_id,
+                    },
                 )
                 .await?;
             write_json(output, &result)?;
@@ -570,7 +607,13 @@ where
     W: Write,
 {
     let result = backend
-        .run_force(run.target.as_deref(), RunForceParams { run_id: run.run_id })
+        .run_force(
+            run.target.as_deref(),
+            RunForceParams {
+                part_id: run.part_id,
+                run_id: run.run_id,
+            },
+        )
         .await?;
     write_json(output, &result)?;
     Ok(outcome_for_status(&result.status))
@@ -588,15 +631,20 @@ where
     W: Write,
 {
     match command {
-        NativeV2CliCommand::Watch(RunWatchCommand { run, after }) => {
+        NativeV2CliCommand::Watch(RunWatchCommand { run, after, follow }) => {
             let detach = signal.wait();
             tokio::pin!(detach);
             follow_run_result(
                 DurableFollow {
+                    part_id: run.part_id,
                     backend,
                     target: run.target.as_deref(),
                     run_id: run.run_id,
-                    kind: DurableFollowKind::Watch,
+                    kind: if follow {
+                        DurableFollowKind::ContinuousWatch
+                    } else {
+                        DurableFollowKind::Watch
+                    },
                     initial_cursor: after,
                     execution: None,
                 },
@@ -612,6 +660,7 @@ where
         }) => {
             follow_durable(
                 DurableFollow {
+                    part_id: run.part_id,
                     backend,
                     target: run.target.as_deref(),
                     run_id: run.run_id,
@@ -630,6 +679,7 @@ where
                 RoutedAttach {
                     target: run.target.as_deref(),
                     params: RunAttachParams {
+                        part_id: run.part_id.clone(),
                         run_id: run.run_id,
                         execution,
                     },
@@ -675,6 +725,7 @@ where
     }
     follow_run_result(
         DurableFollow {
+            part_id: None,
             backend: context.backend,
             target: run.target.as_deref(),
             run_id: receipt.run_id,
@@ -703,6 +754,7 @@ where
     W: Write,
 {
     let (backend, target, run_id) = (follow.backend, follow.target, follow.run_id.clone());
+    let part_id = follow.part_id.clone();
     let mut observed = failure::FailureOutput::new(output);
     let outcome = match follow_durable_with_detach(follow, detach.as_mut(), &mut observed).await? {
         // A runtime failure can close the watch before its terminal snapshot is durable, or
@@ -711,6 +763,7 @@ where
         // while it is read.
         CliOutcome::Completed => {
             let params = RunStatusParams {
+                part_id: part_id.clone(),
                 run_id: run_id.clone(),
             };
             tokio::select! {
@@ -718,6 +771,7 @@ where
                 () = detach.as_mut() => CliOutcome::Detached,
                 result = backend.run_status(target, params) => {
                     let result = result?;
+                    observed.origin = Some((result.run_id, result.part_id));
                     observed.observe(&result.status);
                     outcome_for_status(&result.status)
                 }
@@ -727,8 +781,21 @@ where
     };
     // Auxiliary memory errors never populate the primary failure context. Read their existing
     // log stream for successful runs too, including recall-only runs and resumed controllers.
+    let (run_id, part_id) = observed
+        .origin
+        .take()
+        .map_or((run_id, part_id), |(run, part)| (run, Some(part)));
     let logs = if matches!(outcome, CliOutcome::Finished | CliOutcome::Failed) {
-        let logs = RunFailure::read(backend, target, run_id.clone(), detach.as_mut()).await;
+        let logs = RunFailure::read(
+            backend,
+            target,
+            RunStatusParams {
+                run_id: run_id.clone(),
+                part_id,
+            },
+            detach.as_mut(),
+        )
+        .await;
         logs.report_memory(true);
         Some(logs)
     } else {
@@ -748,10 +815,12 @@ where
 #[derive(Clone, Copy)]
 enum DurableFollowKind {
     Watch,
+    ContinuousWatch,
     Logs,
 }
 
 struct DurableFollow<'a, B> {
+    part_id: Option<RunId>,
     backend: &'a B,
     target: Option<&'a str>,
     run_id: RunId,
@@ -764,16 +833,66 @@ impl<B> DurableFollow<'_, B>
 where
     B: NativeV2CliBackend,
 {
+    /// A pinned stream closes when its ledger has been drained. Use that for a
+    /// foreground reconnect into the currently suspended part, even when its
+    /// last status notification precedes the final ledger cursor.
+    async fn suspended_replay(&self) -> Result<Option<RunId>, NativeV2CliError> {
+        if !matches!(self.kind, DurableFollowKind::Watch) || self.part_id.is_some() {
+            return Ok(None);
+        }
+        let Some((part, _)) = self
+            .initial_cursor
+            .as_ref()
+            .and_then(crate::native_v2_observability::lineage::split_cursor)
+        else {
+            return Ok(None);
+        };
+        let head = self
+            .backend
+            .run_status(self.target, RunStatusParams::new(self.run_id.clone()))
+            .await?;
+        Ok((head.current_part_id == part
+            && matches!(
+                head.status,
+                CliRunStatus::Target(RunStatus::Suspended { .. })
+            ))
+        .then_some(part))
+    }
+
+    async fn boundary(
+        &self,
+        outcome: Option<CliOutcome>,
+        cursor: Option<&Cursor>,
+    ) -> Result<Option<CliOutcome>, NativeV2CliError> {
+        if outcome.is_none() || matches!(self.kind, DurableFollowKind::ContinuousWatch) {
+            return Ok(None);
+        }
+        let Some((part, _)) =
+            cursor.and_then(crate::native_v2_observability::lineage::split_cursor)
+        else {
+            return Ok(outcome);
+        };
+        if self.part_id.is_some() {
+            return Ok(outcome);
+        }
+        let head = self
+            .backend
+            .run_status(self.target, RunStatusParams::new(self.run_id.clone()))
+            .await?;
+        Ok(outcome.filter(|_| head.current_part_id == part))
+    }
+
     async fn open(
         &self,
         from_cursor: Option<Cursor>,
     ) -> Result<DurableSubscription<B::Watch, B::Logs>, NativeV2CliError> {
         match self.kind {
-            DurableFollowKind::Watch => self
+            DurableFollowKind::Watch | DurableFollowKind::ContinuousWatch => self
                 .backend
                 .run_watch(
                     self.target,
                     RunWatchParams {
+                        part_id: self.part_id.clone(),
                         run_id: self.run_id.clone(),
                         from_cursor,
                     },
@@ -785,6 +904,7 @@ where
                 .run_logs(
                     self.target,
                     RunLogsParams {
+                        part_id: self.part_id.clone(),
                         run_id: self.run_id.clone(),
                         from_cursor,
                         execution: self.execution.clone(),
@@ -880,7 +1000,7 @@ where
 }
 
 async fn follow_durable_with_detach<B, D, W>(
-    follow: DurableFollow<'_, B>,
+    mut follow: DurableFollow<'_, B>,
     mut detach: Pin<&mut D>,
     output: &mut W,
 ) -> Result<CliOutcome, NativeV2CliError>
@@ -890,6 +1010,14 @@ where
     W: DurableOutput,
 {
     let mut from_cursor = follow.initial_cursor.clone();
+    let suspended = tokio::select! {
+        biased;
+        () = detach.as_mut() => return Ok(CliOutcome::Detached),
+        part = follow.suspended_replay() => part?,
+    };
+    if let Some(part) = &suspended {
+        follow.part_id = Some(part.clone());
+    }
     let mut opened = false;
     let mut reconnect = Reconnect::new(follow.target, &follow.run_id);
     loop {
@@ -926,8 +1054,21 @@ where
                 )))
                 | SubscriptionStep::Item(None) => break NativeV2CliError::Disconnected,
                 SubscriptionStep::Reconnect(error) => break error,
-                SubscriptionStep::Item(Some(event)) => {
-                    if let Some(outcome) = write_durable_event(event, &mut from_cursor, output)? {
+                SubscriptionStep::Item(Some(mut event)) => {
+                    if let (Some(part), DurableItem::Watch(notification)) = (&suspended, &mut event)
+                    {
+                        notification.cursor = crate::native_v2_observability::lineage::part_cursor(
+                            part,
+                            &notification.cursor,
+                        );
+                    }
+                    let outcome = write_durable_event(event, &mut from_cursor, output)?;
+                    let boundary = tokio::select! {
+                        biased;
+                        () = detach.as_mut() => return Ok(CliOutcome::Detached),
+                        result = follow.boundary(outcome, from_cursor.as_ref()) => result?,
+                    };
+                    if let Some(outcome) = boundary {
                         return Ok(outcome);
                     }
                 }
@@ -1027,13 +1168,21 @@ fn request_error(message: impl Into<String>) -> NativeV2CliError {
     }
 }
 
+pub(super) fn stale_part(current: &RunId) -> NativeV2CliError {
+    NativeV2CliError::Remote {
+        code: openengine_cluster_protocol::RUN_CONFLICT.into(),
+        message: format!("the current run part is {}", current.as_str()),
+        details: Some(serde_json::json!({"currentPartId":current})),
+    }
+}
+
 async fn execute_answer<B: NativeV2CliBackend, S: DetachSignal, W: Write>(
     command: (RunSelector, std::path::PathBuf, bool),
     context: &CliExecutionContext<'_, B>,
     signal: &mut S,
     output: &mut W,
 ) -> Result<CliOutcome, NativeV2CliError> {
-    let (run, input, forward_github_token) = command;
+    let (mut run, input, forward_github_token) = command;
     context
         .backend
         .validate_request_ask(run.target.as_deref())
@@ -1043,10 +1192,14 @@ async fn execute_answer<B: NativeV2CliBackend, S: DetachSignal, W: Write>(
         .run_status(
             run.target.as_deref(),
             RunStatusParams {
+                part_id: run.part_id.clone(),
                 run_id: run.run_id.clone(),
             },
         )
         .await?;
+    if status.part_id != status.current_part_id {
+        return Err(stale_part(&status.current_part_id));
+    }
     if let Some(successor) = status.workspace_recovery.successor_run_id {
         return Err(request_error(format!(
             "run already has successor {}",
@@ -1066,6 +1219,7 @@ async fn execute_answer<B: NativeV2CliBackend, S: DetachSignal, W: Write>(
             }
         )));
     };
+    run.part_id = Some(status.part_id);
     let (from, input_error) = match read_request_answer(&input) {
         Ok(from) => (from, None),
         Err(error) => (

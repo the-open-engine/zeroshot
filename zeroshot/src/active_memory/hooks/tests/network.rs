@@ -339,8 +339,8 @@ async fn successor(fixture: &NetworkFixture) -> (ActiveMemoryHooks, RunId) {
     crate::v2_run_ledger::vectors::inherit(
         fixture.ledger.as_ref(),
         fixture.ledger.as_ref(),
-        &fixture.run,
-        &next,
+        (&fixture.run, &next),
+        None,
     )
     .await
     .assert_value();

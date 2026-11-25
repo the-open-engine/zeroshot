@@ -57,11 +57,6 @@
 .run-list-item small span {
   margin-left: auto;
 }
-.run-successor {
-  display: block;
-  margin: 0 10px 10px 25px;
-  font-size: 12px;
-}
 .run-dot {
   flex-shrink: 0;
   width: 6px;
@@ -847,6 +842,7 @@
   }
   .history-header .profile-title {
     gap: 7px;
+    flex-wrap: wrap;
   }
   .history-header h1 {
     font-size: 20px;

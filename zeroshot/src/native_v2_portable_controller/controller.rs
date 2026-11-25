@@ -276,9 +276,7 @@ impl PortableRunController {
         loop {
             let status = self
                 .inner
-                .status(RunStatusParams {
-                    run_id: self.run_id.clone(),
-                })
+                .status(RunStatusParams::new(self.run_id.clone()))
                 .await?;
             if matches!(status.status, RunStatus::Suspended { .. }) {
                 self.inner.wait_runtime_settled(&self.run_id).await;
@@ -317,9 +315,9 @@ impl PortableRunController {
         }
         let result = self
             .inner
-            .force(openengine_cluster_protocol::RunForceParams {
-                run_id: self.run_id.clone(),
-            })
+            .force(openengine_cluster_protocol::RunForceParams::new(
+                self.run_id.clone(),
+            ))
             .await;
         // A failed request must not discard an in-flight runtime failure's terminal append.
         self.inner.wait_runtime_settled(&self.run_id).await;
@@ -607,6 +605,7 @@ async fn seed_predecessor_history(
         let page = crate::v2_run_ledger::vectors::list_full(
             &source,
             openengine_cluster_protocol::RunVectorsParams {
+                part_id: None,
                 run_id: predecessor.clone(),
                 after,
                 limit: Some(100),
@@ -636,6 +635,11 @@ async fn seed_predecessor_history(
     if let crate::v2_run_ledger::RunEvent::Vector { vector } = crate::v2_run_ledger::vector_event(
         &bootstrap.run_id,
         openengine_cluster_protocol::RunVectorContent::Continuation {
+            checkpoint_id: bootstrap
+                .checkpoint
+                .as_ref()
+                .and_then(|restore| restore.selection.checkpoint_id())
+                .cloned(),
             resumed_from: predecessor.clone(),
         },
     )? {

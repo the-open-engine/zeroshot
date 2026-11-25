@@ -132,6 +132,7 @@ pub(super) fn list(
     };
     Ok(RunCheckpointsResult {
         controller: None,
+        part_id: params.run_id.clone(),
         run_id: params.run_id,
         checkpoints,
         next_after,

@@ -241,7 +241,7 @@ pub fn capability() -> Value {
 
 fn discovery(origin: &str, capability: Value) -> String {
     json!({
-        "kind":"zeroshot.native-v2-target/v3", "authentication":"hosted_oauth",
+        "kind":"zeroshot.native-v2-target/v4", "authentication":"hosted_oauth",
         "runPath":"/native-v2/run", "sessionPath":"/native-v2/oecp-session", "oecpPath":"/native-v2/oecp", "audience":"controller",
         "oauth": {
             "metadataUrl": format!("{origin}/oauth/metadata"), "deviceAuthorizationEndpoint":format!("{origin}/oauth/device"),
@@ -251,7 +251,7 @@ fn discovery(origin: &str, capability: Value) -> String {
         "loginSession":{"routeTemplate":"/session", "method":"GET", "cachePolicy":"no-store"},
         "extensions": {
             "api_key":{"kind":"zeroshot.api-key-authentication/v1", "header":"Authorization", "scheme":"Bearer", "organization_header":"X-Zeroshot-Organization", "identity_path":"/machine", "delegations_path":"/delegations"},
-            "hosted_runs":{"kind":"zeroshot.hosted-runs/v2", "base_url":origin, "route_templates": {
+            "hosted_runs":{"kind":"zeroshot.hosted-runs/v3", "base_url":origin, "route_templates": {
                 "list":"/native-v2/runs", "status":"/native-v2/runs/{run_id}", "watch":"/native-v2/runs/{run_id}/watch{?from_cursor}",
                 "logs":"/native-v2/runs/{run_id}/logs{?from_cursor,execution}", "force":"/native-v2/runs/{run_id}/force"
             }},

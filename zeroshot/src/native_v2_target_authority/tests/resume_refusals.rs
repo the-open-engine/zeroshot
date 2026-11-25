@@ -158,6 +158,7 @@ fn resume(
 ) -> RunResumeParams {
     RunResumeParams {
         runtime: None,
+        part_id: run_id(),
         run_id: run_id(),
         successor_run_id,
         from: None,
@@ -204,6 +205,7 @@ async fn resume_runtime_rpc_rejects_contained_checkpoint_opt_out_without_mutatio
             serde_json::from_value(runtime).assert_value();
         let query = client
             .run_resume_requirements(openengine_cluster_protocol::RunResumeRequirementsParams {
+                part_id: None,
                 run_id: run_id(),
                 runtime: runtime.clone(),
             })
@@ -253,6 +255,7 @@ async fn resume_runtime_rpc_query_and_successor_share_contained_policy_and_provi
             serde_json::from_value(runtime).assert_value();
         let requirements = client
             .run_resume_requirements(openengine_cluster_protocol::RunResumeRequirementsParams {
+                part_id: None,
                 run_id: run_id(),
                 runtime: runtime.clone(),
             })
@@ -320,7 +323,7 @@ async fn direct_target_resume_names_a_missing_declared_connection() {
 
     // `zeroshot resume --target` reads these requirements and selects their values from its shell.
     let status = client
-        .run_status(RunStatusParams { run_id: run_id() })
+        .run_status(RunStatusParams::new(run_id()))
         .await
         .assert_value();
     assert!(status.workspace_recovery.recoverable);

@@ -111,12 +111,13 @@ impl TargetState {
             .iter()
             .find(|admission| admission.key == key)
         {
-            Some(admission) if admission.identity == identity => {
-                ("200 OK", json!({"runId": admission.run_id}).to_string())
-            }
+            Some(admission) if admission.identity == identity => (
+                "200 OK",
+                json!({"runId": admission.run_id, "currentPartId": admission.run_id}).to_string(),
+            ),
             Some(_) => problem("409 Conflict", "IDEMPOTENCY_REUSE"),
             None => {
-                let receipt = json!({"runId": run_id}).to_string();
+                let receipt = json!({"runId": run_id, "currentPartId": run_id}).to_string();
                 self.admissions.push(Admission {
                     key,
                     identity,

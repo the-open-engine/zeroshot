@@ -53,15 +53,9 @@ async fn resume_without_the_lane_executable_on_path_is_refused_like_run() {
              {MISSING_CODEX:?}, and start no successor\nstdout:\n{stdout}\nstderr:\n{stderr}",
             arguments.join(" ")
         );
-        let recovery = fixture
-            .json(&["status", &failed_run_id], "finish")
-            .await
-            .assert_key("workspaceRecovery")
-            .clone();
-        assert!(
-            recovery.assert_key("recoverable") == true && recovery.get("successorRunId").is_none(),
-            "a refused resume must leave the run resumable without a successor: {recovery}"
-        );
+        let status = fixture.json(&["status", &failed_run_id], "finish").await;
+        assert_eq!(status["currentPartId"], failed_run_id);
+        assert_eq!(status["workspaceRecovery"]["recoverable"], true);
     }
     let listed = fixture.json(&["list"], "finish").await;
     let runs = listed
@@ -69,11 +63,11 @@ async fn resume_without_the_lane_executable_on_path_is_refused_like_run() {
         .as_array()
         .assert_value_with("run list")
         .iter()
-        .map(|run| run.assert_key("runId").clone())
+        .map(|run| (run["runId"].clone(), run["currentPartId"].clone()))
         .collect::<Vec<_>>();
     assert_eq!(
         runs,
-        [json!(failed_run_id)],
+        [(json!(failed_run_id), json!(failed_run_id))],
         "a refused resume created a run"
     );
 
@@ -229,13 +223,8 @@ async fn local_run_and_checkpoint_resume_refuse_old_or_unreadable_cli_before_dis
         }
         let listed = fixture.json(&["list"], "finish").await;
         assert_eq!(listed.assert_key("runs").as_array().assert_value().len(), 1);
-        let recovery = fixture.json(&["status", &failed_run_id], "finish").await;
-        assert!(
-            recovery
-                .assert_key("workspaceRecovery")
-                .get("successorRunId")
-                .is_none()
-        );
+        let status = fixture.json(&["status", &failed_run_id], "finish").await;
+        assert_eq!(status["currentPartId"], failed_run_id);
     }
 }
 
@@ -361,7 +350,7 @@ async fn assert_late_version_is_not_admitted(resuming: bool) {
         let status = fixture.json(&["status", run], "finish").await;
         let recovery = status.assert_key("workspaceRecovery");
         assert_eq!(recovery.assert_key("recoverable"), true);
-        assert!(recovery.get("successorRunId").is_none());
+        assert_eq!(status["currentPartId"], run.as_str());
         assert_eq!(worker_checkpoint(&fixture, run).await, *checkpoint);
         openengine_cluster_testkit::fixture::write_executable(&executable, original, 0o700)
             .assert_value();
@@ -377,7 +366,8 @@ async fn assert_late_version_is_not_admitted(resuming: bool) {
                 "finish",
             )
             .await;
-        let successor = receipt.assert_key("runId").as_str().assert_value();
+        assert_eq!(receipt["runId"], run.as_str());
+        let successor = receipt.assert_key("currentPartId").as_str().assert_value();
         fixture.wait_succeeded(successor, "finish").await;
         wait_for_exit(fixture.ready_pid(successor)).await;
     }
@@ -481,6 +471,6 @@ async fn controller_shutdown_cancels_version_probes_before_run_or_checkpoint_res
         let status = fixture.json(&["status", &failed_run_id], "finish").await;
         let recovery = status.assert_key("workspaceRecovery");
         assert_eq!(recovery.assert_key("recoverable"), true);
-        assert!(recovery.get("successorRunId").is_none());
+        assert_eq!(status["currentPartId"], failed_run_id);
     }
 }

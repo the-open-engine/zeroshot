@@ -218,8 +218,8 @@ impl NativeV2PlatformController {
             crate::v2_run_ledger::vectors::inherit(
                 self.ledger.as_ref(),
                 self.ledger.as_ref(),
-                &resume.source_run_id,
-                run_id,
+                (&resume.source_run_id, run_id),
+                resume.selection.checkpoint_id().cloned(),
             )
             .await?;
             if matches!(resume.selection, CheckpointRestoreSelection::Continue) {

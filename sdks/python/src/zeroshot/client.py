@@ -334,15 +334,14 @@ class Client:
             async for value in self._native().json_lines(arguments):
                 if isinstance(value.get("runId"), str):
                     receipt = value
-        if not isinstance(receipt, dict) or not isinstance(receipt.get("runId"), str):
-            raise ProtocolError("Zeroshot returned a malformed submission receipt")
-        return Run(self, receipt["runId"])
+        return Run._from_receipt(self, receipt)
 
-    def get_run(self, run_id: str) -> Run:
+    def get_run(self, run_id: str, *, part_id: str | None = None) -> Run:
         """Reconstruct a durable handle without target I/O.
 
         Args:
-            run_id: Opaque public run identity.
+            run_id: Stable public run identity. A saved part ID resolves on status lookup.
+            part_id: Select a single admitted part. Omit to follow the run across continuations.
 
         Returns:
             A handle resolved lazily against this client's target.
@@ -352,7 +351,7 @@ class Client:
         """
         if self._closed:
             raise ClientClosedError("the Zeroshot client is closed")
-        return Run(self, run_id)
+        return Run(self, run_id, part_id=part_id)
 
     async def list_runs(self) -> tuple[RunSummary, ...]:
         """Return summaries for runs retained by this client's target."""
@@ -663,27 +662,38 @@ class Client:
             arguments.extend(["--after", after])
         return _inbox(await self._native().json([*arguments, *self._route_arguments()]))
 
-    async def _status(self, run_id: str) -> RunStatus:
+    async def _status(self, run_id: str, part_id: str | None) -> RunStatus:
         await self._ready()
-        value = await self._native().json(["status", run_id, *self._route_arguments()])
+        value = await self._native().json(
+            ["status", run_id, *_part_arguments(part_id), *self._route_arguments()]
+        )
         return _status(value)
 
-    async def _watch(self, run_id: str, after: str | None) -> AsyncGenerator[RunStatus, None]:
+    async def _matches_run(self, selected: str, reported: object, part_id: str | None) -> bool:
+        if selected == reported:
+            return True
+        if not isinstance(reported, str):
+            return False
+        # A saved physical ID can resolve to its logical run. Confirm this with the target.
+        return (await self._status(selected, part_id)).run_id == reported
+
+    async def _watch(
+        self, run_id: str, after: str | None, part_id: str | None, *, follow: bool = False
+    ) -> AsyncGenerator[RunStatus, None]:
         await self._ready()
-        arguments = ["watch", run_id]
+        arguments = ["watch", run_id, *_part_arguments(part_id)]
+        if follow:
+            arguments.append("--follow")
         if after is not None:
             arguments.extend(["--after", after])
         stream = self._native().json_lines([*arguments, *self._route_arguments()])
         try:
             async with aclosing(stream) as values:
                 async for value in values:
-                    status = _status(value)
-                    yield status
-                    if status.phase == "suspended":
-                        return
+                    yield _status(value, watch=True)
         except _RunFailed as error:
             # Failed results stay opt-in exceptions through RunResult.raise_for_failure().
-            if error.run_id != run_id:
+            if not await self._matches_run(run_id, error.run_id, part_id):
                 raise ProtocolError("Zeroshot reported failure for a different run") from error
 
     async def _logs(
@@ -691,9 +701,10 @@ class Client:
         run_id: str,
         after: str | None,
         execution: str | None,
+        part_id: str | None,
     ) -> AsyncGenerator[LogEvent, None]:
         await self._ready()
-        arguments = ["logs", run_id]
+        arguments = ["logs", run_id, *_part_arguments(part_id)]
         if after is not None:
             arguments.extend(["--after", after])
         if execution is not None:
@@ -703,15 +714,21 @@ class Client:
             async for value in values:
                 yield _log_event(value)
 
-    async def _force_stop(self, run_id: str) -> RunStatus:
+    async def _force_stop(self, run_id: str, part_id: str | None) -> RunStatus:
         await self._ready()
-        value = await self._native().json(["force-stop", run_id, *self._route_arguments()])
+        value = await self._native().json(
+            ["force-stop", run_id, *_part_arguments(part_id), *self._route_arguments()]
+        )
         return _status(value)
 
-    async def _discard_workspace(self, run_id: str) -> bool:
+    async def _discard_workspace(self, run_id: str, part_id: str | None) -> bool:
         await self._ready()
-        value = await self._native().json(["discard-workspace", run_id, *self._route_arguments()])
-        if not isinstance(value, dict) or value.get("runId") != run_id:
+        value = await self._native().json(
+            ["discard-workspace", run_id, *_part_arguments(part_id), *self._route_arguments()]
+        )
+        if not isinstance(value, dict) or not await self._matches_run(
+            run_id, value.get("runId"), part_id
+        ):
             raise ProtocolError("discard-workspace returned an invalid discarded result")
         discarded = value.get("discarded")
         if not isinstance(discarded, bool):
@@ -799,11 +816,44 @@ class Stack:
 class Run:
     """Durable public run handle bound to one Client target."""
 
-    __slots__ = ("_client", "_id")
+    __slots__ = ("_client", "_id", "_observed_part_id", "_part_id")
 
-    def __init__(self, client: Client, run_id: str) -> None:
+    def __init__(self, client: Client, run_id: str, *, part_id: str | None = None) -> None:
         self._client = client
         self._id = run_id
+        self._part_id = part_id
+        self._observed_part_id: str | None = None
+
+    @classmethod
+    def _from_receipt(cls, client: Client, value: object) -> Run:
+        if (
+            not isinstance(value, dict)
+            or not isinstance(value.get("runId"), str)
+            or not isinstance(value.get("currentPartId"), str)
+        ):
+            raise ProtocolError("Zeroshot emitted a malformed run receipt")
+        run = cls(client, value["runId"])
+        run._observed_part_id = value["currentPartId"]
+        return run
+
+    @property
+    def part_id(self) -> str | None:
+        """Return the selected historical part, or None when following the logical run."""
+        return self._part_id
+
+    @property
+    def current_part_id(self) -> str | None:
+        """Return the most recently observed head, or None before the first lookup."""
+        return self._observed_part_id
+
+    def _expected_part(self, part_id: str | None) -> str | None:
+        if part_id is not None:
+            if self.part_id is not None and self.part_id != part_id:
+                raise ValueError("part_id conflicts with the selected part")
+            return part_id
+        if self.part_id is not None:
+            return self.part_id
+        return self._observed_part_id
 
     @property
     def id(self) -> str:
@@ -821,20 +871,32 @@ class Run:
             TargetError: If the selected target is unavailable.
             ProtocolError: If native output is malformed.
         """
-        return await self._client._status(self.id)
+        status = await self._client._status(self.id, self.part_id)
+        self._id = status.run_id
+        self._observed_part_id = status.current_part_id
+        return status
 
-    def watch(self, *, after: str | None = None) -> AsyncIterator[RunStatus]:
-        """Open a durable status stream strictly after an optional cursor.
+    async def watch(
+        self, *, after: str | None = None, follow: bool = False
+    ) -> AsyncGenerator[RunStatus, None]:
+        """Watch run status until an actionable suspension or terminal result.
 
         Args:
             after: Last consumed opaque status cursor. None replays retained history.
+            follow: Keep watching through suspensions and accepted continuations.
 
         Returns:
             An async iterator of immutable status snapshots.
 
         Cancelling or closing the iterator detaches observation and does not stop the run.
         """
-        return self._client._watch(self.id, after)
+        stream = self._client._watch(self.id, after, self.part_id, follow=follow)
+        async with aclosing(stream) as statuses:
+            async for status in statuses:
+                if self.part_id is None and status.phase in {"suspended", "finished"}:
+                    # Guard the next action with the actionable state shown to the caller.
+                    self._observed_part_id = status.part_id
+                yield status
 
     def logs(
         self,
@@ -853,7 +915,7 @@ class Run:
 
         Cancelling or closing the iterator detaches observation and does not stop the run.
         """
-        return self._client._logs(self.id, after, execution)
+        return self._client._logs(self.id, after, execution, self.part_id)
 
     async def wait(self, *, wait_timeout: float | None = None) -> RunResult:
         """Wait for the durable terminal result without controlling run lifetime.
@@ -877,25 +939,31 @@ class Run:
         if wait_timeout is not None and wait_timeout < 0:
             raise ValueError("wait_timeout must be non-negative")
 
+        def outcome(status: RunStatus) -> RunResult | None:
+            if status.phase == "suspended":
+                raise RunSuspendedError(self, status)
+            return status.result
+
         async def observe() -> RunResult:
             current = await self.status()
-            if current.phase == "suspended":
-                raise RunSuspendedError(self, current)
-            if current.result is not None:
-                return current.result
-            stream = self._client._watch(self.id, current.cursor)
-            async with aclosing(stream) as statuses:
-                async for status in statuses:
-                    if status.phase == "suspended":
-                        raise RunSuspendedError(self, status)
-                    if status.result is not None:
-                        return status.result
-            current = await self.status()
-            if current.phase == "suspended":
-                raise RunSuspendedError(self, current)
-            if current.result is not None:
-                return current.result
-            raise ProtocolError("Zeroshot watch closed before a terminal result")
+            if result := outcome(current):
+                return result
+            while True:
+                stream = self._client._watch(self.id, current.cursor, self.part_id)
+                async with aclosing(stream) as statuses:
+                    async for event in statuses:
+                        if event.phase not in {"suspended", "finished"}:
+                            continue
+                        # The part may have advanced while its boundary event was in flight.
+                        latest = await self.status()
+                        if result := outcome(event if event.part_id == latest.part_id else latest):
+                            return result
+                latest = await self.status()
+                if result := outcome(latest):
+                    return result
+                if latest.part_id == current.part_id:
+                    raise ProtocolError("Zeroshot watch closed before a terminal result")
+                current = latest
 
         if wait_timeout is None:
             return await observe()
@@ -913,24 +981,28 @@ class Run:
         """
         await self._client._ready()
         value = await self._client._native().json(
-            ["suspend", self.id, *self._client._route_arguments()]
+            ["suspend", self.id, *_part_arguments(self.part_id), *self._client._route_arguments()]
         )
-        return _status(value)
+        status = _status(value)
+        self._observed_part_id = status.current_part_id
+        return status
 
-    async def resume(self, *, runtime: _Runtime | None = None) -> Run:
+    async def resume(self, *, runtime: _Runtime | None = None, part_id: str | None = None) -> Run:
         """Continue a suspension or restart a failed attempt, optionally replacing its runtime.
 
         Args:
+            part_id: Resume only if this part is still current. Defaults to the observed part.
             runtime: Complete replacement runtime. None retains the saved configuration.
                 Native conversations use the harness's restoration and fresh-session fallback.
 
         Returns:
-            The successor run handle.
+            A handle with the same logical ID and the newly admitted current part.
         """
         await self._client._ready()
         arguments = [
             "resume",
             self.id,
+            *_part_arguments(self._expected_part(part_id)),
             *self._client._route_arguments(),
             *self._client._controller_arguments(),
             *self._client._forwarding_arguments(),
@@ -940,31 +1012,42 @@ class Run:
             if runtime is not None:
                 self._client._append_runtime(arguments, runtime, Path(directory))
             value = await self._client._native().json(arguments)
-        if not isinstance(value, dict) or not isinstance(value.get("runId"), str):
-            raise ProtocolError("Zeroshot emitted malformed resume result")
-        return Run(self._client, value["runId"])
+        return Run._from_receipt(self._client, value)
 
     async def request(self) -> InboxRequest:
-        """Read the request this run made, including its state and successor.
+        """Read the selected part's own request, including its state and successor part.
 
         Returns:
             The complete inbox request. Inherited requests are excluded.
         """
         await self._client._ready()
-        return _inbox_request(
+        request = _inbox_request(
             await self._client._native().json(
-                ["inbox", "show", self.id, *self._client._route_arguments()]
+                [
+                    "inbox",
+                    "show",
+                    self.id,
+                    *_part_arguments(self.part_id),
+                    *self._client._route_arguments(),
+                ]
             )
         )
 
-    async def answer(self, answer: JsonValue) -> Run:
+        self._id = request.run_id
+        if self.part_id is None:
+            self._observed_part_id = request.part_id
+        return request
+
+    async def answer(self, answer: JsonValue, *, part_id: str | None = None) -> Run:
         """Answer this run's request and start one successor on the retained workspace.
 
         Args:
+            part_id: Answer only the request owned by this part. Defaults to the observed part.
             answer: Complete verifier result with signals and output matching the request.
 
         Returns:
-            The successor run handle. Invalid, repeated and late answers raise the CLI error.
+            A handle with the same logical ID and the newly admitted current part.
+            Invalid, repeated and late answers raise the CLI error.
         """
         await self._client._ready()
         with tempfile.TemporaryDirectory(prefix="zeroshot-python-answer-") as directory:
@@ -973,6 +1056,7 @@ class Run:
                 [
                     "answer",
                     self.id,
+                    *_part_arguments(self._expected_part(part_id)),
                     "--input",
                     str(path),
                     *self._client._route_arguments(),
@@ -980,9 +1064,7 @@ class Run:
                     *self._client._forwarding_arguments(),
                 ]
             )
-        if not isinstance(value, dict) or not isinstance(value.get("runId"), str):
-            raise ProtocolError("Zeroshot emitted malformed answer result")
-        return Run(self._client, value["runId"])
+        return Run._from_receipt(self._client, value)
 
     async def steer(self, text: str, *, mode: Literal["once", "standing"] = "standing") -> RunSteer:
         """Record direction without continuing a suspended run.
@@ -1010,6 +1092,7 @@ class Run:
                 [
                     "steer",
                     self.id,
+                    *_part_arguments(self.part_id),
                     "--text-file",
                     str(path),
                     "--mode",
@@ -1017,7 +1100,9 @@ class Run:
                     *self._client._route_arguments(),
                 ]
             )
-        if not isinstance(value, dict) or value.get("runId") != self.id:
+        if not isinstance(value, dict) or not await self._client._matches_run(
+            self.id, value.get("runId"), self.part_id
+        ):
             raise ProtocolError("Zeroshot emitted malformed steer result")
         return _steer(value.get("steer"))
 
@@ -1037,7 +1122,7 @@ class Run:
         if type(limit) is not int or not 1 <= limit <= 100:
             raise ValueError("limit must be from 1 through 100")
         await self._client._ready()
-        arguments = ["vectors", self.id, "--limit", str(limit)]
+        arguments = ["vectors", self.id, *_part_arguments(self.part_id), "--limit", str(limit)]
         if after is not None:
             arguments.extend(["--after", after])
         return _vectors(
@@ -1056,7 +1141,14 @@ class Run:
         await self._client._ready()
         return _vector(
             await self._client._native().json(
-                ["vectors", "show", self.id, id, *self._client._route_arguments()]
+                [
+                    "vectors",
+                    "show",
+                    self.id,
+                    id,
+                    *_part_arguments(self.part_id),
+                    *self._client._route_arguments(),
+                ]
             )
         )
 
@@ -1068,13 +1160,12 @@ class Run:
             Stopping during the postmortem preserves the recorded graph result.
 
         Raises:
-            RunSuspendedError: If the run is suspended and already has a successor, which a
-                force-stop leaves unchanged.
+            InvalidRequestError: If a selected part has been superseded.
             RunNotFoundError: If the target no longer retains this run.
             TargetError: If mutation or observation fails.
             ProtocolError: If native output is malformed.
         """
-        status = await self._client._force_stop(self.id)
+        status = await self._client._force_stop(self.id, self.part_id)
         if status.result is not None:
             return status.result
         return await self.wait()
@@ -1096,7 +1187,11 @@ class Run:
             TargetError: If the operation fails.
             ProtocolError: If native output is malformed.
         """
-        return await self._client._discard_workspace(self.id)
+        return await self._client._discard_workspace(self.id, self.part_id)
+
+
+def _part_arguments(part_id: str | None) -> list[str]:
+    return ["--part", part_id] if part_id is not None else []
 
 
 def _submission_key() -> str:

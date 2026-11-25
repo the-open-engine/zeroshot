@@ -429,13 +429,15 @@ zeroshot answer RUN_ID --input answer.json
 
 For approval, change the answer's decision to `approved` and give empty feedback. An answer must
 provide every declared signal and every required output field. Unknown fields, signals and labels
-are refused as `invalid_request`, naming the path, without consuming the request. A second answer
-names the accepted successor. `resume`, including checkpoint selection, refuses requests and names
-`answer` before resolving credentials; after an answer it names the successor instead. If that
-successor fails or is lost, `resume --restart` on it starts again right after the answer: the request
-stays answered, the question is not asked again, and `node_instance` agents continue their conversations
-from when the question was asked. Only a successor lost in the instant it starts, before its
-starting point is recorded, restarts at the root with new conversations and asks again.
+are refused as `invalid_request`, naming the path, without consuming the request. To answer the
+question you inspected, pass its `partId` to `zeroshot answer RUN_ID --part PART_ID --input answer.json`.
+If the run has advanced, the command reports the stale part. While a question is pending,
+`resume` directs you to `answer` even if you selected a checkpoint.
+
+If the next part fails or is lost, `zeroshot resume RUN_ID --restart` restarts right after the answer.
+The request stays answered, and `node_instance` agents continue their conversations from when
+the question was asked. A part lost before its starting point was recorded restarts at the root
+with new conversations and asks again.
 
 Every request has a deadline: `timeoutMs` from creation, 7 days when omitted, at most 30 days.
 Acceptance is strictly before the deadline. At or after it, `answer` checks expiry before content,
@@ -446,13 +448,13 @@ report overdue requests as `expired` without changing the suspended run or start
 
 `inbox list` returns `requests` and optional `nextAfter` in run ID order. Pass that cursor with
 `--after`, which locally must be a run ID; `--limit` accepts 1 through 100, default 50. Answered
-and force-stopped requests drop from the list. `inbox show` retains their `answered`, `expired` or
-`stopped` disposition and the successor link. It shows only the question that run made, never an
-inherited question.
+and force-stopped requests drop from the list. `inbox show RUN_ID` shows the latest question in
+the run. To inspect an earlier question, use `inbox show RUN_ID --part PART_ID`. Its record
+retains the `answered`, `expired` or `stopped` disposition and, when present, `successorPartId`.
 
 Use `vectors RUN_ID` for bounded summaries and `vectors show RUN_ID ID` for full requests and
 answers. Successors inherit the ordered record. `checkpoints` includes entry to the request node.
-The run viewer and list display the question, deadline and successor; answering uses the CLI or SDK.
+The run viewer shows questions and answers in order. Use the CLI or SDK to answer a pending question.
 
 Request nodes use `builtin.request.ask@1` with `{"kind":"request"}`. They must be verifiers with
 exactly one required string input `text`, a flat record output of boolean, integer, number, string

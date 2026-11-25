@@ -2,6 +2,8 @@ export type FailureDiagnostic = {
   message: string;
   execution?: { execution: string; node: string; mapIndices?: number[] } | null;
   cursor?: string | null;
+  runCursor?: string;
+  partId?: string;
 };
 export type FailureContext = {
   primary?: FailureDiagnostic | null;

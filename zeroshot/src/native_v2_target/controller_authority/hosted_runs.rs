@@ -3,9 +3,9 @@ use openengine_cluster_protocol::{
     HostedRunStreamFrame, RunForceParams, RunListParams, RunLogEventNotification, RunLogsParams,
     RunStatusParams, RunWatchParams,
 };
-use reqwest::header::{ACCEPT, CACHE_CONTROL, CONTENT_TYPE};
+use reqwest::header::{ACCEPT, CACHE_CONTROL};
 use reqwest::{RequestBuilder, Response, Url};
-use serde::de::DeserializeOwned;
+use serde::{Serialize, de::DeserializeOwned};
 
 use super::contract::{
     HostedRunsDescriptor, StacksDescriptor, authority_error, http_error, read_success_json,
@@ -109,7 +109,7 @@ where
         if line.is_empty() || line.len() > self.maximum_frame_bytes {
             return Err(stream_error("hosted run stream frame is malformed"));
         }
-        match serde_json::from_slice::<HostedRunStreamFrame<E>>(line)
+        match openengine_cluster_protocol::bounded_json_from_slice::<HostedRunStreamFrame<E>>(line)
             .map_err(|_| stream_error("hosted run stream frame is malformed"))?
         {
             HostedRunStreamFrame::Event { event } => Ok(CliSubscriptionItem::Event(event)),
@@ -172,6 +172,22 @@ impl TargetHttpControlAuthority {
         } else {
             read_success_json(response, &expected, operation).await
         }
+    }
+
+    async fn hosted_run_post<P: Serialize, T: DeserializeOwned>(
+        &self,
+        request: (Url, &AccessToken, P),
+        operation: &'static str,
+        maximum_bytes: Option<usize>,
+    ) -> Result<T, TargetAuthorityError> {
+        let (url, access, params) = request;
+        let request = self
+            .authorized(self.client.post(url), access)?
+            .header(ACCEPT, "application/json")
+            .header(CACHE_CONTROL, "no-store")
+            .json(&params);
+        self.hosted_json((request, access), operation, maximum_bytes)
+            .await
     }
 
     pub(super) async fn hosted_get_json<T: DeserializeOwned>(
@@ -250,6 +266,7 @@ impl TargetHttpControlAuthority {
     ) -> Result<CliRunStatusResult, TargetAuthorityError> {
         let (routes, access) = self.require_hosted_run_access(target).await?;
         let url = routes.status_url(&params.run_id)?;
+        let url = selected_url(url, params.part_id.as_ref());
         self.hosted_get_json(
             (url, &access),
             "hosted run status",
@@ -265,6 +282,7 @@ impl TargetHttpControlAuthority {
     ) -> Result<BoxedSubscription<CliRunWatchEventNotification>, TargetAuthorityError> {
         let (routes, access) = self.require_hosted_run_access(target).await?;
         let url = routes.watch_url(&params.run_id, params.from_cursor.as_ref())?;
+        let url = selected_url(url, params.part_id.as_ref());
         self.hosted_stream(
             (url, &access),
             "hosted run watch",
@@ -284,6 +302,7 @@ impl TargetHttpControlAuthority {
             params.from_cursor.as_ref(),
             params.execution.as_ref(),
         )?;
+        let url = selected_url(url, params.part_id.as_ref());
         self.hosted_stream((url, &access), "hosted run logs", MAX_STREAM_FRAME_BYTES)
             .await
     }
@@ -295,14 +314,20 @@ impl TargetHttpControlAuthority {
     ) -> Result<CliRunForceResult, TargetAuthorityError> {
         let (routes, access) = self.require_hosted_run_access(target).await?;
         let url = routes.force_url(&params.run_id)?;
-        let request = self
-            .authorized(self.client.post(url.clone()), &access)?
-            .header(ACCEPT, "application/json")
-            .header(CONTENT_TYPE, "application/json")
-            .body("{}");
-        self.hosted_json((request, &access), "hosted run force", None)
+        let body = match params.part_id {
+            Some(part) => serde_json::json!({ "partId": part }),
+            None => serde_json::json!({}),
+        };
+        self.hosted_run_post((url, &access, body), "hosted run force", None)
             .await
     }
+}
+
+fn selected_url(mut url: Url, part: Option<&openengine_cluster_protocol::RunId>) -> Url {
+    if let Some(part) = part {
+        url.query_pairs_mut().append_pair("partId", part.as_str());
+    }
+    url
 }
 
 fn stream_error(message: &'static str) -> NativeV2CliError {

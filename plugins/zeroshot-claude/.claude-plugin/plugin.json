@@ -1,7 +1,7 @@
 {
   "name": "zeroshot",
   "displayName": "Zeroshot",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Plan software changes, design workflows, and run verified work on Zeroshot Platform.",
   "author": {
     "name": "The Open Engine",

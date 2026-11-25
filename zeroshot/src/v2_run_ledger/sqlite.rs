@@ -378,18 +378,6 @@ fn snapshot_page(
         return Err(RunLedgerError::CursorAhead);
     }
     let after = i64::try_from(after).map_err(|_| RunLedgerError::CursorAhead)?;
-    Ok(SnapshotAndTail {
-        snapshot: stored.snapshot,
-        events: read_page(connection, recorded_at, run_id, after)?,
-    })
-}
-
-fn read_page(
-    connection: &Connection,
-    recorded_at: bool,
-    run_id: &RunId,
-    after: i64,
-) -> Result<Vec<StoredRunEvent>, RunLedgerError> {
     // Read-only opens never migrate, so retained pre-column ledgers read every time as unknown.
     let query = if recorded_at {
         "SELECT sequence, event_json, recorded_at_ms FROM v2_run_events
@@ -398,6 +386,18 @@ fn read_page(
         "SELECT sequence, event_json, NULL FROM v2_run_events
               WHERE run_id = ?1 AND sequence > ?2 ORDER BY sequence LIMIT ?3"
     };
+    Ok(SnapshotAndTail {
+        snapshot: stored.snapshot,
+        events: read_page(connection, query, run_id, after)?,
+    })
+}
+
+fn read_page(
+    connection: &Connection,
+    query: &str,
+    run_id: &RunId,
+    after: i64,
+) -> Result<Vec<StoredRunEvent>, RunLedgerError> {
     let mut statement = connection.prepare(query).map_err(sqlite_error)?;
     let mut rows = statement
         .query(params![run_id.as_str(), after, MAX_REPLAY_EVENTS as i64])

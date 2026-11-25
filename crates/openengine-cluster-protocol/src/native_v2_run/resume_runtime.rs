@@ -103,6 +103,9 @@ impl UniformRuntimePlan {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunResumeRequirementsParams {
     pub run_id: crate::RunId,
+    /// When supplied, the observed part must still be current.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part_id: Option<crate::RunId>,
     pub runtime: RunResumeRuntime,
 }
 

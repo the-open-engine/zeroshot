@@ -7,7 +7,10 @@
     "maxParameters": 8
   },
   "targets": {
-    "exclude": [".github/scripts/test-windows-host.ps1", "scripts/test-windows.ps1"]
+    "exclude": [
+      ".github/scripts/test-windows-host.ps1",
+      "scripts/test-windows.ps1"
+    ]
   },
   "documentation": {
     "bindings": [
@@ -25,6 +28,10 @@
       },
       {
         "source": "ui/src/workflow-projection.ts",
+        "document": "ui/README.md"
+      },
+      {
+        "source": "ui/src/run-history.ts",
         "document": "ui/README.md"
       }
     ]

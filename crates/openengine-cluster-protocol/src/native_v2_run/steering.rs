@@ -78,6 +78,9 @@ pub fn validate_steer(text: &str) -> Result<(), String> {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunSteerParams {
     pub run_id: RunId,
+    /// When supplied, the observed part must still be current.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part_id: Option<RunId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node: Option<NodeName>,
     #[serde(default)]
@@ -109,6 +112,8 @@ pub struct RunSteer {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunSteerResult {
     pub run_id: RunId,
+    /// Part that owns this record.
+    pub part_id: RunId,
     pub steer: RunSteer,
 }
 

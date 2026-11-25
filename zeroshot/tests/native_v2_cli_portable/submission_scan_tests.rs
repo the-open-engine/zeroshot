@@ -122,11 +122,14 @@ fn unreadable_history_allows_new_runs_and_resume_without_changing_inspection() {
         .output()
         .unwrap();
     success(&resumed);
-    let successor = receipt_id(&resumed);
+    let receipt: Value = serde_json::from_slice(&resumed.stdout).unwrap();
+    assert_eq!(receipt["runId"], failed_id);
+    let successor = receipt["currentPartId"].as_str().unwrap();
     assert_ne!(successor, failed_id);
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        let status = fixture.json(&["status", &successor]);
+        let status = fixture.json(&["status", &failed_id]);
+        assert_eq!(status["partId"], successor);
         if status["status"]["phase"] == "finished" {
             assert_eq!(status["status"]["terminalResult"]["status"], "succeeded");
             break;

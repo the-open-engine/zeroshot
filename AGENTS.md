@@ -157,7 +157,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   state/credential tampering, external proxies and macOS session detachment plus orphaning require
   stronger isolation. Never treat labels as authority or silently relax an uncertain provenance check.
   Local `steer --network` uses that capability without controller discovery, stamps its origin at
-  the host and refuses foreign runs or human-broadcast escalation. Repeated destinations and
+  the host and refuses foreign runs or human-broadcast escalation. Its run ID addresses the
+  execution's physical part. A supplied `--part` must match before publication. Repeated destinations and
   overlapping memberships deduplicate delivery. Per-message once mode defaults for networks and
   consumes receipts per recipient node instance across fresh conversations and successors; standing
   tracks provider conversations. Human broadcast retains its standing default and precedence.
@@ -1148,6 +1149,16 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   latched primary outcome. No terminal is invented when settlement fails or
   the deadline/OS ends the process. Terminal closure remains detached. Windows keeps Ctrl-C and
   Ctrl-Break guards and adds no close/logoff/shutdown handler; cooperative stop uses force-stop.
+- Public native run operations use the original submission ID as `runId` across accepted
+  resumes, request answers, retries and checkpoint rewinds. `partId` identifies the physical
+  ledger and `currentPartId` the latest accepted handoff. Only reciprocal, committed ownership
+  advances the run. A failed preparation can retain its own diagnostic ledger. Group lists before
+  pagination. Public history cursors identify a part and its local cursor. Ledgers, snapshots,
+  provider execution references, checkpoint ownership and private archive exports remain per part.
+  Continuation vectors keep the selected checkpoint ID on explicit rewinds. Older continuations
+  without that field retain an unknown checkpoint.
+  Aggregate only original work and usage. Imports seed the part's replay. A live logical watch
+  follows suspension, while foreground observation returns control at the current suspension.
 - Failed and suspended local and direct-target runs retain an exclusively claimable workspace for a successor
   attempt. Local recovery metadata lives beside each run ledger while the checkout remains
   user-owned; direct targets retain only the candidate and Git metadata, dispose private runtime
@@ -1214,7 +1225,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Omission retains saved runtime and authorization behavior; authorization files need no migration.
 - `openengine.workspace-checkpoints/v1` adds `run/checkpoints` and selected checkpoint resume to
   retained workspace recovery. The CLI defaults failed-run resume to the newest entry checkpoint,
-  following every bounded inventory page and passing its ID through the existing resume API.
+  following every bounded inventory page of the resolved current part and passing its ID through
+  the existing resume API. Keep that part fixed across inventory pages and the guarded resume.
   Local restoration requires `--discard-workspace-changes`; no entry means an explicit `--restart`
   is required. `--restart` preserves the API's restart behavior on the retained workspace: a submitted
   run at the graph root, a successor at the boundary it began at. Python `Run.resume()` uses the
@@ -1344,8 +1356,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Hosted factories advertise checkpoints only when they implement storage and restore. Snapshot
   restore requires exclusive workspace ownership and preserves the checkout root and Git identity.
 - Hosted workspace recovery advertises `resume`, `checkpoints`, and `discard_workspace` in the
-  separate `openengine.hosted-workspace-recovery/v1` outer discovery extension, leaving the strict
-  `zeroshot.hosted-runs/v2` route object unchanged. POST bodies and results match
+  `openengine.hosted-workspace-recovery/v1` outer discovery extension. POST bodies and results match
   the OECP `Run*Params`/`Run*Result` types. These authenticated Platform routes remain available after
   capsule disposal. Platform resolves the admitted connection references freshly; hosted recovery does
   not depend on local direct-target authorization or read local provider environment values.
@@ -1977,21 +1988,17 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 
 ## CLI and target contracts
 
-- The current wire contract uses `openengine.cluster/v2` at OECP initialization,
-  `zeroshot.native-v2-target/v3` at target discovery, and `zeroshot.hosted-runs/v2` for hosted
-  observation. These protocol-owned identifiers gate incompatible peers before submission or
-  observation; upgrade clients (including Python wheels), targets and hosted gateways together.
-  Keep one strict timed payload format, existing paths and protocol artifact locations. The
-  isolated `crates/openengine-cluster-testkit/tests/released-wire-contract` workspace pins the
-  untouched v16.0.0 client/server sources for early-rejection controls without adding duplicate
-  package identities to the product workspace. The protocol's `native_v2_observation` integration
-  suite invokes its locked controls and the current runtime/HTTP wire tests through the existing
-  Linux/Windows and macOS CI entry points; child Cargo commands never select that parent suite.
-  It also covers optional hosted checkpoint discovery, client gating, admission and recovery refusal.
-  Separate current/released workspaces under `target/wire-contract` preserve the surrounding CLI's
-  feature profile and keep each Cargo workspace's build artifacts independent.
-  Child commands clear the parent package's Cargo metadata so Windows can reuse its leaf-test
-  prebuilds inside the bounded native execution host.
+- OECP uses `openengine.cluster/v3`. Direct and hosted HTTP discovery use
+  `zeroshot.native-v2-target/v4`, with `zeroshot.hosted-runs/v3` for hosted observation.
+  Run and browser history routes group confirmed successors under the original run ID.
+  The isolated `crates/openengine-cluster-testkit/tests/released-wire-contract` workspace pins
+  v17.1.1 to test version mismatch at initialization and reading its continuation records.
+  The protocol's `native_v2_observation` integration suite invokes these controls and the current
+  runtime/HTTP wire tests through the Linux, Windows and macOS CI entry points. Child Cargo
+  commands clear the parent package's Cargo metadata and use independent build directories.
+  Hosted observation and force use the canonical run in every phase. Live attachment and
+  steering mint exact-part sessions after the host resolves membership. Steering retains
+  the observed head guard.
 
 - `target list` and `target remove` manage local named-target state, including the built-in
   `platform` listing. Inventory exposes only name, origin and hosted/direct kind. Removal refuses
@@ -2471,6 +2478,10 @@ python -m mkdocs build --strict
   after workspace loss. The catalog retains
   request-vs-final access context for reads and pins. Final references live in result metadata;
   request attachments are omitted from ordinary status/vector views and retained in the inbox.
+  Managed file receipts retain the producing part’s file address in logical and exact reads. A
+  suspended part’s publications remain protected until its successor is committed and admitted.
+  Final statuses keep the full file receipt. If the serialized response exceeds the existing byte
+  limit, omit the oldest steering summaries, count them in `omittedSteers`, and retain their vectors.
   Generic history definitions, pages, SSE and run lists use the same suspension redaction;
   private request-preparation payloads stay hidden while their event cursors remain contiguous.
   Publication hosts must preflight the complete receipt through the caller's record/response

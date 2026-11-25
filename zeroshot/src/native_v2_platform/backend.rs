@@ -1,5 +1,8 @@
 use super::*;
 
+mod lineage;
+use lineage::selected_part;
+
 impl NativeV2PlatformController {
     pub(super) async fn admit_resume_runtime(
         &self,
@@ -71,8 +74,13 @@ impl ClusterBackend for NativeV2PlatformController {
         params: RunSubmitParams,
     ) -> Result<RunSubmitResult, BackendError> {
         let receipt = self.submit(params).await.map_err(platform_backend_error)?;
+        let family = self
+            .run_lineage(&receipt.run_id)
+            .await
+            .map_err(platform_backend_error)?;
         Ok(RunSubmitResult {
-            run_id: receipt.run_id,
+            run_id: family.root().clone(),
+            current_part_id: family.current().clone(),
         })
     }
 
@@ -81,13 +89,11 @@ impl ClusterBackend for NativeV2PlatformController {
         _context: &ConnectionContext,
         _params: RunListParams,
     ) -> Result<RunListResult, BackendError> {
-        let summaries = self.list().await.map_err(platform_backend_error)?;
-        let mut runs = Vec::with_capacity(summaries.len());
-        for summary in summaries {
+        let families = self.run_families().await.map_err(platform_backend_error)?;
+        let mut runs = Vec::with_capacity(families.len());
+        for family in families {
             let mut result = self
-                .status(RunStatusParams {
-                    run_id: summary.run_id,
-                })
+                .projected_status(&family, None)
                 .await
                 .map_err(platform_backend_error)?;
             result.steering = Default::default();
@@ -101,7 +107,13 @@ impl ClusterBackend for NativeV2PlatformController {
         _context: &ConnectionContext,
         params: RunStatusParams,
     ) -> Result<RunStatusResult, BackendError> {
-        self.status(params).await.map_err(platform_backend_error)
+        let family = self
+            .run_lineage(&params.run_id)
+            .await
+            .map_err(platform_backend_error)?;
+        self.projected_status(&family, params.part_id.as_ref())
+            .await
+            .map_err(platform_backend_error)
     }
 
     async fn run_watch(
@@ -127,8 +139,24 @@ impl ClusterBackend for NativeV2PlatformController {
         _context: &ConnectionContext,
         params: RunAttachParams,
     ) -> Result<(RunAttachResult, RunAttachEventStream), BackendError> {
-        let (result, source) = self.attach(params).await.map_err(platform_backend_error)?;
-        Ok((result, RunSubscriptionStream::new(AttachSource(source))))
+        let (family, part) = self
+            .read_target(&params.run_id, params.part_id.as_ref())
+            .await?;
+        let (mut result, source) = self
+            .attach(RunAttachParams {
+                run_id: part,
+                ..params
+            })
+            .await
+            .map_err(platform_backend_error)?;
+        result.run_id = family.root().clone();
+        Ok((
+            result,
+            RunSubscriptionStream::new(AttachSource {
+                source,
+                run_id: family.root().clone(),
+            }),
+        ))
     }
 
     async fn run_force(
@@ -136,7 +164,26 @@ impl ClusterBackend for NativeV2PlatformController {
         _context: &ConnectionContext,
         params: RunForceParams,
     ) -> Result<RunForceResult, BackendError> {
-        self.force(params).await.map_err(platform_backend_error)
+        let (family, run_id) = self
+            .current_target(&params.run_id, params.part_id.as_ref())
+            .await?;
+        let mut result = self
+            .force(RunForceParams {
+                part_id: Some(run_id.clone()),
+                run_id,
+            })
+            .await
+            .map_err(platform_backend_error)?;
+        result.run_id = family.root().clone();
+        result.current_part_id = family.current().clone();
+        family.project_recovery(family.current(), &mut result.workspace_recovery);
+        self.aggregate_status(&family, &mut result.status, &mut result.at_cursor)
+            .await
+            .map_err(platform_backend_error)?;
+        result
+            .fit_published_steering()
+            .map_err(|_| platform_backend_error(RunLedgerError::Corrupt.into()))?;
+        Ok(result)
     }
 
     async fn run_steer(
@@ -144,7 +191,15 @@ impl ClusterBackend for NativeV2PlatformController {
         _context: &ConnectionContext,
         params: openengine_cluster_protocol::RunSteerParams,
     ) -> Result<openengine_cluster_protocol::RunSteerResult, BackendError> {
-        self.steer(params).await.map_err(platform_backend_error)
+        let (family, run_id) = self
+            .current_target(&params.run_id, params.part_id.as_ref())
+            .await?;
+        let mut result = self
+            .steer(openengine_cluster_protocol::RunSteerParams { run_id, ..params })
+            .await
+            .map_err(platform_backend_error)?;
+        result.run_id = family.root().clone();
+        Ok(result)
     }
 
     async fn run_suspend(
@@ -152,7 +207,16 @@ impl ClusterBackend for NativeV2PlatformController {
         _context: &ConnectionContext,
         params: openengine_cluster_protocol::RunSuspendParams,
     ) -> Result<openengine_cluster_protocol::RunSuspendResult, BackendError> {
-        self.suspend(params).await.map_err(platform_backend_error)
+        let (family, run_id) = self
+            .current_target(&params.run_id, params.part_id.as_ref())
+            .await?;
+        let result = self
+            .suspend(RunStatusParams { run_id, ..params })
+            .await
+            .map_err(platform_backend_error)?;
+        self.project_status_result(&family, result, true)
+            .await
+            .map_err(platform_backend_error)
     }
 
     async fn inbox_list(
@@ -169,9 +233,30 @@ impl ClusterBackend for NativeV2PlatformController {
         _context: &ConnectionContext,
         params: openengine_cluster_protocol::InboxShowParams,
     ) -> Result<openengine_cluster_protocol::InboxShowResult, BackendError> {
-        self.inbox_show(params)
+        let family = self
+            .run_lineage(&params.run_id)
             .await
-            .map_err(platform_backend_error)
+            .map_err(platform_backend_error)?;
+        let selected =
+            selected_part(&family, params.part_id.as_ref()).map_err(platform_backend_error)?;
+        for id in family
+            .parts()
+            .iter()
+            .rev()
+            .filter(|id| params.part_id.is_none() || *id == selected)
+        {
+            match self.inbox_part(id, family.successor(id).cloned()).await {
+                Ok(mut request) => {
+                    request.run_id = family.root().clone();
+                    return Ok(request);
+                }
+                Err(NativeV2PlatformError::Ledger(RunLedgerError::VectorNotFound)) => continue,
+                Err(error) => return Err(platform_backend_error(error)),
+            }
+        }
+        Err(platform_backend_error(
+            RunLedgerError::VectorNotFound.into(),
+        ))
     }
 
     async fn run_vectors(
@@ -179,7 +264,18 @@ impl ClusterBackend for NativeV2PlatformController {
         _context: &ConnectionContext,
         params: openengine_cluster_protocol::RunVectorsParams,
     ) -> Result<openengine_cluster_protocol::RunVectorsResult, BackendError> {
-        self.vectors(params).await.map_err(platform_backend_error)
+        let (family, run_id) = self
+            .read_target(&params.run_id, params.part_id.as_ref())
+            .await?;
+        let mut result = self
+            .vectors(openengine_cluster_protocol::RunVectorsParams { run_id, ..params })
+            .await
+            .map_err(platform_backend_error)?;
+        result.run_id = family.root().clone();
+        for vector in &mut result.vectors {
+            vector.run_id = family.root().clone();
+        }
+        Ok(result)
     }
 
     async fn run_vector(
@@ -187,7 +283,15 @@ impl ClusterBackend for NativeV2PlatformController {
         _context: &ConnectionContext,
         params: openengine_cluster_protocol::RunVectorParams,
     ) -> Result<openengine_cluster_protocol::RunVectorResult, BackendError> {
-        self.vector(params).await.map_err(platform_backend_error)
+        let (family, run_id) = self
+            .read_target(&params.run_id, params.part_id.as_ref())
+            .await?;
+        let mut result = self
+            .vector(openengine_cluster_protocol::RunVectorParams { run_id, ..params })
+            .await
+            .map_err(platform_backend_error)?;
+        result.run_id = family.root().clone();
+        Ok(result)
     }
 
     async fn run_checkpoints(
@@ -195,9 +299,15 @@ impl ClusterBackend for NativeV2PlatformController {
         _context: &ConnectionContext,
         params: openengine_cluster_protocol::RunCheckpointsParams,
     ) -> Result<openengine_cluster_protocol::RunCheckpointsResult, BackendError> {
-        self.checkpoints(params)
+        let (family, run_id) = self
+            .read_target(&params.run_id, params.part_id.as_ref())
+            .await?;
+        let mut result = self
+            .checkpoints(openengine_cluster_protocol::RunCheckpointsParams { run_id, ..params })
             .await
-            .map_err(platform_backend_error)
+            .map_err(platform_backend_error)?;
+        result.run_id = family.root().clone();
+        Ok(result)
     }
 
     async fn run_resume_requirements(
@@ -205,8 +315,11 @@ impl ClusterBackend for NativeV2PlatformController {
         _context: &ConnectionContext,
         params: openengine_cluster_protocol::RunResumeRequirementsParams,
     ) -> Result<openengine_cluster_protocol::RunResumeRequirementsResult, BackendError> {
+        let (_, run_id) = self
+            .current_target(&params.run_id, params.part_id.as_ref())
+            .await?;
         let source = self
-            .recoverable_resume_source(&params.run_id)
+            .recoverable_resume_source(&run_id)
             .await
             .map_err(platform_backend_error)?;
         let submission = crate::native_v2_runtime_config::replacement_submission(
@@ -228,7 +341,15 @@ impl ClusterBackend for NativeV2PlatformController {
         _context: &ConnectionContext,
         params: RunResumeParams,
     ) -> Result<RunResumeResult, BackendError> {
-        self.resume(params).await.map_err(platform_backend_error)
+        let (family, run_id) = self
+            .current_target(&params.run_id, Some(&params.part_id))
+            .await?;
+        let mut result = self
+            .resume(RunResumeParams { run_id, ..params })
+            .await
+            .map_err(platform_backend_error)?;
+        result.run_id = family.root().clone();
+        Ok(result)
     }
 
     async fn run_discard_workspace(
@@ -236,9 +357,15 @@ impl ClusterBackend for NativeV2PlatformController {
         _context: &ConnectionContext,
         params: RunDiscardWorkspaceParams,
     ) -> Result<RunDiscardWorkspaceResult, BackendError> {
-        self.discard_workspace(params)
+        let (family, run_id) = self
+            .current_target(&params.run_id, params.part_id.as_ref())
+            .await?;
+        let mut result = self
+            .discard_workspace(RunDiscardWorkspaceParams { run_id, ..params })
             .await
-            .map_err(platform_backend_error)
+            .map_err(platform_backend_error)?;
+        result.run_id = family.root().clone();
+        Ok(result)
     }
 }
 
@@ -272,13 +399,19 @@ fn durable_item<E>(result: Result<Option<E>, NativeV2ObservationError>) -> RunSu
     }
 }
 
-struct AttachSource(RunAttachSubscription);
+struct AttachSource {
+    source: RunAttachSubscription,
+    run_id: RunId,
+}
 
 #[async_trait]
 impl RunSubscriptionSource<RunAttachEventNotification> for AttachSource {
     async fn next(&mut self) -> Option<RunSubscriptionItem<RunAttachEventNotification>> {
-        match self.0.recv().await {
-            Ok(event) => Some(RunSubscriptionItem::Event(event)),
+        match self.source.recv().await {
+            Ok(mut event) => {
+                event.run_id = self.run_id.clone();
+                Some(RunSubscriptionItem::Event(event))
+            }
             Err(NativeV2ObservationError::AttachLagged) => Some(RunSubscriptionItem::Closed {
                 reason: SubscriptionCloseReason::SlowConsumer,
             }),
@@ -336,6 +469,14 @@ fn platform_backend_error(error: NativeV2PlatformError) -> BackendError {
                 Some(serde_json::json!({ "runId": existing_run_id })),
             )
         }
+        NativeV2PlatformError::StalePart(current) => BackendError::application(
+            openengine_cluster_protocol::RUN_CONFLICT,
+            format!(
+                "the current part is {}; refresh the run before acting",
+                current.as_str()
+            ),
+            Some(serde_json::json!({"currentPartId":current})),
+        ),
         NativeV2PlatformError::InvalidRequest(message) => {
             BackendError::application("invalid_request", message, None)
         }

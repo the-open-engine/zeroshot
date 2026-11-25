@@ -106,13 +106,13 @@ async fn status_and_list_expose_graph_result_during_finalization_and_stopping() 
                     .await
                     .assert_value();
             }
-            let status = fixture
-                .controller
-                .status(RunStatusParams {
-                    run_id: request.run_id.clone(),
-                })
-                .await
-                .assert_value();
+            let status = ClusterBackend::run_status(
+                &fixture.controller,
+                &ConnectionContext::default(),
+                RunStatusParams::new(request.run_id.clone()),
+            )
+            .await
+            .assert_value();
             let value = serde_json::to_value(&status.status).assert_value();
             assert_eq!(
                 value["phase"],
@@ -265,9 +265,7 @@ async fn force_of_orphaned_primary_result_preserves_main_outcome_after_cleanup()
     let request = seed_tail(&fixture.ledger, "primary-force", false, true).await;
     let result = fixture
         .controller
-        .force(RunForceParams {
-            run_id: request.run_id.clone(),
-        })
+        .force(RunForceParams::new(request.run_id.clone()))
         .await
         .assert_value();
     assert!(

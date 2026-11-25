@@ -29,7 +29,7 @@ fn checkpoint() -> Value {
 
 #[test]
 fn resume_omission_preserves_restart_and_checkpoint_selection_is_closed() {
-    let legacy = json!({"runId": "prior", "successorRunId": "successor"});
+    let legacy = json!({"runId": "prior", "partId":"prior", "successorPartId": "successor"});
     let params: RunResumeParams = serde_json::from_value(legacy.clone()).assert_value();
     assert!(params.from.is_none());
     assert_eq!(serde_json::to_value(params).assert_value(), legacy);
@@ -132,14 +132,14 @@ fn checkpoint_metadata_is_javascript_safe_and_storage_private() {
 #[test]
 fn checkpoint_result_pages_are_bounded_and_round_trip_the_cursor() {
     let value = json!({
-        "runId": "run-1", "checkpoints": [checkpoint()], "nextAfter": "opaque-entry-2"
+        "runId": "run-1", "partId":"run-1", "checkpoints": [checkpoint()], "nextAfter": "opaque-entry-2"
     });
     let result: RunCheckpointsResult = serde_json::from_value(value.clone()).assert_value();
     assert_eq!(serde_json::to_value(result).assert_value(), value);
     assert_contract::<RunCheckpointsResult>(value, true);
     for (count, accepted) in [(0, true), (100, true), (101, false)] {
         assert_contract::<RunCheckpointsResult>(
-            json!({"runId": "run-1", "checkpoints": vec![checkpoint(); count]}),
+            json!({"runId": "run-1", "partId":"run-1", "checkpoints": vec![checkpoint(); count]}),
             accepted,
         );
     }
@@ -185,7 +185,7 @@ fn checkpoints_are_opt_in_and_discovery_tolerates_future_extensions() {
 #[test]
 fn hosted_recovery_routes_do_not_change_the_strict_hosted_run_route_shape() {
     let legacy_routes = json!({
-        "kind": "zeroshot.hosted-runs/v2",
+        "kind": "zeroshot.hosted-runs/v3",
         "base_url": "https://target.example",
         "route_templates": {
             "list": "/runs",
@@ -216,7 +216,7 @@ fn hosted_recovery_routes_do_not_change_the_strict_hosted_run_route_shape() {
 
 #[test]
 fn resume_runtime_forms_are_explicit_and_validate_like_run_configuration() {
-    let base = json!({"runId":"prior", "successorRunId":"next"});
+    let base = json!({"runId":"prior", "partId":"prior", "successorPartId":"next"});
     for runtime in [
         json!({"kind":"exact","runtime":{"harness":"codex","provider":"openai","nodes":{}}}),
         json!({"kind":"uniform","runtime":{"harness":"claude","provider":"anthropic","model":"corrected","effort":"high","harnessConfig":{"args":["--tools","Read"]},"connections":{"anthropic":["ANTHROPIC_API_KEY"]}}}),

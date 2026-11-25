@@ -969,6 +969,7 @@ sys.stdin.read()
         RunSteerParams {
             node: None,
             mode: Default::default(),
+            part_id: None,
             run_id: run.clone(),
             text: "Steer the contained agent.".into(),
         },

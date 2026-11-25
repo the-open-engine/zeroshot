@@ -91,8 +91,10 @@ fn failed_three_round_loop_defaults_to_latest_entry_and_retries_only_round_three
         fs::read_to_string(fixture.workspace.join("later-edit")).unwrap(),
         "keep until consent"
     );
+    let refused_status = fixture.json(&["status", id]);
+    assert_eq!(refused_status["currentPartId"], id);
     assert!(
-        fixture.json(&["status", id])["workspaceRecovery"]
+        refused_status["workspaceRecovery"]
             .get("successorRunId")
             .is_none()
     );
@@ -114,7 +116,8 @@ fn failed_three_round_loop_defaults_to_latest_entry_and_retries_only_round_three
     success(&resumed);
     assert!(String::from_utf8_lossy(&resumed.stderr).contains(selected));
     let resumed: Value = serde_json::from_slice(&resumed.stdout).unwrap();
-    let successor = resumed["runId"].as_str().unwrap();
+    assert_eq!(resumed["runId"], id);
+    let successor = resumed["currentPartId"].as_str().unwrap();
     wait_finished(&fixture, successor, "succeeded");
     assert!(!fixture.workspace.join("later-edit").exists());
     assert_eq!(fs::read_to_string(receipts).unwrap().lines().count(), 4);
@@ -346,11 +349,12 @@ fn assert_python_resume_after_controller_loss(checkpoints: bool, interrupted: bo
     let resumed = resume.env("FIXTURE_MODE", "finish").output().unwrap();
     success(&resumed);
     let resumed: Value = serde_json::from_slice(&resumed.stdout).unwrap();
-    let successor = resumed["runId"].as_str().unwrap();
+    assert_eq!(resumed["runId"], id);
+    let successor = resumed["currentPartId"].as_str().unwrap();
     assert_ne!(successor, id);
     wait_finished(&fixture, successor, "succeeded");
     assert_eq!(
-        fixture.json(&["status", id])["status"]["terminalResult"]["reason"],
+        fixture.json(&["status", id, "--part", id])["status"]["terminalResult"]["reason"],
         "runtime_lost"
     );
     assert_eq!(
@@ -413,7 +417,7 @@ from zeroshot import Client, LocalTarget
 async def main():
     async with Client(target=LocalTarget(state_dir=sys.argv[1])) as client:
         successor = await client.get_run(sys.argv[2]).resume()
-        print(json.dumps({"runId": successor.id}))
+        print(json.dumps({"runId": successor.id, "currentPartId": successor.current_part_id}))
 asyncio.run(main())
 "#,
         ])

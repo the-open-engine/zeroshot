@@ -265,3 +265,7 @@ have a 7-day default deadline and a 30-day maximum. A late answer continues thro
 reads require advertised routes in the independent `hosted_inbox` extension, kind
 `openengine.hosted-inbox/v1`. Vector reads need only `openengine.run-vectors/v1`.
 See [Ask a person](../guides/ask-a-person.md).
+
+On a local or direct target, a run keeps its original ID across suspension, answers and checkpoint
+retries. Status includes the current part ID. Each part owns its logs and checkpoints. A Docker
+or Helm target keeps the handoff records on the same persistent volume as its run storage.

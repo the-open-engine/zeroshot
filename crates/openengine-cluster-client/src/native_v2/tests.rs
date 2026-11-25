@@ -120,7 +120,7 @@ fn watch_result() -> Value {
 fn watch_event(subscription_id: &str, cursor: &str) -> Value {
     json!({
         "jsonrpc":"2.0","method":"event","params":{
-            "subscriptionId":subscription_id,"runId":"run-1","cursor":cursor,
+            "subscriptionId":subscription_id,"runId":"run-1","partId":"run-1","cursor":cursor,
             "title":"Protocol client test",
             "source":{
                 "repository":"open-engine/zeroshot",
@@ -140,6 +140,7 @@ async fn successful_subscription_without_a_stream_is_an_invalid_response() {
     let error = checked_error(
         RunSubscriptionClient::new(&transport)
             .run_watch(RunWatchParams {
+                part_id: None,
                 run_id: RunId::new("run-1"),
                 from_cursor: None,
             })
@@ -167,6 +168,7 @@ async fn close_retains_the_local_cursor_and_is_terminal() {
     let (_, mut stream) = checked_result(
         RunSubscriptionClient::new(&transport)
             .run_watch(RunWatchParams {
+                part_id: None,
                 run_id: RunId::new("run-1"),
                 from_cursor: None,
             })
@@ -196,6 +198,7 @@ async fn stream_reports_overflow_and_rejects_cross_subscription_events() {
     let (_, mut overflow_stream) = checked_result(
         RunSubscriptionClient::new(&overflow)
             .run_watch(RunWatchParams {
+                part_id: None,
                 run_id: RunId::new("run-1"),
                 from_cursor: None,
             })
@@ -219,6 +222,7 @@ async fn stream_reports_overflow_and_rejects_cross_subscription_events() {
     let (_, mut mismatch_stream) = checked_result(
         RunSubscriptionClient::new(&mismatch)
             .run_watch(RunWatchParams {
+                part_id: None,
                 run_id: RunId::new("run-1"),
                 from_cursor: None,
             })
@@ -239,6 +243,7 @@ async fn logs_and_attach_use_their_run_scoped_method_names() {
     checked_result(
         RunSubscriptionClient::new(&logs)
             .run_logs(RunLogsParams {
+                part_id: None,
                 run_id: RunId::new("run-1"),
                 from_cursor: None,
                 execution: None,
@@ -249,7 +254,7 @@ async fn logs_and_attach_use_their_run_scoped_method_names() {
     let attach = ScriptedSubscriptionTransport::new(
         RUN_ATTACH_METHOD,
         json!({
-            "subscriptionId":"attach-1","runId":"run-1","execution":"execution-1"
+            "subscriptionId":"attach-1","runId":"run-1","partId":"run-1","execution":"execution-1"
         }),
         vec![],
         true,
@@ -257,6 +262,7 @@ async fn logs_and_attach_use_their_run_scoped_method_names() {
     checked_result(
         RunSubscriptionClient::new(&attach)
             .run_attach(RunAttachParams {
+                part_id: None,
                 run_id: RunId::new("run-1"),
                 execution: checked_result(openengine_cluster_protocol::ExecutionRef::new(
                     "execution-1",

@@ -295,9 +295,7 @@ pub(super) async fn terminal(
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
             let result = controller
-                .status(RunStatusParams {
-                    run_id: run_id.clone(),
-                })
+                .status(RunStatusParams::new(run_id.clone()))
                 .await
                 .assert_value_with("status");
             if let RunStatus::Finished {

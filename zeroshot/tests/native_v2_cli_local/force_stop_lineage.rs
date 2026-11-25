@@ -19,14 +19,17 @@ async fn force_stopped_successor_discards_every_catalog_of_its_lineage() {
     let resumed = fixture
         .json(&["resume", &original, "--restart"], "block")
         .await;
+    assert_eq!(resumed["runId"], original);
     let successor = resumed
-        .assert_key("runId")
+        .assert_key("currentPartId")
         .as_str()
-        .assert_value_with("successor run identity")
+        .assert_value_with("successor part identity")
         .to_owned();
     fixture.wait_running(&successor).await;
     assert!(!fixture.checkpoints(&successor).await.is_empty());
-    fixture.json(&["force-stop", &successor], "block").await;
+    fixture
+        .json(&["force-stop", &original, "--part", &successor], "block")
+        .await;
     fixture
         .wait_terminal(&successor, "block", "force_stopped")
         .await;
@@ -34,8 +37,10 @@ async fn force_stopped_successor_discards_every_catalog_of_its_lineage() {
 
     for run_id in [&original, &successor] {
         assert_eq!(
-            fixture.checkpoints(run_id).await,
-            Vec::<Value>::new(),
+            fixture
+                .json(&["checkpoints", &original, "--part", run_id], "finish")
+                .await["checkpoints"],
+            json!([]),
             "run {run_id} still lists checkpoints of the discarded lineage"
         );
     }
@@ -61,7 +66,7 @@ async fn force_stopped_successor_discards_every_catalog_of_its_lineage() {
         )
         .await;
     let restored = restored
-        .assert_key("runId")
+        .assert_key("currentPartId")
         .as_str()
         .assert_value_with("separate successor identity");
     fixture.wait_succeeded(restored, "finish").await;

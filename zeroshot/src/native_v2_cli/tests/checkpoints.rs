@@ -34,6 +34,7 @@ async fn checkpoint_listing_emits_one_typed_page_without_resolving_secrets() {
             [Call::Checkpoints {
                 target: target.map(str::to_owned),
                 params: RunCheckpointsParams {
+                    part_id: None,
                     run_id: RunId::new("run-failed"),
                     after: Some(CheckpointId::new("entry-7").assert_value()),
                     limit: Some(1),
@@ -61,6 +62,7 @@ async fn checkpoint_listing_emits_one_typed_page_without_resolving_secrets() {
 async fn failed_resume_selects_newest_entry_across_pages_for_local_and_named_runs() {
     for target in [None, Some("docker")] {
         let backend = FakeBackend::with_resume_requirements(Default::default())
+            .with_resume_part("part-failed")
             .with_checkpoint_pages(vec![
                 checkpoint_page("z-first", 1, Some("z-first")),
                 checkpoint_page("a-latest", 2, None),
@@ -93,6 +95,15 @@ async fn failed_resume_selects_newest_entry_across_pages_for_local_and_named_run
         else {
             panic!("unexpected calls: {calls:?}");
         };
+        assert_eq!(first.run_id.as_str(), "run-failed");
+        assert_eq!(second.run_id, first.run_id);
+        assert_eq!(
+            first.part_id.as_ref().map(RunId::as_str),
+            Some("part-failed")
+        );
+        assert_eq!(second.part_id, first.part_id);
+        assert_eq!(params.run_id.as_str(), "run-failed");
+        assert_eq!(params.part_id.as_str(), "part-failed");
         assert_eq!(first.after, None);
         assert_eq!(first.limit, Some(100));
         assert_eq!(
@@ -119,6 +130,7 @@ async fn failed_resume_without_checkpoints_requires_explicit_restart_before_cred
         let backend = FakeBackend::with_resume_requirements(Default::default())
             .with_checkpoint_pages(vec![RunCheckpointsResult {
                 run_id: RunId::new("run-failed"),
+                part_id: RunId::new("run-failed"),
                 controller: None,
                 checkpoints: vec![],
                 next_after: None,
@@ -181,7 +193,7 @@ async fn sdk_api_default_preserves_omitted_selector_for_local_and_named_runs() {
 
 fn checkpoint_page(id: &str, sequence: u64, next: Option<&str>) -> RunCheckpointsResult {
     serde_json::from_value(json!({
-        "runId":"run-failed", "checkpoints":[{
+        "runId":"run-failed", "partId":"part-failed", "checkpoints":[{
             "checkpointId":id, "sequence":sequence, "node":"review", "mapIndices":[],
             "loopIterations":[sequence - 1], "createdAt":42
         }], "nextAfter":next

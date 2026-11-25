@@ -60,6 +60,7 @@ printf '%s%s%s\n' \
         );
         let (_, mut logs) = NativeV2Observability::new(ledger)
             .logs(RunLogsParams {
+                part_id: None,
                 run_id: RunId::new(run_id),
                 from_cursor: None,
                 execution: None,

@@ -273,6 +273,8 @@ pub struct RunSubmitParams {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunSubmitResult {
     pub run_id: RunId,
+    /// Physical identity of the current part of the run.
+    pub current_part_id: RunId,
 }
 
 #[derive(Clone, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -282,6 +284,9 @@ pub struct RunResumeParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<super::RunResumeRuntime>,
     pub run_id: RunId,
+    /// Part observed by the caller. This must still be the current part when resume claims it.
+    pub part_id: RunId,
+    #[serde(rename = "successorPartId")]
     pub successor_run_id: RunId,
     /// Omission preserves restarting from the latest retained workspace.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -314,6 +319,7 @@ impl std::fmt::Debug for RunResumeParams {
             .debug_struct("RunResumeParams")
             .field("runtime", &self.runtime)
             .field("run_id", &self.run_id)
+            .field("part_id", &self.part_id)
             .field("successor_run_id", &self.successor_run_id)
             .field("from", &self.from)
             .field("connections", &self.connections.keys().collect::<Vec<_>>())
@@ -333,6 +339,9 @@ impl std::fmt::Debug for RunResumeParams {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunResumeResult {
     pub run_id: RunId,
+    /// Physical identity of the current part of the run.
+    pub current_part_id: RunId,
+    #[serde(rename = "resumedFromPartId")]
     pub resumed_from: RunId,
 }
 
@@ -340,12 +349,17 @@ pub struct RunResumeResult {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunDiscardWorkspaceParams {
     pub run_id: RunId,
+    /// When supplied, the observed part must still be current.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part_id: Option<RunId>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunDiscardWorkspaceResult {
     pub run_id: RunId,
+    /// Part that owns this record.
+    pub part_id: RunId,
     pub discarded: bool,
 }
 

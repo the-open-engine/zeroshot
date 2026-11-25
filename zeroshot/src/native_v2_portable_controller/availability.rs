@@ -44,7 +44,7 @@ pub(crate) async fn check_controller_with_timeout(
         let response = tokio::time::timeout(timeout, async {
             let transport = connect_transport(paths).await.ok()?;
             let status = ClusterClient::new(transport.as_ref())
-                .run_status(RunStatusParams { run_id: id.clone() })
+                .run_status(RunStatusParams::new(id.clone()))
                 .await
                 .ok()?;
             (status.run_id == *id).then_some((transport, status))

@@ -1249,6 +1249,7 @@ fn steer_parser_requires_exactly_one_text_source() {
             NativeV2CliCommand::Steer {
                 node: None,
                 run: RunSelector {
+                    part_id: None,
                     controller: Default::default(),
                     run_id: RunId::new("run-1"),
                     target: Some("prod".into())

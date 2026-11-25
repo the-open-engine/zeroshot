@@ -248,6 +248,11 @@ impl TargetControlAuthority for FakeAuthority {
             Box::new(request.clone()),
         ));
         Ok(RunSubmitResult {
+            current_part_id: self
+                .receipt_run_id
+                .clone()
+                .unwrap_or_else(|| request.run_id.clone())
+                .clone(),
             run_id: self
                 .receipt_run_id
                 .clone()

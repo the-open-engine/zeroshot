@@ -351,7 +351,7 @@ fn explicit_controls_recover_interrupted_ledgers_without_a_temporary_image() {
         } else {
             success(&output);
         }
-        let status = fixture.json(&["status", &id]);
+        let status = fixture.json(&["status", &id, "--part", &id]);
         assert_eq!(
             status["status"]["terminalResult"]["reason"],
             "runtime_lost",

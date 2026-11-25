@@ -15,6 +15,9 @@ import time
 
 args = sys.argv[1:]
 log_path = os.environ.get("FAKE_ZEROSHOT_LOG")
+handoff = os.environ.get("FAKE_WATCH_HANDOFF")
+if handoff and os.path.exists(handoff):
+    os.environ["FAKE_HEAD_PART"] = "child"
 
 def option(name):
     try:
@@ -29,11 +32,16 @@ def request_status():
                        "signals":{"decision":["approved","rejected"]},
                        "output":{"kind":"record","fields":{}},"expiresAt":2000},"metadata":{}}
 
+def canonical(run_id):
+    return "logical-root" if run_id == os.getenv("FAKE_ALIAS") else run_id
+
 def projection(run_id, status, cursor):
     if os.environ.get("FAKE_REQUEST_STATUS") == "1" and status["phase"] == "admitted":
         status = request_status()
     return {
-        "runId": run_id,
+        "runId": canonical(run_id),
+        "partId": option("--part") or os.getenv("FAKE_HEAD_PART") or run_id,
+        "currentPartId": os.getenv("FAKE_HEAD_PART") or run_id,
         "title": "Fake run",
         "source": {
             "repository": "owner/repo",
@@ -175,7 +183,8 @@ elif args and args[0] == "run":
     if "--validate-only" in args:
         print(json.dumps({"valid": True}))
     else:
-        print(json.dumps({"runId": "01900000-0000-7000-8000-000000000001"}))
+        run_id = "01900000-0000-7000-8000-000000000001"
+        print(json.dumps({"runId": run_id, "currentPartId": run_id}))
 elif args and args[0] == "list":
     runs = []
     if os.environ.get("FAKE_LIST_ONE") == "1":
@@ -191,7 +200,8 @@ elif args and args[0] == "steer":
     if os.environ.get("FAKE_STEER_FAIL"):
         fail("invalid_request", "invalid_request", "run already has successor next", {})
     text = entry["text"]
-    print(json.dumps({"runId":args[1],"steer":{"id":"steer-1","createdAt":1000,
+    print(json.dumps({"runId":canonical(args[1]),"partId":option("--part") or args[1],
+        "steer":{"id":"steer-1","createdAt":1000,
         "textBytes":len(text.encode()),"excerpt":text.encode()[:1024].decode("utf-8", "ignore"),
         "receivedExecutions":0,"executions":[],
         "mode":args[args.index("--mode")+1] if "--mode" in args else "standing"}}))
@@ -200,35 +210,45 @@ elif args and args[0] == "suspend":
     print(json.dumps(projection(args[1], status, "v2:1")))
 elif args[:2] in (["inbox", "list"], ["inbox", "show"]):
     request={"id":"question","text":"Approve?","signals":{"decision":["approved","rejected"]},"output":{"kind":"record","fields":{}},"expiresAt":2000}
-    row={"runId":"original","node":"approval","createdAt":1000,"expiresAt":2000,"state":"pending"}
+    row={"runId":"original","partId":os.getenv("FAKE_HEAD_PART") or "original",
+         "node":"approval","createdAt":1000,"expiresAt":2000,"state":"pending"}
     if args[1] == "list": print(json.dumps({"requests":[row],"nextAfter":"original"}))
     else:
-        print(json.dumps({"runId":args[2],"node":"approval","createdAt":1000,
+        part = option("--part") or os.getenv("FAKE_HEAD_PART") or args[2]
+        print(json.dumps({"runId":args[2],"partId":part,
+                          "node":"approval","createdAt":1000,
                           "request":request,"state":"pending"}))
-elif args and args[0] == "answer":
-    if os.environ.get("FAKE_ANSWER_FAIL"):
+elif args and args[0] in ("answer", "resume"):
+    if args[0] == "answer" and os.environ.get("FAKE_ANSWER_FAIL"):
         messages = ["$.output.feedback required", "already has successor next",
                     "request expired; successor next"]
         fail("invalid_request","invalid_request",messages[int(os.environ["FAKE_ANSWER_FAIL"])],{})
-    print(json.dumps({"runId":"successor","resumedFrom":args[1]}))
-elif args and args[0] == "resume":
-    print(json.dumps({"runId":"successor","resumedFrom":args[1]}))
+    current = os.getenv("FAKE_HEAD_PART") or args[1]
+    if option("--part") is not None and option("--part") != current:
+        fail("invalid_request","stale_part","selected part is no longer current",{})
+    print(json.dumps({"runId":args[1],"currentPartId":"successor",
+                      "resumedFromPartId":current}))
 elif args and args[0] == "vectors":
-    vector={"id":"vector-1","kind":"suspend_request","runId":"original","createdAt":1762905600000}
+    root = args[2] if args[1] == "show" else args[1]
+    vector={"id":"vector-1","kind":"suspend_request","runId":root,"partId":"original","createdAt":1762905600000}
     vectors=[vector]
     if os.environ.get("FAKE_STEER_VECTORS"):
-        vector={"id":"steer-1","kind":"steer","runId":"original","createdAt":1762905600000}
-        receipt={"id":"receipt-1","kind":"steer_receipt","runId":"original",
+        vector={"id":"steer-1","kind":"steer","runId":root,"partId":"original","createdAt":1762905600000}
+        receipt={"id":"receipt-1","kind":"steer_receipt","runId":root,"partId":"original",
                  "createdAt":1762905600001,"steerId":"steer-1","execution":"execution-1"}
         vectors=[{**vector,"textBytes":262144},receipt]
         vector={**vector,"text":"é"*131072}
     if args[1] == "show":
         print(json.dumps(vector))
     else:
-        print(json.dumps({"runId":args[1],"vectors":vectors,"nextAfter":"vector-1"}))
+        part = option("--part") or os.getenv("FAKE_HEAD_PART") or args[1]
+        print(json.dumps({"runId":args[1],"partId":part,"vectors":vectors,"nextAfter":"vector-1"}))
 elif args and args[0] == "status":
     if os.environ.get("FAKE_WATCH_FAILURE") in ("early", "outage_failed_run"):
         print(json.dumps(projection(args[1], failed_status, "v2:2")))
+    elif handoff and os.path.exists(handoff):
+        running = {"phase": "running", "activeExecutions": []}
+        print(json.dumps(projection(args[1], running, "child@v2:1")))
     else:
         print(json.dumps(projection(args[1], {"phase": "admitted"}, "v2:0")))
 elif args and args[0] == "watch":
@@ -237,6 +257,18 @@ elif args and args[0] == "watch":
             handle.write(str(os.getpid()))
     time.sleep(float(os.environ.get("FAKE_WATCH_DELAY", "0")))
     failure = os.environ.get("FAKE_WATCH_FAILURE")
+    if handoff and not os.path.exists(handoff):
+        with open(handoff, "w"):
+            pass
+        previous = projection(args[1], request_status(), "parent@v2:2")
+        previous["cursor"] = previous.pop("atCursor")
+        print(json.dumps(previous))
+        raise SystemExit(0)
+    if os.getenv("FAKE_HISTORY_PART") and option("--part") is None:
+        previous = projection(args[1], request_status(), "previous:2")
+        previous["partId"] = os.environ["FAKE_HISTORY_PART"]
+        previous["cursor"] = previous.pop("atCursor")
+        print(json.dumps(previous), flush=True)
     running = projection(
         args[1],
         {
@@ -280,13 +312,14 @@ elif args and args[0] == "watch":
     if failure == "terminal":
         fail(
             "run_failed", "run.failed", "run finished unsuccessfully: worker_failed",
-            {"runId": args[1]},
+            {"runId": canonical(args[1])},
         )
     if failure == "outage_after_terminal":
         fail("target", "target.unavailable", "cannot reach target", {})
 elif args and args[0] == "logs":
     event = {
         "runId": args[1],
+        "partId": option("--part") or os.getenv("FAKE_HEAD_PART") or args[1],
         "cursor": "v2:3",
         "timestamp": 1725000000123,
         "record": {"level": "info", "target": "agent", "message": "done"},
@@ -300,7 +333,8 @@ elif args and args[0] == "discard-workspace":
     if args[1] == "running":
         fail("invalid_request", "request.invalid", "run is running; use force-stop first", {})
     print(os.environ.get("FAKE_DISCARD_RESULT", json.dumps({
-        "runId": args[1], "discarded": args[1] != "empty",
+        "runId": canonical(args[1]), "partId": option("--part") or args[1],
+        "discarded": args[1] != "empty",
     })))
 elif args and args[0] == "force-stop":
     print(json.dumps(projection(

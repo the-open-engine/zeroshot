@@ -314,7 +314,9 @@ impl LocalFixture {
     }
 
     pub(super) async fn assert_version_log(&self, run_id: &str) {
-        let logs = self.output(&["logs", run_id], "finish").await;
+        let logs = self
+            .output(&["logs", run_id, "--part", run_id], "finish")
+            .await;
         assert_success(&logs, "finished run version logs");
         let records = json_lines(&logs.stdout);
         let expected = concat!("Zeroshot version: ", env!("CARGO_PKG_VERSION"));

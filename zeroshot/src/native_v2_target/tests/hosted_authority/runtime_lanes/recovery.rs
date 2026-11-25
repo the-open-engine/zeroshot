@@ -78,34 +78,30 @@ async fn hosted_request_status_list_and_watch_accept_large_requests_with_bounded
                 "output":{"kind":"record","fields":{}},"expiresAt":2000},"metadata":{}});
         let returned = status.clone();
         let target = RecordingTarget::spawn(move |request, origin, tokens| {
-            let run = json!({"runId":"question-run","title":"Approval","size":"medium","atCursor":"v2:1","status":returned});
+            let run = json!({"runId":"question-run","partId":"question-run","currentPartId":"question-run","title":"Approval","size":"medium","atCursor":"v2:1","status":returned});
             match (request.method.as_str(), request.path.as_str()) {
                 DISCOVERY => ("200 OK", control_document(origin).to_string()),
                 ("GET", "/native-v2/runs") => ("200 OK", json!({"runs":[run]}).to_string()),
                 ("GET", "/native-v2/runs/question-run") => ("200 OK", run.to_string()),
                 ("GET", "/native-v2/runs/question-run/watch") => ("200 OK", format!("{}\n{}\n",
-                    json!({"type":"event","event":{"subscriptionId":"watch-1","runId":"question-run","title":"Approval",
+                    json!({"type":"event","event":{"subscriptionId":"watch-1","runId":"question-run","partId":"question-run","title":"Approval",
                         "size":"medium","cursor":"v2:1","status":returned}}), json!({"type":"closed","reason":"done"}))),
                 ("GET", "/native-v2/runs/question-run/logs") => ("200 OK", format!("{}\n",
-                    json!({"type":"event","event":{"subscriptionId":"logs-1","runId":"question-run","cursor":"v2:2",
+                    json!({"type":"event","event":{"subscriptionId":"logs-1","runId":"question-run","partId":"question-run","cursor":"v2:2",
                         "timestamp":1000,"execution":"worker/1","record":{"level":"info","target":"agent","message":"x".repeat(70_000)}}}))),
                 _ => hosted_response(request, origin, tokens, true),
             }
         }).await;
         let (record, authority) = authenticated_authority(&root, &target.origin).await;
         let observed = authority
-            .hosted_run_status(
-                &record,
-                RunStatusParams {
-                    run_id: RunId::new("question-run"),
-                },
-            )
+            .hosted_run_status(&record, RunStatusParams::new(RunId::new("question-run")))
             .await;
         let listed = authority.hosted_run_list(&record, RunListParams {}).await;
         let mut watch = authority
             .hosted_run_watch(
                 &record,
                 RunWatchParams {
+                    part_id: None,
                     run_id: RunId::new("question-run"),
                     from_cursor: None,
                 },
@@ -141,6 +137,7 @@ async fn hosted_request_status_list_and_watch_accept_large_requests_with_bounded
                 .hosted_run_logs(
                     &record,
                     RunLogsParams {
+                        part_id: None,
                         run_id: RunId::new("question-run"),
                         from_cursor: None,
                         execution: None,
@@ -167,14 +164,14 @@ async fn hosted_request_status_list_and_watch_accept_large_requests_with_bounded
 async fn hosted_request_list_bounds_each_status_in_a_collection_of_large_requests() {
     let root = temp_root();
     let runs = (0..9).map(|index| json!({
-        "runId":format!("request-{index}"),"title":"Approval","size":"medium","atCursor":"v2:1",
+        "runId":format!("request-{index}"),"partId":format!("request-{index}"),"currentPartId":format!("request-{index}"),"title":"Approval","size":"medium","atCursor":"v2:1",
         "status":{"phase":"suspended","reason":"request","node":"approval","createdAt":1000,
             "request":{"id":format!("question-{index}"),"text":"x".repeat(750_000),
                 "signals":{"decision":["approved","rejected"]},
                 "output":{"kind":"record","fields":{}},"expiresAt":2000},"metadata":{}}
     })).collect::<Vec<_>>();
-    let expected = json!({"runs":runs});
-    let returned = expected.clone();
+    let returned = json!({"runs":runs});
+    let expected = returned.clone();
     assert!(
         returned.to_string().len() > 2 * openengine_cluster_protocol::MAX_REQUEST_RESPONSE_BYTES
     );
@@ -221,7 +218,7 @@ async fn hosted_request_answer_requires_the_marker_and_uses_the_resume_route() {
             {
                 (
                     "200 OK",
-                    json!({"runId":"successor","resumedFrom":"run-recoverable"}).to_string(),
+                    json!({"runId":"run-recoverable","currentPartId":"successor","resumedFromPartId":"run-recoverable"}).to_string(),
                 )
             } else {
                 hosted_response(request, origin, tokens, true)
@@ -231,12 +228,12 @@ async fn hosted_request_answer_requires_the_marker_and_uses_the_resume_route() {
         let (record, authority) = authenticated_authority(&root, &target.origin).await;
         let from = json!({"kind":"answer","signals":{"decision":"approved"},"output":{"feedback":"Ready."}});
         let params = serde_json::from_value(
-            json!({"runId":"run-recoverable","successorRunId":"successor","from":from}),
+            json!({"runId":"run-recoverable","partId":"run-recoverable","successorPartId":"successor","from":from}),
         )
         .assert_value();
         let result = authority.hosted_run_resume(&record, params).await;
         if enabled {
-            assert_eq!(result.assert_value().run_id.as_str(), "successor");
+            assert_eq!(result.assert_value().current_part_id.as_str(), "successor");
         } else {
             assert!(
                 result
@@ -269,7 +266,7 @@ async fn hosted_suspend_uses_the_advertised_authenticated_http_route() {
         match (request.method.as_str(), request.path.as_str()) {
             DISCOVERY => ("200 OK", control_document(origin).to_string()),
             ("POST", "/native-v2/runs/run-recoverable/suspend") => ("200 OK", json!({
-                "runId":"run-recoverable", "title":"Suspend", "source":null, "size":"medium", "atCursor":"1",
+                "runId":"run-recoverable","partId":"run-recoverable","currentPartId":"run-recoverable", "title":"Suspend", "source":null, "size":"medium", "atCursor":"1",
                 "status":{"phase":"running","activeExecutions":[],"suspendRequested":true}
             }).to_string()),
             _ => hosted_response(request, origin, tokens, true),
@@ -279,9 +276,7 @@ async fn hosted_suspend_uses_the_advertised_authenticated_http_route() {
     let result = authority
         .hosted_run_suspend(
             &record,
-            RunSuspendParams {
-                run_id: RunId::new("run-recoverable"),
-            },
+            RunSuspendParams::new(RunId::new("run-recoverable")),
         )
         .await
         .assert_value()
@@ -335,7 +330,7 @@ async fn absent_hosted_control_routes_fall_back_without_resolving_access_tokens(
         let run_id = RunId::new("run-recoverable");
         let missing = match operation {
             0 => authority
-                .hosted_run_suspend(&record, RunSuspendParams { run_id })
+                .hosted_run_suspend(&record, RunSuspendParams::new(run_id))
                 .await
                 .assert_value()
                 .is_none(),
@@ -343,6 +338,7 @@ async fn absent_hosted_control_routes_fall_back_without_resolving_access_tokens(
                 .hosted_run_vectors(
                     &record,
                     RunVectorsParams {
+                        part_id: None,
                         run_id,
                         after: None,
                         limit: None,
@@ -355,6 +351,7 @@ async fn absent_hosted_control_routes_fall_back_without_resolving_access_tokens(
                 .hosted_run_vector(
                     &record,
                     RunVectorParams {
+                        part_id: None,
                         run_id,
                         id: VectorId::new("entry").assert_value(),
                     },
@@ -419,8 +416,8 @@ async fn hosted_inbox_reads_advertised_routes_with_an_explicit_large_show_bound(
     let target=RecordingTarget::spawn(|request,origin,tokens| {
         match (request.method.as_str(),request.path.as_str()) {
             DISCOVERY=>{let mut document=control_document(origin);document["extensions"]["request_ask"]=json!({"kind":"openengine.request-ask/v1"});document["extensions"]["hosted_inbox"]=json!({"kind":"openengine.hosted-inbox/v1","route_templates":{"list":"/inbox/list","show":"/inbox/{run_id}"}});("200 OK",document.to_string())},
-            ("POST","/inbox/list")=>("200 OK",json!({"requests":[{"runId":"question-run","node":"approval","createdAt":1000,"expiresAt":2000,"state":"pending"}],"nextAfter":"question-run"}).to_string()),
-            ("POST","/inbox/question-run")=>("200 OK",json!({"runId":"question-run","node":"approval","createdAt":1000,"request":{"id":"question","text":"x".repeat(1024 * 1024 - 1024),"signals":{"decision":["approved","rejected"]},"output":{"kind":"record","fields":{}},"expiresAt":2000},"state":"pending"}).to_string()),
+            ("POST","/inbox/list")=>("200 OK",json!({"requests":[{"runId":"question-run","partId":"question-run","node":"approval","createdAt":1000,"expiresAt":2000,"state":"pending"}],"nextAfter":"question-run"}).to_string()),
+            ("POST","/inbox/question-run")=>("200 OK",json!({"runId":"question-run","partId":"question-run","node":"approval","createdAt":1000,"request":{"id":"question","text":"x".repeat(1024 * 1024 - 1024),"signals":{"decision":["approved","rejected"]},"output":{"kind":"record","fields":{}},"expiresAt":2000},"state":"pending"}).to_string()),
             _=>hosted_response(request,origin,tokens,true),
         }
     }).await;
@@ -438,12 +435,7 @@ async fn hosted_inbox_reads_advertised_routes_with_an_explicit_large_show_bound(
         .assert_value();
     assert_eq!(page.next_after, Some(RunId::new("question-run")));
     let show = authority
-        .hosted_inbox_show(
-            &record,
-            RunStatusParams {
-                run_id: RunId::new("question-run"),
-            },
-        )
+        .hosted_inbox_show(&record, RunStatusParams::new(RunId::new("question-run")))
         .await
         .assert_value()
         .assert_value();

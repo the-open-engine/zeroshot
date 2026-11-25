@@ -36,6 +36,7 @@ async fn newest_checkpoint(
                 run.target.as_deref(),
                 RunCheckpointsParams {
                     run_id: run.run_id.clone(),
+                    part_id: run.part_id.clone(),
                     after,
                     limit: Some(openengine_cluster_protocol::MAX_CHECKPOINT_PAGE_SIZE),
                 },

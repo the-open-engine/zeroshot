@@ -93,7 +93,7 @@ fn resume_rediscovers_restic_after_the_install_moves() {
             .unwrap();
         success(&resumed);
         let receipt: Value = serde_json::from_slice(&resumed.stdout).unwrap();
-        let successor = receipt["runId"].as_str().unwrap();
+        let successor = receipt["currentPartId"].as_str().unwrap();
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             let status = fixture.json(&["status", successor]);

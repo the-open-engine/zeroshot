@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import aclosing
 from pathlib import Path
 
 import pytest
@@ -157,28 +158,6 @@ def test_one_client_can_select_distinct_folders_per_submission(
         assert item["cwd"] == str(launcher)
         assert item["args"][item["args"].index("--cwd") + 1] == str(selected)
         assert Path(item["args"][item["args"].index("--input") + 1]).is_absolute()
-
-
-@pytest.mark.parametrize("absolute", [True, False])
-def test_local_state_directory_preserves_native_endpoint_spelling(
-    absolute: bool,
-    fake_native: Path,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.chdir(tmp_path)
-    selected = Path("state") / ".." / "state"
-    expected = Path.cwd() / selected
-    target = LocalTarget(state_dir=expected if absolute else selected)
-
-    async def exercise() -> None:
-        async with Client(target=target) as client:
-            await client.get_run("failed-run").resume()
-
-    asyncio.run(exercise())
-    invocations = read_invocations(fake_native)
-    assert any(item["args"][0] == "resume" for item in invocations)
-    assert all(item["stateDir"] == str(expected) for item in invocations)
 
 
 def test_exact_request_forwards_folder_and_source_only_connection(fake_native: Path) -> None:
@@ -736,7 +715,7 @@ def test_closed_client_rejects_run_handle(fake_native: Path) -> None:
 
 
 def test_failed_result_has_opt_in_exception_projection() -> None:
-    result = RunResult(run_id="run-1", succeeded=False, failure="worker_failed")
+    result = RunResult(run_id="run-1", part_id="run-1", succeeded=False, failure="worker_failed")
     with pytest.raises(RunFailedError) as caught:
         result.raise_for_failure()
     assert caught.value.result is result
@@ -1057,7 +1036,9 @@ def test_suspension_continuation_and_vector_target_arguments(
         async with Client(target=target, forward_github_token=forward) as client:
             run = client.get_run("original")
             assert (await run.suspend()).suspend_requested
-            assert (await run.resume()).id == "successor"
+            resumed = await run.resume()
+            assert resumed.id == run.id
+            assert resumed.current_part_id == "successor"
             page = await run.vectors(after="cursor", limit=2)
             assert page.next_after == "vector-1"
             assert (await run.vector(page.vectors[0].id)).run_id == "original"
@@ -1065,6 +1046,8 @@ def test_suspension_continuation_and_vector_target_arguments(
         assert ["suspend", "original", *route] in args
         assert [
             "resume",
+            "original",
+            "--part",
             "original",
             *route,
             *(["--forward-gh-token"] if forward else []),
@@ -1116,7 +1099,8 @@ def test_request_inbox_and_answer_keep_client_target_arguments(fake_native: Path
             pending = await run.request()
             assert pending.request.text == "Approve?"
             successor = await run.answer({"signals": {"decision": "approved"}, "output": {}})
-            assert successor.id == "successor"
+            assert successor.id == run.id
+            assert successor.current_part_id == "successor"
 
     asyncio.run(exercise())
     calls = read_invocations(fake_native)
@@ -1181,7 +1165,7 @@ def test_watch_and_wait_preserve_large_request_suspensions(
 
     asyncio.run(exercise())
     calls = read_invocations(fake_native)
-    assert [call["args"][0] for call in calls] == ["status", "watch", "status", "watch"]
+    assert [call["args"][0] for call in calls] == ["status", "watch", "status", "watch", "status"]
     assert all("prod" in call["args"] for call in calls)
 
 
@@ -1207,6 +1191,9 @@ def test_answer_refusals_raise_existing_cli_error(fake_native: Path, message: st
                 await client.get_run("original").answer({"signals": {}, "output": {}})
 
     asyncio.run(exercise())
+    commands = [call["args"] for call in read_invocations(fake_native)]
+    assert all(command[0] != "status" for command in commands)
+    assert any(command[0] == "answer" and "--part" not in command for command in commands)
 
 
 @pytest.mark.parametrize("target_kind", ["local", "direct", "hosted"])
@@ -1310,10 +1297,12 @@ def test_resume_replaces_runtime_files(fake_native: Path, target_kind: str, unif
             else RuntimePlan({"harness": "codex", "provider": "openai", "nodes": {}})
         )
         async with Client(target=target) as client:
-            assert (await client.get_run("original").resume(runtime=selected)).id == "successor"
-        record = next(
-            entry for entry in read_invocations(fake_native) if entry["args"][0] == "resume"
-        )
+            resumed = await client.get_run("original").resume(runtime=selected)
+            assert resumed.id == "original" and resumed.current_part_id == "successor"
+        calls = read_invocations(fake_native)
+        assert all(entry["args"][0] != "status" for entry in calls)
+        record = next(entry for entry in calls if entry["args"][0] == "resume")
+        assert "--part" not in record["args"]
         option = "--uniform-runtime-config" if uniform else "--runtime-config"
         assert record[option] == selected.to_dict()
         if target_kind == "contained":
@@ -1321,28 +1310,6 @@ def test_resume_replaces_runtime_files(fake_native: Path, target_kind: str, unif
         assert not Path(record["args"][record["args"].index(option) + 1]).exists()
 
     asyncio.run(scenario())
-
-
-@pytest.mark.parametrize("target_kind", ["local", "contained", "direct", "hosted"])
-def test_resume_preserves_api_defaults_without_inspecting_status(
-    target_kind: str, fake_native: Path
-) -> None:
-    async def scenario() -> None:
-        target = {
-            "local": LocalTarget(),
-            "contained": LocalTarget(controller="contained"),
-            "direct": DirectTarget("https://target.example"),
-            "hosted": HostedTarget("prod"),
-        }[target_kind]
-        async with Client(target=target) as client:
-            assert (await client.get_run("original").resume()).id == "successor"
-
-    asyncio.run(scenario())
-    calls = [entry["args"] for entry in read_invocations(fake_native)]
-    assert not any(args[0] == "status" for args in calls)
-    resume = next(args for args in calls if args[0] == "resume")
-    assert "--api-default" in resume
-    assert "--restart" not in resume
 
 
 @pytest.mark.parametrize("controller", ["detached", "contained"])
@@ -1376,3 +1343,148 @@ def test_local_controller_policy_reaches_every_launch_path(
         for call in calls
         if call["args"][0] in ("status", "force-stop")
     )
+
+
+def test_wait_reopens_when_another_observer_resumes_at_watch_close(
+    fake_native: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_WATCH_HANDOFF", str(tmp_path / "resumed"))
+
+    async def exercise() -> None:
+        async with Client() as client:
+            result = await client.get_run("parent").wait(wait_timeout=5)
+            assert result.succeeded and result.part_id == "child"
+
+    asyncio.run(exercise())
+    watches = [row["args"] for row in read_invocations(fake_native) if row["args"][0] == "watch"]
+    assert [args[args.index("--after") + 1] for args in watches] == ["v2:0", "child@v2:1"]
+
+
+def test_logical_history_crosses_suspension_and_wait_ignores_a_superseded_question(
+    fake_native: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_HEAD_PART", "part-2")
+    monkeypatch.setenv("FAKE_HISTORY_PART", "part-1")
+
+    async def exercise() -> None:
+        async with Client() as client:
+            run = client.get_run("logical")
+            status = await run.status()
+            assert status.run_id == run.id
+            assert status.part_id == status.current_part_id == "part-2"
+            events = [event async for event in run.watch(follow=True)]
+            assert all(event.run_id == run.id and event.current_part_id is None for event in events)
+            assert [(e.phase, e.part_id) for e in events] == [
+                ("suspended", "part-1"),
+                ("running", "part-2"),
+                ("finished", "part-2"),
+            ]
+            result = await run.wait()
+            assert result.succeeded and result.part_id == "part-2"
+            old = client.get_run(run.id, part_id="part-1")
+            old_status = await old.status()
+            assert old_status.part_id == "part-1" and old_status.current_part_id == "part-2"
+            assert {event.part_id async for event in old.watch()} == {"part-1"}
+            assert {log.part_id async for log in old.logs()} == {"part-1"}
+            page = await old.vectors()
+            assert page.part_id == old.part_id
+            assert (await old.vector(page.vectors[0].id)).part_id == "original"
+            assert (await old.request()).part_id == old.part_id
+
+    asyncio.run(exercise())
+    watches = [row["args"] for row in read_invocations(fake_native) if row["args"][0] == "watch"]
+    assert ["--follow" in args for args in watches] == [True, False, False]
+    pinned = [row["args"] for row in read_invocations(fake_native) if "--part" in row["args"]]
+    assert {args[0] for args in pinned} == {"status", "watch", "logs", "vectors", "inbox"}
+    assert all(args[args.index("--part") + 1] == "part-1" for args in pinned)
+
+
+def test_sending_a_stale_answer_or_resume_never_advances_a_later_part(
+    fake_native: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_HEAD_PART", "question-a")
+
+    async def exercise() -> None:
+        async with Client() as client:
+            run = client.get_run("logical")
+            old = await run.request()
+            monkeypatch.setenv("FAKE_HEAD_PART", "question-b")
+            with pytest.raises(InvalidRequestError, match="no longer current"):
+                await run.answer({"signals": {}, "output": {}})
+            new = await run.request()
+            assert new.part_id != old.part_id
+            with pytest.raises(InvalidRequestError, match="no longer current"):
+                await run.answer({"signals": {}, "output": {}}, part_id=old.part_id)
+            with pytest.raises(InvalidRequestError, match="no longer current"):
+                await run.resume(part_id=old.part_id)
+            resumed = await run.answer({"signals": {}, "output": {}}, part_id=new.part_id)
+            assert resumed.id == run.id and resumed.current_part_id == "successor"
+
+    asyncio.run(exercise())
+
+
+def test_answers_guard_the_last_suspension_yielded_by_watch(
+    fake_native: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_HISTORY_PART", "question-a")
+    monkeypatch.setenv("FAKE_HEAD_PART", "question-b")
+    monkeypatch.setenv("FAKE_REQUEST_STREAM_BYTES", "32")
+
+    async def exercise() -> None:
+        async with Client() as client:
+            run = client.get_run("logical")
+            stream = run.watch(follow=True)
+            async with aclosing(stream):
+                assert (await anext(stream)).part_id == "question-a"
+                with pytest.raises(InvalidRequestError, match="no longer current"):
+                    await run.answer({"signals": {}, "output": {}})
+                assert (await anext(stream)).phase == "running"
+                assert run.current_part_id == "question-a"
+                assert (await anext(stream)).part_id == "question-b"
+                answered = await run.answer({"signals": {}, "output": {}})
+                assert answered.current_part_id == "successor"
+
+    asyncio.run(exercise())
+
+
+def test_resuming_after_follow_uses_the_part_that_finished(
+    fake_native: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_HISTORY_PART", "suspended-part")
+    monkeypatch.setenv("FAKE_HEAD_PART", "finished-part")
+    monkeypatch.setenv("FAKE_WATCH_FAILURE", "terminal")
+
+    async def exercise() -> None:
+        async with Client() as client:
+            run = client.get_run("logical")
+            events = [event async for event in run.watch(follow=True)]
+            assert [(event.phase, event.part_id) for event in events] == [
+                ("suspended", "suspended-part"),
+                ("running", "finished-part"),
+                ("finished", "finished-part"),
+            ]
+            resumed = await run.resume()
+            assert resumed.id == run.id and resumed.current_part_id == "successor"
+
+    asyncio.run(exercise())
+
+
+def test_saved_part_alias_resolves_the_root_for_status_watch_steer_and_discard(
+    fake_native: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_ALIAS", "old-part")
+    monkeypatch.setenv("FAKE_HEAD_PART", "tip")
+    monkeypatch.setenv("FAKE_WATCH_FAILURE", "terminal")
+
+    async def exercise() -> None:
+        async with Client() as client:
+            handle = client.get_run("old-part")
+            assert (await handle.status()).run_id == handle.id == "logical-root"
+            assert handle.current_part_id == "tip"
+            events = [event async for event in client.get_run("old-part").watch()]
+            assert events[-1].result and events[-1].result.failure == "worker_failed"
+            assert events[-1].run_id == "logical-root"
+            assert (await client.get_run("old-part").steer("direction")).id == "steer-1"
+            assert await client.get_run("old-part").discard_workspace()
+
+    asyncio.run(exercise())

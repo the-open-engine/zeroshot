@@ -58,6 +58,10 @@ use connections::LocalConnectionStore;
 
 #[path = "local/backend.rs"]
 mod backend;
+#[path = "local/lineage.rs"]
+mod lineage;
+#[path = "local/streams.rs"]
+mod streams;
 
 #[path = "local/inspection.rs"]
 mod inspection;
@@ -882,9 +886,7 @@ impl LocalCliBackend {
     ) -> Result<RunListResult, NativeV2CliError> {
         let mut result = self
             .inspect_status(
-                RunStatusParams {
-                    run_id: run_id.clone(),
-                },
+                RunStatusParams::new(run_id.clone()),
                 deadline.saturating_duration_since(Instant::now()),
             )
             .await?;
@@ -893,7 +895,7 @@ impl LocalCliBackend {
         Ok(RunListResult { runs: vec![result] })
     }
 
-    async fn status_local(
+    pub(crate) async fn status_local(
         &self,
         params: RunStatusParams,
     ) -> Result<RunStatusResult, NativeV2CliError> {
@@ -1036,22 +1038,6 @@ impl LocalCliBackend {
         Ok(None)
     }
 
-    async fn local_successor_was_admitted(
-        &self,
-        ledger_path: &Path,
-        successor_run_id: &RunId,
-    ) -> Result<bool, NativeV2CliError> {
-        if !require_existing_ledger(ledger_path).map_err(local_io)? {
-            return Ok(false);
-        }
-        let ledger = SqliteRunLedger::open_read_only(ledger_path).map_err(local_error)?;
-        Ok(ledger
-            .get(successor_run_id)
-            .await
-            .map_err(local_error)?
-            .is_some())
-    }
-
     fn read_recovery_document(
         &self,
         run_id: &RunId,
@@ -1175,19 +1161,9 @@ impl LocalCliBackend {
                 self.force_once(retry).await?;
             }
         };
-        let status = self.status_local(RunStatusParams { run_id }).await?;
-        Ok(RunForceResult {
-            steering: Default::default(),
-            context_sources: status.context_sources,
-            run_id: status.run_id,
-            title: status.title,
-            source: status.source,
-            size: status.size,
-            at_cursor: status.at_cursor,
-            status: status.status,
-            controller: None,
-            workspace_recovery: status.workspace_recovery,
-        })
+        self.status_local(RunStatusParams::new(run_id))
+            .await
+            .map(physical_force_result)
     }
 
     async fn force_once(&self, params: RunForceParams) -> Result<RunForceResult, NativeV2CliError> {
@@ -1205,34 +1181,33 @@ impl LocalCliBackend {
         } else {
             None
         };
+        // The selected part may have handed off while we waited for its workspace.
+        // Only the local host sees that lineage; the controller owns one physical run.
+        if let Some(expected) = &params.part_id {
+            self.select_part(&params.run_id, Some(expected), true)
+                .await?;
+        }
         let recorded = self
-            .read_recorded_status(RunStatusParams {
-                run_id: params.run_id.clone(),
-            })
+            .read_recorded_status(RunStatusParams::new(params.run_id.clone()))
             .await;
-        if let Ok(recorded) = recorded
-            && (matches!(
-                recorded.status,
-                openengine_cluster_protocol::RunStatus::Finished { .. }
-            ) || (matches!(
-                recorded.status,
-                openengine_cluster_protocol::RunStatus::Suspended { .. }
-            ) && self
-                .read_recovery_document(&params.run_id)
-                .is_ok_and(|recovery| recovery.successor_run_id.is_some())))
-        {
-            return Ok(RunForceResult {
-                steering: Default::default(),
-                context_sources: recorded.context_sources,
-                run_id: recorded.run_id,
-                title: recorded.title,
-                source: recorded.source,
-                size: recorded.size,
-                at_cursor: recorded.at_cursor,
-                status: recorded.status,
-                controller: None,
-                workspace_recovery: recorded.workspace_recovery,
-            });
+        if let Ok(recorded) = recorded {
+            use openengine_cluster_protocol::RunStatus;
+            match &recorded.status {
+                RunStatus::Finished { .. } => return Ok(physical_force_result(recorded)),
+                RunStatus::Suspended { .. }
+                    if self
+                        .read_recovery_document(&params.run_id)
+                        .is_ok_and(|recovery| recovery.successor_run_id.is_some()) =>
+                {
+                    if params.part_id.is_some() {
+                        return Err(backend::invalid_request(
+                            "force-stop cannot proceed while this run has an unconfirmed successor",
+                        ));
+                    }
+                    return Ok(physical_force_result(recorded));
+                }
+                _ => {}
+            }
         }
         let transport = self.connect_run(&params.run_id, true).await?;
         let pid = read_ready(&paths)
@@ -1242,7 +1217,7 @@ impl LocalCliBackend {
             .unwrap_or_else(|| "unavailable".to_owned());
         self.controller_cleanup_request(&params.run_id, "force-stop", async {
             ClusterClient::new(transport.as_ref())
-                .run_force(params.clone())
+                .run_force(RunForceParams::new(params.run_id.clone()))
                 .await
                 .map_err(protocol_error)
         })
@@ -1253,6 +1228,23 @@ impl LocalCliBackend {
             ),
             error => error,
         })
+    }
+}
+
+fn physical_force_result(status: RunStatusResult) -> RunForceResult {
+    RunForceResult {
+        steering: Default::default(),
+        context_sources: status.context_sources,
+        part_id: status.run_id.clone(),
+        current_part_id: status.run_id.clone(),
+        run_id: status.run_id,
+        title: status.title,
+        source: status.source,
+        size: status.size,
+        at_cursor: status.at_cursor,
+        status: status.status,
+        controller: None,
+        workspace_recovery: status.workspace_recovery,
     }
 }
 

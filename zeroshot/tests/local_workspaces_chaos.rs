@@ -518,7 +518,10 @@ fn folder_resume_uses_stored_workspace_from_a_different_launcher() {
         .output()
         .unwrap();
     success(&resumed);
-    let resumed_id = receipt(&resumed)["runId"].as_str().unwrap().to_owned();
+    let resumed_id = receipt(&resumed)["currentPartId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     let guard = StopRun {
         fixture: &fixture,
         run_id: resumed_id.clone(),
@@ -545,10 +548,13 @@ fn folder_resume_uses_stored_workspace_from_a_different_launcher() {
         !fixture.workspace.join("resumed.txt").exists(),
         "resume imported an old provider session"
     );
-    assert!(
-        !fixture.json(&["status", &original_id])["workspaceRecovery"]["recoverable"]
-            .as_bool()
-            .unwrap()
+    let current = fixture.json(&["status", &original_id]);
+    assert_eq!(current["currentPartId"], resumed_id);
+    let predecessor = fixture.json(&["status", &original_id, "--part", &original_id]);
+    assert_eq!(predecessor["workspaceRecovery"]["recoverable"], false);
+    assert_eq!(
+        predecessor["workspaceRecovery"]["successorRunId"],
+        resumed_id
     );
     guard.stop();
 }
@@ -751,7 +757,10 @@ fn selected_plain_folder_checkpoint_restores_bytes_and_a_fresh_worker_session() 
         .output()
         .unwrap();
     success(&resumed);
-    let run_id = receipt(&resumed)["runId"].as_str().unwrap().to_owned();
+    let run_id = receipt(&resumed)["currentPartId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     let active = StopRun {
         fixture: &fixture,
         run_id: run_id.clone(),

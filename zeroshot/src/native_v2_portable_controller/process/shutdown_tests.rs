@@ -114,7 +114,7 @@ async fn shutdown_is_not_queued_behind_the_terminal_wait_it_replaces() {
     let busy = tokio::spawn(async move {
         controller
             .inner
-            .status(openengine_cluster_protocol::RunStatusParams { run_id })
+            .status(openengine_cluster_protocol::RunStatusParams::new(run_id))
             .await
     });
     tokio::task::yield_now().await;
@@ -210,9 +210,9 @@ async fn shutdown_leaves_a_suspended_run_suspended() {
             .assert_value();
         let status = controller
             .inner
-            .status(openengine_cluster_protocol::RunStatusParams {
-                run_id: run_id.clone(),
-            })
+            .status(openengine_cluster_protocol::RunStatusParams::new(
+                run_id.clone(),
+            ))
             .await
             .assert_value();
         assert!(

@@ -655,7 +655,7 @@ async fn networks_suspended_successor_keeps_once_consumption_and_sender_exclusio
     fixture.wait_suspended(&run).await;
     wait_for_exit(fixture.ready_pid(&run)).await;
     let next = fixture.json(&["resume", &run], "networks").await;
-    let next = next["runId"].as_str().assert_value();
+    let next = next["currentPartId"].as_str().assert_value();
     fixture.wait_succeeded(next, "networks").await;
     wait_for_exit(fixture.ready_pid(next)).await;
     network_no_messages(&fixture, next, "sender", 2);
@@ -745,7 +745,8 @@ fn network_rollback_fixture() -> LocalFixture {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn networks_failed_restart_and_earlier_checkpoint_deliver_to_distinct_new_branch_instances() {
     let fixture = network_rollback_fixture();
-    let mut run = fixture.submit_detached("networks").await;
+    let logical = fixture.submit_detached("networks").await;
+    let mut run = logical.clone();
     confirm_sequential_publications(&fixture, &run, 0).await;
     fixture
         .wait_terminal(&run, "networks", "network_retry")
@@ -781,7 +782,7 @@ async fn networks_failed_restart_and_earlier_checkpoint_deliver_to_distinct_new_
         } else {
             None
         };
-        let mut args = vec!["resume", &run];
+        let mut args = vec!["resume", &logical, "--part", &run];
         if let Some(checkpoint_id) = &checkpoint_id {
             args.extend([
                 "--from-checkpoint",
@@ -792,7 +793,9 @@ async fn networks_failed_restart_and_earlier_checkpoint_deliver_to_distinct_new_
             args.push("--restart");
         }
         let next = fixture.json(&args, "networks").await;
-        let next = next["runId"].as_str().assert_value().to_owned();
+        assert_eq!(next["runId"], logical);
+        assert_eq!(next["resumedFromPartId"], run);
+        let next = next["currentPartId"].as_str().assert_value().to_owned();
         fixture
             .wait_terminal(&next, "networks", "network_retry")
             .await;
@@ -818,7 +821,7 @@ async fn networks_failed_restart_and_earlier_checkpoint_deliver_to_distinct_new_
             );
             assert_eq!(received.matches(STANDING).count(), 1);
         }
-        let status = fixture.json(&["status", &next], "networks").await;
+        let status = fixture.json(&["status", &logical, "--part", &next], "networks").await;
         let steers = status["steers"].as_array().assert_value();
         assert_eq!(steers.len(), 2, "the alternate branch must not republish");
         assert_eq!(steers[0]["network"]["origin"], source);

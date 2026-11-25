@@ -98,9 +98,7 @@ async fn durable_terminal_wins_over_stale_runtime_failure() {
     // The source still has its old fallback; the UI must prefer the durable terminal regardless.
     assert!(matches!(
         observations
-            .status(RunStatusParams {
-                run_id: fixture.id.clone()
-            })
+            .status(RunStatusParams::new(fixture.id.clone()))
             .await
             .assert_value()
             .status,
@@ -358,9 +356,7 @@ async fn failure_observation_requires_exact_run_canonical_cursor_and_reserved_re
         .assert_value()
         .snapshot;
     let valid = observations
-        .status(RunStatusParams {
-            run_id: fixture.id.clone(),
-        })
+        .status(RunStatusParams::new(fixture.id.clone()))
         .await
         .assert_value();
     assert!(confirmed_failure(&snapshot, valid.clone()).is_some());
@@ -480,9 +476,7 @@ mod local {
             .assert_value()
             .snapshot;
         let status = observations
-            .status(RunStatusParams {
-                run_id: fixture.id.clone(),
-            })
+            .status(RunStatusParams::new(fixture.id.clone()))
             .await
             .assert_value();
         let directory = SocketDirectory::new();
@@ -607,7 +601,7 @@ async fn request_attachments_stay_out_of_run_history_lists_pages_and_sse() {
         assert_eq!(list["runs"][0]["suspension"], definition["suspension"]);
     }
     let (authority, task) = serve_local_ui(&fixture).await;
-    let response = reqwest::Client::new()
+    let mut response = reqwest::Client::new()
         .get(format!(
             "http://{authority}/ui/api/runs/{}/events",
             fixture.id.as_str()
@@ -616,13 +610,20 @@ async fn request_attachments_stay_out_of_run_history_lists_pages_and_sse() {
         .await
         .assert_value();
     assert_eq!(response.status(), StatusCode::OK);
-    let body = tokio::time::timeout(Duration::from_secs(2), response.text())
-        .await
-        .assert_value()
-        .assert_value();
+    // The stream stays open for an answer. Read the complete initial SSE event.
+    let body = tokio::time::timeout(Duration::from_secs(2), async {
+        let mut bytes = Vec::new();
+        while !bytes.windows(2).any(|pair| pair == b"\n\n") {
+            let chunk = response.chunk().await.assert_value().assert_value();
+            bytes.extend_from_slice(&chunk);
+        }
+        String::from_utf8(bytes).assert_value()
+    })
+    .await
+    .assert_value();
     task.abort();
     assert!(body.contains("event: history"));
-    assert!(body.contains("id: v2:2"));
+    assert!(body.contains(&format!("id: {}@v2:2\n", fixture.id.as_str())));
     assert!(body.contains("Approve?"));
     assert!(!body.contains("private-request-root"));
     assert!(!body.contains("\"artifacts\""));

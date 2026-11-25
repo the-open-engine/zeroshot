@@ -41,6 +41,7 @@ pub struct RunFailure {
 /// Writes the ordinary watch output while retaining its terminal failure context.
 pub(super) struct FailureOutput<'a, W> {
     output: &'a mut W,
+    pub(super) origin: Option<(RunId, RunId)>,
     pub(super) context: Option<(EnumLabel, Box<FailureContext>)>,
 }
 
@@ -48,6 +49,7 @@ impl<'a, W> FailureOutput<'a, W> {
     pub(super) fn new(output: &'a mut W) -> Self {
         Self {
             output,
+            origin: None,
             context: None,
         }
     }
@@ -63,12 +65,15 @@ impl<'a, W> FailureOutput<'a, W> {
         }) = status
         {
             self.context = Some((reason.clone(), context.clone()));
+        } else {
+            self.context = None;
         }
     }
 }
 
 impl<W: std::io::Write> DurableOutput for FailureOutput<'_, W> {
     fn watch_event(&mut self, event: CliRunWatchEventNotification) -> Result<(), NativeV2CliError> {
+        self.origin = Some((event.run_id.clone(), event.part_id.clone()));
         self.observe(&event.status);
         super::write_json(self.output, &event)
     }
@@ -115,13 +120,14 @@ impl RunFailure {
     pub(super) async fn read<B, D>(
         backend: &B,
         target: Option<&str>,
-        run_id: RunId,
+        run: openengine_cluster_protocol::RunStatusParams,
         detach: Pin<&mut D>,
     ) -> Self
     where
         B: NativeV2CliBackend,
         D: Future<Output = ()> + ?Sized,
     {
+        let openengine_cluster_protocol::RunStatusParams { run_id, part_id } = run;
         let mut failure = Self {
             run_id: run_id.clone(),
             target: target.map(str::to_owned),
@@ -132,6 +138,7 @@ impl RunFailure {
             context: None,
         };
         let follow = DurableFollow {
+            part_id,
             backend,
             target,
             run_id,

@@ -70,10 +70,9 @@ cannot identify the loop iteration.
 
 ## Simulated profile histories
 
-`ui/public/history-examples.json` contains ten separate, explicitly simulated
-examples. They are rendering fixtures, not native ledgers or claims of execution.
-Their graph and runtime documents were copied unchanged from the saved profiles.
-No example profile was edited, no credentials were copied, and no delivery ran.
+The Examples drawer includes ten saved-profile simulations and a three-part approval run
+derived from the security patch profile. The approval run has one menu entry. Check both
+Steps and Graph at the first request, the revision after rejection, and the final approval.
 
 | Profile                      | Expected inspection scenario                                                                                                   |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
@@ -85,22 +84,17 @@ No example profile was edited, no credentials were copied, and no delivery ran.
 | `editorial-evidence-review`  | Three concurrent map items; separate artifact paths; nested parallel review repeated; approximately 13 KB evidence transcript. |
 | `flaky-test-investigation`   | Three map items start; one times out; other two complete; authored failure terminates before report composition.               |
 | `product-launch-content-kit` | Three parallel file writers, assembly, parallel reviews, repair plan, and a second complete revision.                          |
+| `security-patch-approval`    | Two human requests across three parts, with feedback, revision, approval, and a simulated delivery.                            |
 | `security-patch-merge`       | Simulated CI failure at delivery, repair, repeated reviews, and a simulated merge receipt. Nothing was pushed or merged.       |
 | `service-incident-handoff`   | Parallel evidence writers, urgent classification, response plan, and accepted handoff.                                         |
-
-There are 251 events across these examples. Every initial input and recorded node
-input/output/diagnostic was checked against its stored graph schema; all cursors
-are contiguous and execution references are unique. Graph/runtime snapshots were
-compared with the source profiles and match exactly. These checks do not claim
-native reducer conformance for the handcrafted event sequences.
 
 Regenerate deterministically from the frozen definitions:
 
 ```bash
 python3 ui/qa/generate-history-examples.py
+npx --no-install prettier --write ui/public/history-examples.json
 ```
 
 The optional `--profiles` argument captures the ten named definitions from a
-local profile file. It reads that file and writes only the example JSON. All
-fixture runs have `example: true`, `example-` IDs, an explicit simulation notice,
-and `source.profile` pointing to the original profile name.
+local profile file. It reads that file and writes the example JSON. The approval run uses stable part IDs
+to exercise the same replay cursors as a real resumed run.

@@ -309,7 +309,15 @@ impl NativeV2TargetAuthority {
         // branch heads and turn the losing retry into a false submission conflict.
         let _turn = self.submission_turn.lock().await;
         let controller = self.controller().await?;
-        self.factory.submit(&controller, request).await
+        let receipt = self.factory.submit(&controller, request).await?;
+        let family = controller
+            .run_lineage(&receipt.run_id)
+            .await
+            .map_err(|_| TargetAuthorityError::unavailable("run lineage is unavailable"))?;
+        Ok(TargetRunReceipt {
+            run_id: family.root().clone(),
+            current_part_id: family.current().clone(),
+        })
     }
 }
 

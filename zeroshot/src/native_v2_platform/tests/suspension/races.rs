@@ -108,7 +108,7 @@ impl SuspendedEngineHarness {
         let allocator = Arc::new(SuspensionAllocator {
             runtime,
             store: Arc::new(SuspensionStore::default()),
-            successor: StdMutex::new(None),
+            successors: StdMutex::default(),
             preparation_gate: Some(watch::channel(false).0),
             policy: crate::native_v2_wait::WaitPolicy {
                 in_place_threshold: Some(Duration::from_secs(3600)),
@@ -151,7 +151,7 @@ async fn live_force_does_not_wait_for_unrelated_submission_ownership() {
     let _submission = harness.controller.submission_turn.lock().await;
     let result = tokio::time::timeout(
         Duration::from_secs(2),
-        harness.controller.force(RunForceParams { run_id: source }),
+        harness.controller.force(RunForceParams::new(source)),
     )
     .await
     .assert_value_with("live cancellation stays independent of unrelated submissions")
@@ -167,7 +167,8 @@ async fn suspended_engine_force_reserves_ownership_while_persistence_is_pending(
         let harness = SuspendedEngineHarness::new().await;
         let controller = harness.controller.clone();
         let run_id = harness.source.clone();
-        let force = tokio::spawn(async move { controller.force(RunForceParams { run_id }).await });
+        let force =
+            tokio::spawn(async move { controller.force(RunForceParams::new(run_id)).await });
         harness.ledger.force_entered.notified().await;
         harness.ledger.suspension_release.send_replace(true);
         harness
@@ -179,7 +180,14 @@ async fn suspended_engine_force_reserves_ownership_while_persistence_is_pending(
         tokio::pin!(resume);
         assert!(futures_util::poll!(&mut resume).is_pending());
         assert_eq!(harness.ledger.list().await.assert_value().len(), 1);
-        assert!(harness.allocator.successor.lock().assert_value().is_none());
+        assert!(
+            harness
+                .allocator
+                .successors
+                .lock()
+                .assert_value()
+                .is_empty()
+        );
 
         harness.ledger.force_release.send_replace(true);
         let forced = force.await.assert_value().assert_value();
@@ -205,29 +213,39 @@ async fn accepted_continuation_fences_a_previously_captured_suspended_engine() {
         let resume = harness.controller.resume(resume_params(&harness.source));
         tokio::pin!(resume);
         assert!(futures_util::poll!(&mut resume).is_pending());
-        let force = harness.controller.force(RunForceParams {
-            run_id: harness.source.clone(),
-        });
+        let force = harness
+            .controller
+            .force(RunForceParams::new(harness.source.clone()));
         tokio::pin!(force);
         assert!(futures_util::poll!(&mut force).is_pending());
+        let context = openengine_cluster_server::ConnectionContext::default();
+        let public_force = openengine_cluster_server::ClusterBackend::run_force(
+            &harness.controller,
+            &context,
+            RunForceParams::new(harness.source.clone()),
+        );
+        tokio::pin!(public_force);
+        assert!(futures_util::poll!(&mut public_force).is_pending());
         harness.ledger.suspension_release.send_replace(true);
         let successor = resume.await.assert_value();
         let before = harness
             .controller
-            .status(RunStatusParams {
-                run_id: harness.source.clone(),
-            })
+            .status(RunStatusParams::new(harness.source.clone()))
             .await
             .assert_value();
         harness.ledger.force_release.send_replace(true);
         let forced = force.await.assert_value();
+        let stale = public_force.await.assert_error();
+        assert_eq!(stale.code, openengine_cluster_protocol::RUN_CONFLICT);
+        assert_eq!(
+            stale.details.assert_value()["currentPartId"],
+            successor.run_id.as_str()
+        );
         assert_eq!(forced.status, before.status);
         assert_eq!(forced.at_cursor, before.at_cursor);
         let after = harness
             .controller
-            .status(RunStatusParams {
-                run_id: harness.source.clone(),
-            })
+            .status(RunStatusParams::new(harness.source.clone()))
             .await
             .assert_value();
         assert_eq!(after, before);
@@ -248,9 +266,7 @@ async fn accepted_continuation_fences_a_previously_captured_suspended_engine() {
         // Settle the deliberately held successor preparation before leaving the test.
         harness
             .controller
-            .force(RunForceParams {
-                run_id: successor.run_id,
-            })
+            .force(RunForceParams::new(successor.run_id))
             .await
             .assert_value();
     })

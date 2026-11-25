@@ -288,7 +288,7 @@ function Activity({ data, selected }: NodeProps<Node<ActivityData>>) {
 
 const requestStandingLabels = {
   pending: 'Waiting for an answer',
-  continued: 'Continued in a successor run',
+  continued: 'Continued in a later part',
   expired: 'Expired without an answer',
 } as const;
 

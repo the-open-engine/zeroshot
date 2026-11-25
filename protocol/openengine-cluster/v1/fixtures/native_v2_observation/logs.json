@@ -2,6 +2,7 @@
   "event": {
     "cursor": "v2:9",
     "execution": "opaque-verifier-b",
+    "partId": "run-1",
     "record": {
       "level": "info",
       "message": "historical output",

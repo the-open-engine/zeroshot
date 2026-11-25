@@ -48,7 +48,7 @@ async fn checkpointed_run(fixture: &DeliveryFixture) -> CheckpointedRun {
         !run.status.success() && fixture.codex_log.exists(),
         "precondition: the fake delivery leaves a failed run with worker checkpoints: {run:?}"
     );
-    let run_id = receipt_id(&run);
+    let run_id = receipt_part_id(&run);
     let checkpoints = json_output(fixture, &["checkpoints", &run_id], &path).await;
     let checkpoint = checkpoints
         .assert_key("checkpoints")
@@ -173,8 +173,9 @@ async fn checkpoint_resume_checks_the_restored_gh_once_before_agents_start() {
     fs::remove_file(tools.join("gh")).assert_value();
     let resumed = output(&fixture, &arguments, &path).await;
     assert!(resumed.status.success(), "{resumed:?}");
-    let successor = receipt_id(&resumed);
-    let watched = output(&fixture, &["watch", &successor], &path).await;
+    let successor = receipt_part_id(&resumed);
+    assert_ne!(successor, run_id);
+    let watched = output(&fixture, &["watch", &run_id, "--part", &successor], &path).await;
     assert!(
         !watched.status.success(),
         "fake delivery unexpectedly succeeded"
@@ -407,7 +408,7 @@ async fn json_output(fixture: &DeliveryFixture, arguments: &[&str], path: &OsStr
     serde_json::from_slice(&result.stdout).assert_value()
 }
 
-fn receipt_id(result: &Output) -> String {
+fn receipt_part_id(result: &Output) -> String {
     let first = result
         .stdout
         .split(|byte| *byte == b'\n')
@@ -415,7 +416,7 @@ fn receipt_id(result: &Output) -> String {
         .assert_value();
     let receipt: Value = serde_json::from_slice(first).assert_value();
     receipt
-        .assert_key("runId")
+        .assert_key("currentPartId")
         .as_str()
         .assert_value()
         .to_owned()

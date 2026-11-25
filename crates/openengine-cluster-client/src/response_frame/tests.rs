@@ -7,7 +7,7 @@ use tokio::io::BufReader;
 
 fn status(text: String) -> serde_json::Value {
     json!({
-        "runId":"run-1","title":"Inventory request",
+        "runId":"run-1","partId":"run-1","currentPartId":"run-1","title":"Inventory request",
         "source":{"repository":"open-engine/zeroshot","branch":"main",
             "revision":"0123456789abcdef0123456789abcdef01234567"},
         "size":"small","atCursor":"v2:1",

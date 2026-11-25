@@ -46,8 +46,10 @@ def _named_target(value: object) -> NamedTarget:
     )
 
 
-def _status(value: object) -> RunStatus:
+def _status(value: object, *, watch: bool = False) -> RunStatus:
     root = _mapping(value, "run status")
+    run_id = _string(root, "runId", "run status")
+    part_id = _string(root, "partId", "run status")
     native_status = _mapping(root.get("status"), "run status.status")
     phase = cast(
         _Phase,
@@ -74,18 +76,22 @@ def _status(value: object) -> RunStatus:
     graph_result = None
     if phase in {"running", "stopping"} and native_status.get("graphResult") is not None:
         graph_result = _terminal_result(
-            _string(root, "runId", "run status"),
+            run_id,
+            part_id,
             native_status["graphResult"],
             None,
         )
     if phase == "finished":
         result = _terminal_result(
-            _string(root, "runId", "run status"),
+            run_id,
+            part_id,
             native_status.get("terminalResult"),
             native_status.get("metadata"),
         )
     return RunStatus(
-        run_id=_string(root, "runId", "run status"),
+        run_id=run_id,
+        part_id=part_id,
+        current_part_id=None if watch else _string(root, "currentPartId", "run status"),
         title=_string(root, "title", "run status"),
         source=_source(root.get("source")),
         size=_string(root, "size", "run status"),
@@ -103,9 +109,13 @@ def _status(value: object) -> RunStatus:
 
 
 def _summary(status: RunStatus) -> RunSummary:
+    if status.current_part_id is None:
+        raise ProtocolError("Zeroshot omitted currentPartId from run inventory")
     failure = status.result.failure if status.result is not None else None
     return RunSummary(
         run_id=status.run_id,
+        part_id=status.part_id,
+        current_part_id=status.current_part_id,
         title=status.title,
         source=status.source,
         size=status.size,
@@ -144,6 +154,7 @@ def _log_event(value: object) -> LogEvent:
         raise ProtocolError("Zeroshot emitted a non-string log execution selector")
     return LogEvent(
         run_id=_string(root, "runId", "log event"),
+        part_id=_string(root, "partId", "log event"),
         cursor=_string(root, "cursor", "log event"),
         timestamp=_positive_javascript_safe_integer(root, "timestamp", "log event"),
         execution=execution,
@@ -191,7 +202,9 @@ def _remote(value: object) -> ResolvedGitRemote | None:
     )
 
 
-def _terminal_result(run_id: str, value: object, metadata: object = None) -> RunResult:
+def _terminal_result(
+    run_id: str, part_id: str, value: object, metadata: object = None
+) -> RunResult:
     receipt = None
     if metadata is not None:
         fields = _mapping(metadata, "run status.status.metadata")
@@ -209,12 +222,14 @@ def _terminal_result(run_id: str, value: object, metadata: object = None) -> Run
             raise ProtocolError("Zeroshot omitted terminal success output")
         return RunResult(
             run_id=run_id,
+            part_id=part_id,
             succeeded=True,
             delivery_receipt=receipt,
             output=cast(JsonValue, terminal["output"]),
         )
     return RunResult(
         run_id=run_id,
+        part_id=part_id,
         succeeded=False,
         delivery_receipt=receipt,
         failure=_string(terminal, "reason", "run status.status.terminalResult"),
@@ -481,6 +496,7 @@ def _vector(value: object) -> RunVector:
     return RunVector(
         id=_string(entry, "id", "vector"),
         run_id=_string(entry, "runId", "vector"),
+        part_id=_string(entry, "partId", "vector"),
         created_at=_positive_javascript_safe_integer(entry, "createdAt", "vector"),
         kind=_string(entry, "kind", "vector"),
         content=cast(JsonValue, dict(entry)),
@@ -491,6 +507,7 @@ def _vectors(value: object) -> RunVectorsPage:
     page = _mapping(value, "vector page")
     return RunVectorsPage(
         run_id=_string(page, "runId", "vector page"),
+        part_id=_string(page, "partId", "vector page"),
         vectors=tuple(_vector(item) for item in _mapping_list(page.get("vectors"), "vectors")),
         next_after=_nullable_string(
             {"nextAfter": page.get("nextAfter")}, "nextAfter", "vector page"
@@ -515,6 +532,7 @@ def _inbox(value: object) -> InboxPage:
         requests=tuple(
             InboxEntry(
                 run_id=_string(entry, "runId", "inbox"),
+                part_id=_string(entry, "partId", "inbox"),
                 node=_string(entry, "node", "inbox"),
                 created_at=_positive_javascript_safe_integer(entry, "createdAt", "inbox"),
                 expires_at=_positive_javascript_safe_integer(entry, "expiresAt", "inbox"),
@@ -533,6 +551,7 @@ def _inbox_request(value: object) -> InboxRequest:
     request = _mapping(value, "inbox request")
     return InboxRequest(
         run_id=_string(request, "runId", "inbox request"),
+        part_id=_string(request, "partId", "inbox request"),
         node=_string(request, "node", "inbox request"),
         created_at=_positive_javascript_safe_integer(request, "createdAt", "inbox request"),
         request=_human_request(request.get("request")),
@@ -542,8 +561,8 @@ def _inbox_request(value: object) -> InboxRequest:
                 request, "state", {"pending", "answered", "expired", "stopped"}, "inbox request"
             ),
         ),
-        successor_run_id=_nullable_string(
-            {"successorRunId": request.get("successorRunId")}, "successorRunId", "inbox request"
+        successor_part_id=_nullable_string(
+            {"successorPartId": request.get("successorPartId")}, "successorPartId", "inbox request"
         ),
     )
 

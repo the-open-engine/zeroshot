@@ -115,7 +115,7 @@ fn watch_event(
     CliSubscriptionItem::Event(
         serde_json::from_value(json!({
             "subscriptionId":subscription_id,
-            "runId":params.run_id,
+            "partId":params.run_id,"runId":params.run_id,
             "title":"Repair checkout",
             "source":source(),
             "size":"medium",

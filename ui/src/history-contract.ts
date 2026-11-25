@@ -3,6 +3,11 @@ import { validFailureContext } from './failure-context';
 import type { HistoryPage, RunDetail, RuntimeFailure } from './run-history';
 
 export function historyCursorSequence(cursor: unknown): bigint {
+  if (
+    typeof cursor === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}@/.test(cursor)
+  )
+    cursor = cursor.slice(cursor.indexOf('@') + 1);
   if (typeof cursor !== 'string' || !/^v2:(0|[1-9][0-9]*)$/.test(cursor))
     throw new Error('History contains a gap or inconsistent cursor. Reload to try again.');
   const sequence = BigInt(cursor.slice(3));
@@ -52,10 +57,14 @@ export function readRuntimeFailure(value: unknown, head: unknown): RuntimeFailur
 }
 
 export function readPageRuntimeFailure(
-  page: Pick<HistoryPage, 'runtimeFailure' | 'headCursor' | 'finished'>
+  page: Pick<
+    HistoryPage,
+    'runtimeFailure' | 'headCursor' | 'finished' | 'partHeadCursor' | 'partId' | 'currentPartId'
+  >
 ): RuntimeFailure | undefined {
-  const failure = readRuntimeFailure(page.runtimeFailure, page.headCursor);
-  if (failure && page.finished !== true) throw invalidRuntimeFailure();
+  const failure = readRuntimeFailure(page.runtimeFailure, page.partHeadCursor ?? page.headCursor);
+  if (failure && page.finished !== true && page.partId === page.currentPartId)
+    throw invalidRuntimeFailure();
   return failure;
 }
 
@@ -87,8 +96,22 @@ export function observationEnded(
   return observation ? !['active', 'collecting'].includes(observation.state) : fallback;
 }
 export function canFollowHistory(run: RunDetail): boolean {
-  if (run.phase === 'suspended') return false;
+  if (run.phase === 'suspended') return !!run.parts && !run.partView && !run.example;
   return (
     !run.example && !observationEnded(run.observation, run.history.complete || !!run.runtimeFailure)
   );
+}
+
+/** The backend transports native u64 identities as strings; accept only lossless legacy numbers. */
+export function executionIdentity(value: string | number): string {
+  if (typeof value === 'number' && (!Number.isSafeInteger(value) || value < 1)) {
+    throw new Error(
+      'History contains an imprecise execution identity. Reload with a compatible server.'
+    );
+  }
+  return String(value);
+}
+
+export function scopedExecutionId(part: string | undefined, execution: string | number) {
+  return part ? `${part}@${executionIdentity(execution)}` : executionIdentity(execution);
 }

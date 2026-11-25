@@ -33,6 +33,7 @@ mod storage_failure;
 
 pub use storage_failure::SqliteStorageError;
 
+pub use state::merge_usage;
 pub(crate) use state::validate_admitted_run;
 pub(crate) use state::{
     apply_event, apply_stored_event, cursor_for, cursor_sequence, initial_cursor, prepare_event,

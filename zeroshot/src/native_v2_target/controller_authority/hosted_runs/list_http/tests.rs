@@ -4,7 +4,7 @@ use serde_json::json;
 use super::*;
 
 fn status() -> serde_json::Value {
-    json!({"runId":"request-run","title":"Approval","size":"medium","atCursor":"v2:1",
+    json!({"runId":"request-run","currentPartId":"request-run","partId":"request-run","title":"Approval","size":"medium","atCursor":"v2:1",
         "status":{"phase":"suspended","reason":"request","node":"approval","createdAt":1000,
         "request":{"id":"question","text":"Escaped \\\" } ], [ é","signals":{"decision":["approved","rejected"]},
             "output":{"kind":"record","fields":{}},"expiresAt":2000},"metadata":{}}})

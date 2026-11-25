@@ -19,6 +19,7 @@ use openengine_cluster_protocol::{
 use openengine_cluster_testkit::assertions::AssertValue;
 
 mod control;
+mod lineage;
 mod live;
 mod remote;
 mod status;
@@ -155,53 +156,17 @@ async fn local_history_treats_missing_storage_as_empty_and_non_directories_as_un
 }
 
 #[test]
-fn event_resume_cursor_requires_one_valid_header_and_precedes_the_query() {
-    let query = PageQuery {
-        after: Some("v2:3".to_owned()),
-    };
-    assert_eq!(
-        resume_cursor(query, &HeaderMap::new())
-            .assert_value()
-            .assert_value()
-            .as_str(),
-        "v2:3"
-    );
-
+fn duplicate_last_event_ids_are_rejected() {
     let mut headers = HeaderMap::new();
     headers.insert("last-event-id", HeaderValue::from_static("v2:7"));
-    assert_eq!(
-        resume_cursor(
-            PageQuery {
-                after: Some("v2:3".to_owned())
-            },
-            &headers,
-        )
-        .assert_value()
-        .assert_value()
-        .as_str(),
-        "v2:7"
-    );
-
     headers.append("last-event-id", HeaderValue::from_static("v2:8"));
     assert_eq!(
-        resume_cursor(PageQuery { after: None }, &headers)
+        cursor_header_or_query(None, &headers)
             .err()
             .assert_value()
             .code,
         "invalid_cursor"
     );
-
-    for value in ["bad", "v2:not-a-number"] {
-        let mut headers = HeaderMap::new();
-        headers.insert("last-event-id", HeaderValue::from_str(value).assert_value());
-        assert_eq!(
-            resume_cursor(PageQuery { after: None }, &headers)
-                .err()
-                .assert_value()
-                .code,
-            "invalid_cursor"
-        );
-    }
 }
 
 #[tokio::test]

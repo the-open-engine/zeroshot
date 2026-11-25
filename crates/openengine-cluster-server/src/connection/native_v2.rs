@@ -183,16 +183,9 @@ where
             Ok(params) => params,
             Err(_) => return subscription_invalid_params(id),
         };
-        match self.run_watch(params).await {
-            Ok((result, stream)) => {
-                let subscription_id = result.subscription_id.clone();
-                (
-                    serialize_success(id, result),
-                    Some((subscription_id, stream, ())),
-                )
-            }
-            Err(error) => (serialize_backend_error(id, error), None),
-        }
+        subscription_reply(id, self.run_watch(params).await, |result| {
+            result.subscription_id
+        })
     }
 
     pub(crate) async fn dispatch_run_logs(
@@ -204,16 +197,9 @@ where
             Ok(params) => params,
             Err(_) => return subscription_invalid_params(id),
         };
-        match self.run_logs(params).await {
-            Ok((result, stream)) => {
-                let subscription_id = result.subscription_id.clone();
-                (
-                    serialize_success(id, result),
-                    Some((subscription_id, stream, ())),
-                )
-            }
-            Err(error) => (serialize_backend_error(id, error), None),
-        }
+        subscription_reply(id, self.run_logs(params).await, |result| {
+            result.subscription_id
+        })
     }
 
     pub(crate) async fn dispatch_run_attach(
@@ -225,16 +211,23 @@ where
             Ok(params) => params,
             Err(_) => return subscription_invalid_params(id),
         };
-        match self.run_attach(params).await {
-            Ok((result, stream)) => {
-                let subscription_id = result.subscription_id.clone();
-                (
-                    serialize_success(id, result),
-                    Some((subscription_id, stream, ())),
-                )
-            }
-            Err(error) => (serialize_backend_error(id, error), None),
-        }
+        subscription_reply(id, self.run_attach(params).await, |result| {
+            result.subscription_id
+        })
+    }
+}
+
+fn subscription_reply<R: serde::Serialize, S>(
+    id: RequestId,
+    opened: Result<(R, S), crate::BackendError>,
+    subscription_id: impl FnOnce(R) -> SubscriptionId,
+) -> (String, Option<(SubscriptionId, S, ())>) {
+    match opened {
+        Ok((result, stream)) => (
+            serialize_success(id, &result),
+            Some((subscription_id(result), stream, ())),
+        ),
+        Err(error) => (serialize_backend_error(id, error), None),
     }
 }
 

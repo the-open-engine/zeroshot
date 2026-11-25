@@ -37,6 +37,7 @@ async fn hosted_recovery_uses_authenticated_http_without_the_deleted_capsules_tr
                 Some("prod"),
                 RunResumeParams {
                     runtime: None,
+                    part_id: run_id.clone(),
                     run_id: run_id.clone(),
                     successor_run_id: RunId::new("successor"),
                     from,
@@ -51,13 +52,15 @@ async fn hosted_recovery_uses_authenticated_http_without_the_deleted_capsules_tr
             )
             .await
             .assert_value();
-        assert_eq!(result.run_id, RunId::new("successor"));
+        assert_eq!(result.run_id, run_id);
+        assert_eq!(result.current_part_id, RunId::new("successor"));
         assert_eq!(result.resumed_from, run_id);
     }
     let checkpoints = backend
         .run_checkpoints(
             Some("prod"),
             RunCheckpointsParams {
+                part_id: None,
                 run_id: run_id.clone(),
                 after: Some(CheckpointId::new("page/after").assert_value()),
                 limit: Some(5),
@@ -70,6 +73,7 @@ async fn hosted_recovery_uses_authenticated_http_without_the_deleted_capsules_tr
         .run_discard_workspace(
             Some("prod"),
             RunDiscardWorkspaceParams {
+                part_id: None,
                 run_id: run_id.clone(),
             },
         )
@@ -81,6 +85,7 @@ async fn hosted_recovery_uses_authenticated_http_without_the_deleted_capsules_tr
         .run_vectors(
             Some("prod"),
             openengine_cluster_protocol::RunVectorsParams {
+                part_id: None,
                 run_id: run_id.clone(),
                 after: Some(openengine_cluster_protocol::VectorId::new("before").assert_value()),
                 limit: Some(2),
@@ -94,6 +99,7 @@ async fn hosted_recovery_uses_authenticated_http_without_the_deleted_capsules_tr
         .run_vector(
             Some("prod"),
             openengine_cluster_protocol::RunVectorParams {
+                part_id: None,
                 run_id: run_id.clone(),
                 id: vectors.vectors[0].id.clone(),
             },
@@ -157,10 +163,10 @@ pub(super) fn response(request: &CapturedHttpRequest) -> Option<String> {
     let body: Value = serde_json::from_str(&request.body).assert_value();
     Some(
         match suffix {
-            "resume" => json!({"runId": body["successorRunId"], "resumedFrom": body["runId"]}),
-            "checkpoints" => json!({"runId": body["runId"], "checkpoints": []}),
-            "discard-workspace" => json!({"runId": body["runId"], "discarded": true}),
-            "vectors" => json!({"runId": body["runId"], "vectors":[vector()], "nextAfter":"entry"}),
+            "resume" => json!({"runId": body["runId"], "currentPartId": body["successorPartId"], "resumedFromPartId": body["partId"]}),
+            "checkpoints" => json!({"runId": body["runId"], "partId": body["runId"], "checkpoints": []}),
+            "discard-workspace" => json!({"runId": body["runId"], "partId": body["runId"], "discarded": true}),
+            "vectors" => json!({"runId": body["runId"], "partId": body["runId"], "vectors":[vector()], "nextAfter":"entry"}),
             "vector" => vector(),
             _ => return None,
         }
@@ -169,7 +175,7 @@ pub(super) fn response(request: &CapturedHttpRequest) -> Option<String> {
 }
 
 fn vector() -> Value {
-    json!({"id":"entry", "kind":"suspend_request", "runId":"run-recoverable", "createdAt":1})
+    json!({"id":"entry", "kind":"suspend_request", "runId":"run-recoverable", "partId":"run-recoverable", "createdAt":1})
 }
 
 #[tokio::test]
@@ -185,6 +191,7 @@ async fn resume_runtime_refuses_an_older_target_before_credentials_or_resume() {
             &zeroshot_engine::native_v2_cli::RunSelector {
                 controller: Default::default(),
                 target: Some("prod".to_owned()),
+                part_id: None,
                 run_id: RunId::new("prior"),
             },
             &runtime,

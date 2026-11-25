@@ -1,6 +1,10 @@
 import type { EnvironmentDefinition } from './environment-store';
 import type { FailureContext } from './failure-context';
-import type { HistoryObservation } from './history-contract';
+import {
+  executionIdentity as identity,
+  scopedExecutionId,
+  type HistoryObservation,
+} from './history-contract';
 import {
   allNodes,
   children,
@@ -30,6 +34,10 @@ export type RuntimeFailure = {
   context?: FailureContext | null;
 };
 export type RunSummary = {
+  currentPartId?: string;
+  partId?: string;
+  partView?: boolean;
+  partCount?: number;
   runId: string;
   title: string;
   phase: string;
@@ -58,6 +66,7 @@ export type RunSummary = {
   example?: boolean;
 };
 export type RunDetail = Omit<RunSummary, 'cursor' | 'terminal'> & {
+  parts?: string[];
   version: 1;
   projectionVersion: 1;
   cursor: string;
@@ -85,6 +94,10 @@ export type Outcome = {
   artifacts?: unknown[];
 };
 export type HistoryEvent = {
+  partId?: string;
+  partCursor?: string;
+  runCursor?: string;
+  resumeReason?: string;
   cursor: string;
   /**
    * Unix milliseconds when the ledger recorded this event; one value per append batch and never
@@ -111,6 +124,15 @@ export type HistoryEvent = {
   };
 };
 export type HistoryPage = {
+  runId?: string;
+  currentPartId?: string;
+  partId?: string;
+  partAfterCursor?: string;
+  partHeadCursor?: string;
+  partNextCursor?: string;
+  imports?: HistoryEvent[];
+  omittedCursors?: string[];
+  importedControl?: ControlRecord[];
   observation?: HistoryObservation;
   events: HistoryEvent[];
   nextCursor: string;
@@ -137,6 +159,8 @@ export function finishRunHistory(
   events: readonly HistoryEvent[],
   page: Pick<HistoryPage, 'headCursor' | 'runtimeFailure' | 'observation'>
 ): RunDetail {
+  if (run.parts && !run.partView)
+    events = events.filter((entry) => entry.partId === run.currentPartId);
   let recordedTerminal: RunTerminal | undefined;
   for (let index = events.length - 1; index >= 0; index--) {
     if (events[index].event.kind === 'terminal') {
@@ -168,6 +192,9 @@ export function finishRunHistory(
 }
 export type NodeState = 'idle' | 'running' | 'suspended' | 'succeeded' | 'failed' | 'skipped';
 export type Invocation = {
+  partId?: string;
+  /** The original step represented by this part’s checkpoint prerequisite. */
+  originalId?: string;
   id: ExecutionId;
   node: string;
   instance: string;
@@ -216,7 +243,7 @@ export type PersonRequest = {
     | { kind: 'expiry'; at?: number; runId?: string };
 };
 /** Where this run continued an earlier one, at the index of its continuation record. */
-export type RunHandoff = { kind: 'continued'; index: number; from: string };
+export type RunHandoff = { kind: 'continued'; index: number; from: string; label?: string };
 type PriorExecution = {
   execution: string | number;
   node_instance: string | number;
@@ -239,6 +266,7 @@ type VectorRecord = {
   answer?: { signals: Record<string, string>; output: unknown };
   reason?: string;
   resumedFrom?: string;
+  checkpointId?: string;
 };
 export type Moment = {
   index: number;
@@ -383,14 +411,38 @@ function vectorLabel(vector: VectorRecord | undefined): string {
   }
 }
 /** Imported work and bookkeeping records are context, not stops worth replaying one by one. */
+function continuationLabel(record: HistoryEvent): string | undefined {
+  const vector = record.event.vector;
+  if (!record.partId || vector?.kind !== 'continuation') return;
+  switch (record.resumeReason) {
+    case 'request':
+      return 'Continued after a request';
+    case 'wait':
+      return 'Continued after a wait';
+    case 'command':
+      return 'Resumed after a pause';
+    case 'retry':
+      return 'Retried after failure';
+    case 'checkpoint':
+      return vector.checkpointId
+        ? `Restored checkpoint ${vector.checkpointId}`
+        : 'Restored checkpoint';
+    default:
+      return 'Continued in a new part';
+  }
+}
+
 const quietVectors = new Set(['suspend_request', 'wait']);
 
 /** Timeline stops are durable lifecycle facts. Logs between stops belong to the next stop. */
 export function historyMoments(events: readonly HistoryEvent[], pinnedIndex?: number): Moment[] {
   const moments: Moment[] = [{ index: -1, cursor: 'v2:0', label: 'Before the run' }];
-  events.forEach(({ event, cursor }, index) => {
+  events.forEach((record, index) => {
+    const { event, cursor } = record;
     if (
-      (['safe_log', 'token_usage_observed', 'prior_execution'].includes(event.kind) ||
+      (['safe_log', 'token_usage_observed', 'prior_execution', 'control_position'].includes(
+        event.kind
+      ) ||
         (event.kind === 'vector' && quietVectors.has(event.vector?.kind ?? ''))) &&
       index !== pinnedIndex
     )
@@ -398,7 +450,7 @@ export function historyMoments(events: readonly HistoryEvent[], pinnedIndex?: nu
     moments.push({
       index,
       cursor,
-      label: eventLabel(event),
+      label: continuationLabel(record) ?? eventLabel(event),
       node: eventNode(event),
       state:
         event.kind === 'node_started'
@@ -432,13 +484,15 @@ export function nodeReplayPositions(
   const executions = new Map<string, string>();
   const positions = new Set<number>();
   let position = 1;
-  events.forEach(({ event }, index) => {
+  events.forEach(({ event, partId }, index) => {
     while (position < moments.length && moments[position].index < index) position++;
     if (event.kind === 'node_started' && event.reference)
-      executions.set(identity(event.reference.execution), event.reference.node);
+      executions.set(scopedExecutionId(partId, event.reference.execution), event.reference.node);
     const name =
       eventNode(event) ??
-      (event.execution == null ? undefined : executions.get(identity(event.execution)));
+      (event.execution == null
+        ? undefined
+        : executions.get(scopedExecutionId(partId, event.execution)));
     if (name && names.has(name) && position < moments.length) positions.add(position);
   });
   const selectedCursors = new Set(
@@ -469,7 +523,8 @@ export function currentInvocation(
     const event = events[index].event;
     const execution =
       event.reference?.execution ?? event.completion?.reference.execution ?? event.execution;
-    const invocation = execution == null ? undefined : byId.get(identity(execution));
+    const invocation =
+      execution == null ? undefined : byId.get(scopedExecutionId(events[index].partId, execution));
     if (invocation) return invocation;
   }
   return invocations.at(-1);
@@ -498,7 +553,10 @@ export function projectHistory(
     requests,
     handoffs,
     unowned: [],
+    origins: new Map(),
+    previousPart: new Map(),
   };
+  let partStart = 0;
   let terminal: RunTerminal | undefined;
   let suspended = false;
   let suspension: RunSummary['suspension'];
@@ -509,14 +567,27 @@ export function projectHistory(
   const clock: { first?: number; at?: number } = {};
   let untimedStart = false;
   for (let index = 0; index <= Math.min(through, events.length - 1); index++) {
-    const { event, recordedAt } = events[index];
+    const record = events[index];
+    const { event, recordedAt } = record;
+    if (record.partId !== projection.partId) {
+      if (suspended) holdRunning(invocations.slice(partStart));
+      beginPart(projection, record.partId);
+      partStart = invocations.length;
+      terminal = undefined;
+      suspended = false;
+      suspension = undefined;
+    }
     if (recordedAt === undefined) untimedStart ||= clock.at === undefined;
     else {
       if (!untimedStart) clock.first ??= recordedAt;
       clock.at = recordedAt;
     }
     if (event.kind === 'terminal') terminal = event.result;
-    else readHistoryEvent(event, index, projection, recordedAt);
+    else {
+      readHistoryEvent(event, index, projection, recordedAt);
+      const handoff = handoffs.at(-1);
+      if (handoff?.index === index && record.partId) handoff.label = continuationLabel(record);
+    }
     if (event.kind === 'suspended') {
       suspended = true;
       suspension = event.suspension;
@@ -524,50 +595,22 @@ export function projectHistory(
   }
   // A run that ended suspended runs nothing: its open groups and held-back work wait with it.
   const held = suspended && !terminal;
+  const partInvocations = invocations.slice(partStart);
+  const allControls = projectControlHistory(control, events, through);
   const controls = settleControlVisits(
     document.graph.root,
-    projectControlHistory(control, events, through)
+    allControls.filter((visit) => visit.partId === projection.partId)
   );
-  const byControlNode = new Map<string, typeof controls>();
-  for (const visit of controls) {
-    const visits = byControlNode.get(visit.node) ?? [];
-    visits.push(visit);
-    byControlNode.set(visit.node, visits);
-  }
-  const nodes: Record<string, WorkflowNodeObservation> = Object.create(null);
-  for (const node of allNodes(document.graph.root)) {
-    const visits = byControlNode.get(node.name) ?? [];
-    if (executable(node)) {
-      nodes[node.name] = leafObservation(
-        invocations.filter((invocation) => invocation.node === node.name),
-        visits,
-        !terminal,
-        held
-      );
-    } else if (visits.length) {
-      nodes[node.name] = controlObservation(visits, held);
-    } else if (isGroup(node)) {
-      // Without a structural record, only active descendants establish a current group state.
-      const descendants = new Set(allNodes(node).map((child) => child.name));
-      const executions = invocations.filter((invocation) => descendants.has(invocation.node));
-      if (executions.some((invocation) => invocation.state === 'running'))
-        nodes[node.name] = { state: held ? 'suspended' : 'running', count: executions.length };
-      else if (executions.length)
-        nodes[node.name] = { state: 'recorded', count: executions.length };
-    }
-  }
-  if (terminal)
-    nodes[document.graph.root.name] = {
-      ...nodes[document.graph.root.name],
-      state: terminal.status === 'succeeded' ? 'succeeded' : 'failed',
-    };
+  const nodes = graphObservations(document, partInvocations, controls, terminal, held);
   // Keep the original active descendants for the graph's fallback above, then hold their
   // execution rows too. No completion or settlement time was recorded for this held work.
-  if (held)
-    for (const invocation of invocations)
-      if (invocation.state === 'running') invocation.state = 'suspended';
+  if (held) holdRunning(partInvocations);
   return {
-    invocations,
+    invocations: projection.partId
+      ? invocations.filter((work) => !projection.origins.has(work))
+      : invocations,
+    partInvocations,
+    allControls,
     nodes,
     terminal,
     systemLogs,
@@ -579,7 +622,67 @@ export function projectHistory(
   };
 }
 
+function graphObservations(
+  document: Document,
+  partInvocations: Invocation[],
+  controls: ControlVisit[],
+  terminal: RunTerminal | undefined,
+  held: boolean
+) {
+  const byControlNode = new Map<string, typeof controls>();
+  for (const visit of controls) {
+    const visits = byControlNode.get(visit.node) ?? [];
+    visits.push(visit);
+    byControlNode.set(visit.node, visits);
+  }
+  const nodes: Record<string, WorkflowNodeObservation> = Object.create(null);
+  for (const node of allNodes(document.graph.root)) {
+    const visits = byControlNode.get(node.name) ?? [];
+    if (executable(node)) {
+      nodes[node.name] = leafObservation(
+        partInvocations.filter((invocation) => invocation.node === node.name),
+        visits,
+        !terminal,
+        held
+      );
+    } else if (visits.length) {
+      nodes[node.name] = controlObservation(visits, held);
+    } else if (isGroup(node)) {
+      // Without a structural record, only active descendants establish a current group state.
+      const descendants = new Set(allNodes(node).map((child) => child.name));
+      const executions = partInvocations.filter((invocation) => descendants.has(invocation.node));
+      if (executions.some((invocation) => invocation.state === 'running'))
+        nodes[node.name] = { state: held ? 'suspended' : 'running', count: executions.length };
+      else if (executions.length)
+        nodes[node.name] = { state: 'recorded', count: executions.length };
+    }
+  }
+  if (terminal)
+    nodes[document.graph.root.name] = {
+      ...nodes[document.graph.root.name],
+      state: terminal.status === 'succeeded' ? 'succeeded' : 'failed',
+    };
+  return nodes;
+}
+
+function holdRunning(work: Invocation[]) {
+  for (const invocation of work) if (invocation.state === 'running') invocation.state = 'suspended';
+}
+
+function beginPart(projection: HistoryProjection, partId: string | undefined) {
+  projection.previousPart = new Map(projection.byId);
+  projection.byId.clear();
+  projection.latestVisit.clear();
+  projection.references.clear();
+  projection.asking = undefined;
+  projection.unowned = [];
+  projection.partId = partId;
+}
+
 type HistoryProjection = {
+  partId?: string;
+  previousPart: Map<string, Invocation>;
+  origins: Map<Invocation, Invocation>;
   invocations: Invocation[];
   byId: Map<string, Invocation>;
   latestVisit: Map<string, Invocation>;
@@ -623,6 +726,7 @@ function readHistoryEvent(
     invocation.endedAt = recordedAt;
     invocation.outcome = event.completion.outcome;
     invocation.state = event.completion.outcome.status === 'error' ? 'failed' : 'succeeded';
+    settleImported(invocation, projection);
   } else if (
     ['execution_voided', 'wait_deferred', 'request_deferred'].includes(event.kind) &&
     event.reference
@@ -657,7 +761,11 @@ function openInvocation(
 ): Invocation | undefined {
   const invocation = projection.byId.get(identity(reference.execution));
   return invocation &&
-    sameReference(projection.references.get(invocation.id), reference, invocation.imported) &&
+    sameReference(
+      projection.references.get(identity(reference.execution)),
+      reference,
+      invocation.imported
+    ) &&
     invocation.end === undefined
     ? invocation
     : undefined;
@@ -680,6 +788,7 @@ function readPriorExecution(prior: PriorExecution, index: number, projection: Hi
   });
   if (!invocation) return;
   invocation.imported = true;
+  linkOriginal(invocation, projection, identity(prior.execution));
   if (prior.state === 'Active') invocation.state = 'suspended';
   else if ('Settled' in prior.state) {
     invocation.end = index;
@@ -690,11 +799,37 @@ function readPriorExecution(prior: PriorExecution, index: number, projection: Hi
     invocation.state = 'skipped';
     invocation.reason = prior.state.Voided.reason;
   }
+  settleImported(invocation, projection);
   // Inherited questions are recorded before the executions they came with.
   const question = projection.unowned.find((request) => couldHaveAsked(invocation, request));
   if (question) {
     invocation.request = question;
     projection.unowned.splice(projection.unowned.indexOf(question), 1);
+  }
+}
+
+function linkOriginal(work: Invocation, projection: HistoryProjection, execution: string) {
+  const earlier = projection.previousPart.get(execution);
+  if (
+    earlier?.node !== work.node ||
+    earlier.instance !== work.instance ||
+    earlier.attempt !== work.attempt ||
+    JSON.stringify(earlier.mapIndices) !== JSON.stringify(work.mapIndices)
+  )
+    return;
+  const original = projection.origins.get(earlier) ?? earlier;
+  projection.origins.set(work, original);
+  work.originalId = original.id;
+  work.request = original.request;
+}
+
+function settleImported(work: Invocation, projection: HistoryProjection) {
+  const original = projection.origins.get(work);
+  if (original?.state === 'suspended' && work.outcome) {
+    original.state = work.state;
+    original.outcome = work.outcome;
+    original.end = work.end;
+    original.endedAt = work.endedAt;
   }
 }
 
@@ -714,7 +849,8 @@ function startInvocation(
     start.attempt > 1 && previous?.instance === instance && start.attempt > previous.attempt;
   const visit = retry ? previous.visit : (previous?.visit ?? 0) + 1;
   const invocation: Invocation = {
-    id,
+    id: scopedExecutionId(projection.partId, id),
+    partId: projection.partId,
     node,
     instance,
     attempt: start.attempt,
@@ -796,16 +932,6 @@ function couldHaveAsked(invocation: Invocation, request: PersonRequest): boolean
     !invocation.request &&
     invocation.state !== 'skipped'
   );
-}
-
-/** The backend transports native u64 identities as strings; accept only lossless legacy numbers. */
-function identity(value: string | number): string {
-  if (typeof value === 'number' && (!Number.isSafeInteger(value) || value < 1)) {
-    throw new Error(
-      'History contains an imprecise execution identity. Reload with a compatible server.'
-    );
-  }
-  return String(value);
 }
 
 function sameReference(

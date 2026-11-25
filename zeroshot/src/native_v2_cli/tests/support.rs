@@ -240,6 +240,7 @@ pub(in crate::native_v2_cli) struct FakeBackend {
     submitted_stacks: Arc<Mutex<Vec<PreparedStackRequest>>>,
     resume_requirements: Option<RunConnectionRequirements>,
     resume_source: Option<Value>,
+    resume_part_id: Option<RunId>,
     checkpoint_pages: Option<Vec<RunCheckpointsResult>>,
     trusted_resume_requirements: Option<RunConnectionRequirements>,
     resource_scope: Option<openengine_cluster_protocol::ConnectionScope>,
@@ -256,6 +257,11 @@ pub(super) enum CursorCallKind {
 }
 
 impl FakeBackend {
+    pub(super) fn with_resume_part(mut self, part: &str) -> Self {
+        self.resume_part_id = Some(RunId::new(part));
+        self
+    }
+
     pub(super) fn with_checkpoint_pages(mut self, pages: Vec<RunCheckpointsResult>) -> Self {
         self.checkpoint_pages = Some(pages);
         self
@@ -813,6 +819,7 @@ impl NativeV2CliBackend for FakeBackend {
             return Err(NativeV2CliError::Protocol("submission rejected".to_owned()));
         }
         Ok(RunSubmitResult {
+            current_part_id: RunId::new("run-public"),
             run_id: RunId::new("run-public"),
         })
     }
@@ -851,6 +858,8 @@ impl NativeV2CliBackend for FakeBackend {
         }
         if let Some(requirements) = &self.resume_requirements {
             return serde_json::from_value(json!({
+                "partId":self.resume_part_id.as_ref().unwrap_or(&params.run_id),
+                "currentPartId":self.resume_part_id.as_ref().unwrap_or(&params.run_id),
                 "runId":params.run_id,
                 "title":"Repair checkout",
                 "source":self.resume_source.as_ref().cloned().unwrap_or_else(source),
@@ -918,7 +927,7 @@ impl NativeV2CliBackend for FakeBackend {
                 CliSubscriptionItem::Event(
                     serde_json::from_value(json!({
                         "subscriptionId":"watch-1",
-                        "runId":params.run_id,
+                        "partId":params.run_id,"runId":params.run_id,
                         "title":"Repair checkout",
                         "source":source(),
                         "size":"medium",
@@ -937,7 +946,7 @@ impl NativeV2CliBackend for FakeBackend {
         Ok(FakeSubscription::items(vec![CliSubscriptionItem::Event(
             serde_json::from_value(json!({
                 "subscriptionId":"watch-1",
-                "runId":params.run_id,
+                "partId":params.run_id,"runId":params.run_id,
                 "title":"Repair checkout",
                 "source":source(),
                 "size":"medium",
@@ -981,7 +990,7 @@ impl NativeV2CliBackend for FakeBackend {
             let event = CliSubscriptionItem::Event(
                 serde_json::from_value(json!({
                     "subscriptionId":format!("logs-{attempt}"),
-                    "runId":params.run_id,
+                    "partId":params.run_id,"runId":params.run_id,
                     "cursor":cursor,
                     "timestamp":1_725_000_000_123_u64,
                     "record":{"level":"info","target":"agent","message":message}
@@ -1073,7 +1082,7 @@ impl NativeV2CliBackend for FakeBackend {
             run_id: params.run_id.as_str().to_owned(),
         });
         serde_json::from_value(json!({
-            "runId":params.run_id,
+            "partId":params.run_id,"currentPartId":params.run_id,"runId":params.run_id,
             "title":"Repair checkout",
             "source":source(),
             "size":"medium",
@@ -1131,6 +1140,7 @@ impl NativeV2CliBackend for FakeBackend {
             .is_some_and(|after| after.as_str() == "entry-8");
         Ok(RunCheckpointsResult {
             controller: None,
+            part_id: params.run_id.clone(),
             run_id: params.run_id,
             checkpoints: vec![RunCheckpoint {
                 checkpoint_id: CheckpointId::new(if last_page { "entry-9" } else { "entry-8" })
@@ -1157,8 +1167,9 @@ impl NativeV2CliBackend for FakeBackend {
             discard_workspace_changes,
         });
         Ok(openengine_cluster_protocol::RunResumeResult {
-            run_id: params.successor_run_id,
-            resumed_from: params.run_id,
+            current_part_id: params.successor_run_id,
+            run_id: params.run_id,
+            resumed_from: params.part_id,
         })
     }
 
@@ -1175,6 +1186,7 @@ impl NativeV2CliBackend for FakeBackend {
                 run_id: params.run_id.as_str().to_owned(),
             });
         Ok(RunDiscardWorkspaceResult {
+            part_id: params.run_id.clone(),
             run_id: params.run_id,
             discarded: true,
         })

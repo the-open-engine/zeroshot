@@ -19,10 +19,15 @@ function useDeadlineClock(deadline: number | undefined) {
   return now;
 }
 
+function selectedSuccessor(run: RunDetail | undefined) {
+  if (!run?.partView || !run.partId || !run.parts) return;
+  const position = run.parts.indexOf(run.partId);
+  return position >= 0 ? run.parts[position + 1] : undefined;
+}
+
 /**
  * The graph as recorded up to `through`. A suspended request node also says whether it still
- * waits: its successor may be known only to the host's run list, which refreshes after this
- * view read the run's detail, and its deadline can pass while the page is open.
+ * waits at the selected moment, and its deadline can pass while the page is open.
  */
 export function useProjection(
   document: Inputs[0] | undefined,
@@ -30,7 +35,6 @@ export function useProjection(
   through: Inputs[2],
   control: Inputs[3],
   run: RunDetail | undefined,
-  listedSuccessor: string | undefined,
   /** Only the loaded head may use the host's current successor and wall clock. */
   current: boolean
 ) {
@@ -38,9 +42,7 @@ export function useProjection(
     () => document && projectHistory(document, events, through, control),
     [document, events, through, control]
   );
-  const successorRunId = current
-    ? (run?.workspaceRecovery?.successorRunId ?? listedSuccessor)
-    : undefined;
+  const successorRunId = current ? selectedSuccessor(run) : undefined;
   const suspension =
     projection?.suspension ?? (current && run?.phase === 'suspended' ? run.suspension : undefined);
   const clock = useDeadlineClock(

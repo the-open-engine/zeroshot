@@ -74,9 +74,7 @@ async fn readonly_existing_snapshots_recover_only_known_start_times_without_writ
             SqliteRunLedger::open_read_only(&path).assert_value(),
         ));
         let status = service
-            .status(RunStatusParams {
-                run_id: run_id.clone(),
-            })
+            .status(RunStatusParams::new(run_id.clone()))
             .await
             .assert_value();
         let status = serde_json::to_value(status).assert_value();
@@ -91,6 +89,7 @@ async fn readonly_existing_snapshots_recover_only_known_start_times_without_writ
         );
         let (_, mut watch) = service
             .watch(RunWatchParams {
+                part_id: None,
                 run_id,
                 from_cursor: Some(Cursor::new("v2:1")),
             })

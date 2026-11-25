@@ -2,11 +2,8 @@ use openengine_cluster_protocol::{
     RunCheckpointsParams, RunCheckpointsResult, RunDiscardWorkspaceParams,
     RunDiscardWorkspaceResult, RunResumeParams, RunResumeResult,
 };
-use reqwest::Url;
-use reqwest::header::{ACCEPT, CACHE_CONTROL};
-use serde::{Serialize, de::DeserializeOwned};
 
-use super::{AccessToken, TargetAuthorityError, TargetHttpControlAuthority, TargetRecord};
+use super::{TargetAuthorityError, TargetHttpControlAuthority, TargetRecord};
 
 impl TargetHttpControlAuthority {
     pub(in super::super) async fn hosted_run_vector(
@@ -23,13 +20,8 @@ impl TargetHttpControlAuthority {
         let access = self
             .access_token(target, &auth, &controller.audience)
             .await?;
-        let request = self
-            .authorized(self.client.post(url), &access)?
-            .header(ACCEPT, "application/json")
-            .header(CACHE_CONTROL, "no-store")
-            .json(&params);
-        self.hosted_json(
-            (request, &access),
+        self.hosted_run_post(
+            (url, &access, params),
             "hosted run vector",
             Some(openengine_cluster_protocol::MAX_VECTOR_RESPONSE_BYTES),
         )
@@ -49,13 +41,8 @@ impl TargetHttpControlAuthority {
         let access = self
             .access_token(target, &auth, &controller.audience)
             .await?;
-        let request = self
-            .authorized(self.client.post(url), &access)?
-            .header(ACCEPT, "application/json")
-            .header(CACHE_CONTROL, "no-store")
-            .json(&params);
-        self.hosted_json(
-            (request, &access),
+        self.hosted_run_post(
+            (url, &access, params),
             "hosted inbox show",
             Some(openengine_cluster_protocol::MAX_REQUEST_RESPONSE_BYTES),
         )
@@ -77,12 +64,7 @@ impl TargetHttpControlAuthority {
         let access = self
             .access_token(target, &auth, &controller.audience)
             .await?;
-        let request = self
-            .authorized(self.client.post(url), &access)?
-            .header(ACCEPT, "application/json")
-            .header(CACHE_CONTROL, "no-store")
-            .json(&params);
-        self.hosted_json((request, &access), "hosted run vectors", None)
+        self.hosted_run_post((url, &access, params), "hosted run vectors", None)
             .await
             .map(Some)
     }
@@ -99,12 +81,7 @@ impl TargetHttpControlAuthority {
         let access = self
             .access_token(target, &auth, &controller.audience)
             .await?;
-        let request = self
-            .authorized(self.client.post(url), &access)?
-            .header(ACCEPT, "application/json")
-            .header(CACHE_CONTROL, "no-store")
-            .json(&params);
-        self.hosted_json((request, &access), "hosted inbox list", None)
+        self.hosted_run_post((url, &access, params), "hosted inbox list", None)
             .await
             .map(Some)
     }
@@ -124,12 +101,7 @@ impl TargetHttpControlAuthority {
         let access = self
             .access_token(target, &auth, &controller.audience)
             .await?;
-        let request = self
-            .authorized(self.client.post(url), &access)?
-            .header(ACCEPT, "application/json")
-            .header(CACHE_CONTROL, "no-store")
-            .json(&params);
-        self.hosted_json((request, &access), "hosted run suspend", None)
+        self.hosted_run_post((url, &access, params), "hosted run suspend", None)
             .await
             .map(Some)
     }
@@ -159,7 +131,7 @@ impl TargetHttpControlAuthority {
             .require_hosted_run_access_for(target, params.git_credentials.is_some())
             .await?;
         let url = routes.resume_url(&params.run_id)?;
-        self.hosted_recovery_json((url, &access), params, "hosted workspace resume")
+        self.hosted_run_post((url, &access, params), "hosted workspace resume", None)
             .await
     }
 
@@ -170,7 +142,7 @@ impl TargetHttpControlAuthority {
     ) -> Result<RunCheckpointsResult, TargetAuthorityError> {
         let (routes, access) = self.require_hosted_run_access(target).await?;
         let url = routes.checkpoints_url(&params.run_id)?;
-        self.hosted_recovery_json((url, &access), params, "hosted workspace checkpoints")
+        self.hosted_run_post((url, &access, params), "hosted workspace checkpoints", None)
             .await
     }
 
@@ -181,22 +153,11 @@ impl TargetHttpControlAuthority {
     ) -> Result<RunDiscardWorkspaceResult, TargetAuthorityError> {
         let (routes, access) = self.require_hosted_run_access(target).await?;
         let url = routes.discard_workspace_url(&params.run_id)?;
-        self.hosted_recovery_json((url, &access), params, "hosted workspace discard_workspace")
-            .await
-    }
-
-    async fn hosted_recovery_json<P: Serialize, T: DeserializeOwned>(
-        &self,
-        context: (Url, &AccessToken),
-        params: P,
-        operation: &'static str,
-    ) -> Result<T, TargetAuthorityError> {
-        let (url, access) = context;
-        let request = self
-            .authorized(self.client.post(url), access)?
-            .header(ACCEPT, "application/json")
-            .header(CACHE_CONTROL, "no-store")
-            .json(&params);
-        self.hosted_json((request, access), operation, None).await
+        self.hosted_run_post(
+            (url, &access, params),
+            "hosted workspace discard_workspace",
+            None,
+        )
+        .await
     }
 }

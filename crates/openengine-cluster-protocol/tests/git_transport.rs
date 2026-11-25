@@ -122,6 +122,8 @@ fn source_omission_and_null_never_materialize_a_dummy_repository() {
     let mut projection = serde_json::to_value(RunStatusResult {
         steering: Default::default(),
         context_sources: Vec::new(),
+        part_id: openengine_cluster_protocol::RunId::new("local-folder").clone(),
+        current_part_id: openengine_cluster_protocol::RunId::new("local-folder").clone(),
         run_id: openengine_cluster_protocol::RunId::new("local-folder"),
         title: openengine_cluster_protocol::RunTitle::new("Local folder").assert_value(),
         source: None,
@@ -210,7 +212,7 @@ fn transport_credentials_are_bounded_closed_and_redacted_in_every_envelope() {
         .assert_value();
         assert!(request.requires_git_transport());
         let resume: RunResumeParams = serde_json::from_value(json!({
-            "runId":"run-1", "successorRunId":"run-2", "gitCredentials":wire
+            "runId":"run-1", "partId":"run-1", "successorPartId":"run-2", "gitCredentials":wire
         }))
         .assert_value();
         for debug in [

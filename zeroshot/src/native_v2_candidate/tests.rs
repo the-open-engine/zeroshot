@@ -503,9 +503,7 @@ async fn platform_oecp_candidate_runs_worker_and_trusted_merge_entirely_through_
     let direct_status = ClusterBackend::run_status(
         &*controller,
         &ConnectionContext::default(),
-        RunStatusParams {
-            run_id: submitted.run_id.clone(),
-        },
+        RunStatusParams::new(submitted.run_id.clone()),
     )
     .await
     .assert_value_with("direct OECP status");

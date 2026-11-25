@@ -1,4 +1,5 @@
 import { humanize, type PersonRequest } from './run-history';
+import type { PendingHandoff } from './run-story';
 
 /** The run lists' date and time format, local time; another year is named. */
 const dateTime = new Intl.DateTimeFormat(undefined, {
@@ -51,6 +52,7 @@ export function formatWait(ms: number) {
 export type RequestContext = {
   /** The question is unresolved at the selected position. */
   waiting: boolean;
+  pendingHandoff?: PendingHandoff;
   /** The current run is suspended for this question; its deadline is checked below. */
   answerable?: boolean;
   /** Wall clock at the head, recorded time in replay, or unknown on untimed history. */
@@ -67,7 +69,8 @@ export function requestStatus(request: PersonRequest, context: RequestContext, n
       ? `Answered after ${formatWait(resolution.at - createdAt)}`
       : 'Answered';
   if (resolution?.kind === 'expiry') return `No answer before ${formatMoment(expiresAt, now)}`;
-  if (context.successor) return `Handed off to run ${context.successor}`;
+  if (context.pendingHandoff) return 'Handed off';
+  if (context.successor) return `Handed off to part ${context.successor}`;
   const asked = createdAt !== undefined && formatMoment(createdAt, now);
   if (!context.waiting)
     return [asked && `Asked ${asked}`, 'closed without an answer'].filter(Boolean).join(' · ');
@@ -90,13 +93,13 @@ export function PersonRequestView({
   request,
   runId,
   context,
-  runHref,
+  partHref,
 }: {
   request: PersonRequest;
   /** The paused run an answer continues, for the command hint while waiting. */
   runId: string;
   context: RequestContext;
-  runHref?: (runId: string) => string;
+  partHref?: (partId: string) => string;
 }) {
   const answer = request.resolution?.kind === 'answer' ? request.resolution : undefined;
   const fields = Object.entries(request.signals);
@@ -126,9 +129,9 @@ export function PersonRequestView({
         </div>
       )}
       <p className="request-status">
-        {pending && successor && runHref ? (
+        {pending && successor && partHref ? (
           <>
-            Handed off to run <a href={runHref(successor)}>{successor}</a>
+            Handed off to part <a href={partHref(successor)}>{successor}</a>
           </>
         ) : (
           requestStatus(request, context)

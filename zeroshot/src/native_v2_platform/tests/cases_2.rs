@@ -58,6 +58,7 @@ async fn steer_node_target_admission_rejects_non_agents_before_recording() {
         let error = harness
             .controller
             .steer(openengine_cluster_protocol::RunSteerParams {
+                part_id: None,
                 run_id: receipt.run_id.clone(),
                 text: "denied".into(),
                 node: Some(NodeName::new(node).assert_value()),
@@ -77,6 +78,7 @@ async fn steer_node_target_admission_rejects_non_agents_before_recording() {
     let recorded = harness
         .controller
         .steer(openengine_cluster_protocol::RunSteerParams {
+            part_id: None,
             run_id: receipt.run_id.clone(),
             text: "worker direction".into(),
             node: Some(NodeName::new("worker").assert_value()),
@@ -90,9 +92,7 @@ async fn steer_node_target_admission_rejects_non_agents_before_recording() {
     );
     harness
         .controller
-        .force(RunForceParams {
-            run_id: receipt.run_id.clone(),
-        })
+        .force(RunForceParams::new(receipt.run_id.clone()))
         .await
         .assert_value();
     terminal(&harness.controller, &receipt.run_id).await;
@@ -113,6 +113,7 @@ async fn steer_target_list_omits_direction_while_status_keeps_bounded_summaries(
             openengine_cluster_protocol::RunSteerParams {
                 node: None,
                 mode: Default::default(),
+                part_id: None,
                 run_id: receipt.run_id.clone(),
                 text: "Standing direction belongs in status and vector reads".into(),
             },
@@ -124,9 +125,7 @@ async fn steer_target_list_omits_direction_while_status_keeps_bounded_summaries(
         if finished {
             harness
                 .controller
-                .force(RunForceParams {
-                    run_id: receipt.run_id.clone(),
-                })
+                .force(RunForceParams::new(receipt.run_id.clone()))
                 .await
                 .assert_value();
             terminal(&harness.controller, &receipt.run_id).await;
@@ -134,9 +133,7 @@ async fn steer_target_list_omits_direction_while_status_keeps_bounded_summaries(
         let status = ClusterBackend::run_status(
             &harness.controller,
             &context,
-            RunStatusParams {
-                run_id: receipt.run_id.clone(),
-            },
+            RunStatusParams::new(receipt.run_id.clone()),
         )
         .await
         .assert_value();

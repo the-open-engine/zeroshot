@@ -431,7 +431,7 @@ async fn request_and_vector_refusals_preserve_the_marker_without_opening_a_sessi
         ),
         (
             connector
-                .hosted_inbox_show("platform", RunStatusParams { run_id: run })
+                .hosted_inbox_show("platform", RunStatusParams::new(run))
                 .await
                 .assert_error(),
             "does not advertise",
@@ -463,12 +463,7 @@ async fn direct_request_reads_decline_hosted_routes_without_contacting_the_autho
     );
     assert!(
         connector
-            .hosted_inbox_show(
-                "vm",
-                RunStatusParams {
-                    run_id: RunId::new("pending-request")
-                }
-            )
+            .hosted_inbox_show("vm", RunStatusParams::new(RunId::new("pending-request")))
             .await
             .assert_value()
             .is_none()
@@ -488,18 +483,14 @@ async fn connector_preserves_hosted_lifecycle_failures_without_fallback() {
             .await
             .assert_error(),
         connector
-            .hosted_run_status(
-                "platform",
-                RunStatusParams {
-                    run_id: run_id.clone(),
-                },
-            )
+            .hosted_run_status("platform", RunStatusParams::new(run_id.clone()))
             .await
             .assert_error(),
         connector
             .hosted_run_watch(
                 "platform",
                 RunWatchParams {
+                    part_id: None,
                     run_id: run_id.clone(),
                     from_cursor: None,
                 },
@@ -510,6 +501,7 @@ async fn connector_preserves_hosted_lifecycle_failures_without_fallback() {
             .hosted_run_logs(
                 "platform",
                 RunLogsParams {
+                    part_id: None,
                     run_id: run_id.clone(),
                     from_cursor: None,
                     execution: None,
@@ -518,7 +510,7 @@ async fn connector_preserves_hosted_lifecycle_failures_without_fallback() {
             .await
             .assert_error(),
         connector
-            .hosted_run_force("platform", RunForceParams { run_id })
+            .hosted_run_force("platform", RunForceParams::new(run_id))
             .await
             .assert_error(),
     ];

@@ -210,9 +210,9 @@ async fn request_capture_replays_the_committed_receipt_before_suspension_and_red
         1
     );
     let public = crate::native_v2_observability::NativeV2Observability::new(harness.ledger.clone())
-        .status(openengine_cluster_protocol::RunStatusParams {
-            run_id: snapshot.run_id.clone(),
-        })
+        .status(openengine_cluster_protocol::RunStatusParams::new(
+            snapshot.run_id.clone(),
+        ))
         .await
         .unwrap();
     let openengine_cluster_protocol::RunStatus::Suspended {
@@ -462,9 +462,9 @@ async fn production_restart_after_committed_publication(request: bool, committed
             assert_eq!(question.id.as_str(), id.as_str());
             assert_eq!(question.artifacts, files);
             let inbox = controller
-                .inbox_show(openengine_cluster_protocol::InboxShowParams {
-                    run_id: stored.snapshot.run_id.clone(),
-                })
+                .inbox_show(openengine_cluster_protocol::InboxShowParams::new(
+                    stored.snapshot.run_id.clone(),
+                ))
                 .await
                 .unwrap();
             assert!(serde_json::to_string(&inbox).unwrap().contains("requests/"));
