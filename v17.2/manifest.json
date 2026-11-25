@@ -1,0 +1,27 @@
+{
+  "docsVersion": "v17.2",
+  "productVersion": "17.2.0",
+  "publisherCommit": "c363a42824abc2b1664e5bb4bb51255f5ff81f2f",
+  "pythonSdkVersion": "17.2.0.post1",
+  "routes": {
+    "cli": "zeroshot-cli/",
+    "clusterApi": "reference/cluster/api/",
+    "execution": "concepts/execution/",
+    "graphSpec": "reference/cluster/graph/",
+    "install": "getting-started/install/",
+    "openrpc": "reference/cluster/openrpc.json",
+    "overview": "",
+    "portableBindings": "reference/cluster/portable-bindings/",
+    "pythonApi": "reference/python/",
+    "pythonSdk": "guides/python-sdk/",
+    "quickstart": "getting-started/first-run/",
+    "reviewLoop": "guides/review-loop/",
+    "runControl": "guides/observe-and-control/",
+    "runtimePlan": "concepts/runtimes-and-connections/",
+    "runtimePlanReference": "reference/runtime-plan/",
+    "schema": "reference/cluster/schema.json",
+    "targets": "concepts/targets/"
+  },
+  "schemaVersion": 2,
+  "sourceCommit": "c363a42824abc2b1664e5bb4bb51255f5ff81f2f"
+}
