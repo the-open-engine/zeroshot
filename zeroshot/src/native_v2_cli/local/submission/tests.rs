@@ -6,11 +6,12 @@ use openengine_cluster_testkit::assertions::AssertValue;
 async fn refused_managed_cleanup_retains_live_admitted_and_unknown_ownership() {
     for ownership in ["unadmitted", "live", "admitted", "unknown"] {
         let root = TestDirectory::new("refused-workspace-ownership");
-        let source = root.child("source");
+        let root_path = root.path().canonicalize().assert_value();
+        let source = root_path.join("source");
         std::fs::create_dir(&source).assert_value();
         std::fs::write(source.join("seed"), b"original input").assert_value();
         let backend = LocalCliBackend::new(
-            root.child("state"),
+            root_path.join("state"),
             PathBuf::from("zeroshot"),
             source.clone(),
             PathBuf::from("git"),
@@ -35,7 +36,7 @@ async fn refused_managed_cleanup_retains_live_admitted_and_unknown_ownership() {
                 local_root: Some(&source),
             })
             .assert_value();
-        let destination = root.child("managed");
+        let destination = root_path.join("managed");
         std::fs::create_dir(&destination).assert_value();
         files.materialize(&run_id, &destination).assert_value();
         let paths = backend.paths(&run_id).assert_value();
@@ -57,7 +58,7 @@ async fn refused_managed_cleanup_retains_live_admitted_and_unknown_ownership() {
             .assert_value();
         let retained = ownership != "unadmitted";
         assert_eq!(destination.exists(), retained, "{ownership}");
-        let restored = root.child("restored");
+        let restored = root_path.join("restored");
         std::fs::create_dir(&restored).assert_value();
         assert_eq!(
             files.materialize(&run_id, &restored).is_ok(),
