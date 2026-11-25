@@ -218,20 +218,16 @@ elif args[:2] in (["inbox", "list"], ["inbox", "show"]):
         print(json.dumps({"runId":args[2],"partId":part,
                           "node":"approval","createdAt":1000,
                           "request":request,"state":"pending"}))
-elif args and args[0] == "answer":
-    if os.environ.get("FAKE_ANSWER_FAIL"):
+elif args and args[0] in ("answer", "resume"):
+    if args[0] == "answer" and os.environ.get("FAKE_ANSWER_FAIL"):
         messages = ["$.output.feedback required", "already has successor next",
                     "request expired; successor next"]
         fail("invalid_request","invalid_request",messages[int(os.environ["FAKE_ANSWER_FAIL"])],{})
-    if option("--part") != (os.getenv("FAKE_HEAD_PART") or args[1]):
+    current = os.getenv("FAKE_HEAD_PART") or args[1]
+    if option("--part") is not None and option("--part") != current:
         fail("invalid_request","stale_part","selected part is no longer current",{})
     print(json.dumps({"runId":args[1],"currentPartId":"successor",
-                      "resumedFromPartId":option("--part")}))
-elif args and args[0] == "resume":
-    if option("--part") != (os.getenv("FAKE_HEAD_PART") or args[1]):
-        fail("invalid_request","stale_part","selected part is no longer current",{})
-    print(json.dumps({"runId":args[1],"currentPartId":"successor",
-                      "resumedFromPartId":option("--part")}))
+                      "resumedFromPartId":current}))
 elif args and args[0] == "vectors":
     root = args[2] if args[1] == "show" else args[1]
     vector={"id":"vector-1","kind":"suspend_request","runId":root,"partId":"original","createdAt":1762905600000}

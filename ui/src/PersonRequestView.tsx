@@ -1,4 +1,5 @@
 import { humanize, type PersonRequest } from './run-history';
+import type { PendingHandoff } from './run-story';
 
 /** The run lists' date and time format, local time; another year is named. */
 const dateTime = new Intl.DateTimeFormat(undefined, {
@@ -51,7 +52,7 @@ export function formatWait(ms: number) {
 export type RequestContext = {
   /** The question is unresolved at the selected position. */
   waiting: boolean;
-  queued?: boolean;
+  pendingHandoff?: PendingHandoff;
   /** The current run is suspended for this question; its deadline is checked below. */
   answerable?: boolean;
   /** Wall clock at the head, recorded time in replay, or unknown on untimed history. */
@@ -68,7 +69,7 @@ export function requestStatus(request: PersonRequest, context: RequestContext, n
       ? `Answered after ${formatWait(resolution.at - createdAt)}`
       : 'Answered';
   if (resolution?.kind === 'expiry') return `No answer before ${formatMoment(expiresAt, now)}`;
-  if (context.queued) return 'Handed off';
+  if (context.pendingHandoff) return 'Handed off';
   if (context.successor) return `Handed off to part ${context.successor}`;
   const asked = createdAt !== undefined && formatMoment(createdAt, now);
   if (!context.waiting)

@@ -1190,6 +1190,9 @@ def test_answer_refusals_raise_existing_cli_error(fake_native: Path, message: st
                 await client.get_run("original").answer({"signals": {}, "output": {}})
 
     asyncio.run(exercise())
+    commands = [call["args"] for call in read_invocations(fake_native)]
+    assert all(command[0] != "status" for command in commands)
+    assert any(command[0] == "answer" and "--part" not in command for command in commands)
 
 
 @pytest.mark.parametrize("target_kind", ["local", "direct", "hosted"])
@@ -1295,9 +1298,10 @@ def test_resume_replaces_runtime_files(fake_native: Path, target_kind: str, unif
         async with Client(target=target) as client:
             resumed = await client.get_run("original").resume(runtime=selected)
             assert resumed.id == "original" and resumed.current_part_id == "successor"
-        record = next(
-            entry for entry in read_invocations(fake_native) if entry["args"][0] == "resume"
-        )
+        calls = read_invocations(fake_native)
+        assert all(entry["args"][0] != "status" for entry in calls)
+        record = next(entry for entry in calls if entry["args"][0] == "resume")
+        assert "--part" not in record["args"]
         option = "--uniform-runtime-config" if uniform else "--runtime-config"
         assert record[option] == selected.to_dict()
         if target_kind == "contained":

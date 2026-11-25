@@ -190,7 +190,12 @@ test('a copied vector with a reducer transition retains its native replay anchor
   assert.equal(normalized.control?.[0].cursor, normalized.events[0].cursor);
 });
 
-async function renderViewer(t: TestContext, source: RunHistoryReader, runId = root) {
+async function renderViewer(
+  t: TestContext,
+  source: RunHistoryReader,
+  runId = root,
+  embedded = false
+) {
   stubWorker(t);
   installBrowser(t);
   const { RunHistoryView } = await viewerModule(t);
@@ -199,7 +204,7 @@ async function renderViewer(t: TestContext, source: RunHistoryReader, runId = ro
   document.body.append(container);
   const mount = createRoot(container);
   await act(async () =>
-    mount.render(createElement(RunHistoryView, { runId, source, workers: [] }))
+    mount.render(createElement(RunHistoryView, { runId, source, workers: [], embedded }))
   );
   await flushEffects();
   return {
@@ -299,6 +304,76 @@ test('cold open replays retained steps while the head is queued and preserves a 
     assert.match(renderedText(container), /pi \/ anthropic/);
     await clickButton(container, 'Go to latest');
     assert.match(renderedText(container), /codex \/ openai/);
+  } finally {
+    await close();
+  }
+});
+
+test('embedded Steps follows a committed handoff without a menu and preserves the original request in replay', async (t) => {
+  const request = {
+    id: 'ask',
+    text: 'Ship it?',
+    signals: { choice: ['yes'] },
+    output: null,
+    expiresAt: 65_000,
+  };
+  const node = 'approval';
+  const reference = ref(root, node, '1');
+  const suspension: RunDetail['suspension'] = {
+    reason: 'request',
+    node,
+    createdAt: 5_000,
+    request,
+  };
+  const prefix = page(
+    root,
+    child,
+    0,
+    [
+      { kind: 'node_started', reference },
+      { kind: 'request_deferred', reference },
+      {
+        kind: 'vector',
+        vector: { kind: 'request', ...request, node, createdAt: suspension.createdAt },
+      },
+      { kind: 'suspended', suspension },
+    ],
+    0
+  );
+  const exact = {
+    ...definition(child, 'suspended'),
+    partView: true,
+    partId: root,
+    graph: {
+      ...doc.graph,
+      root: { kind: 'verifier' as const, name: node, worker: 'builtin.request.ask@1' },
+    },
+  };
+  const pending = new Error('Successor ledger is pending');
+  const source: RunHistoryReader = {
+    detail: async () => {
+      throw pending;
+    },
+    retryDelay: (error) => (error === pending ? 1 : undefined),
+    forPart: () => ({ ...source, detail: async () => exact }),
+    page: async (_, after) => (after ? deferred<HistoryPage>().promise : prefix),
+    watch: () => () => {},
+  };
+  const { container, close } = await renderViewer(t, source, root, true);
+  try {
+    const summary = () => container.querySelector('.run-outcome-text')?.textContent;
+    const question = container.querySelector('.story-step-head');
+    assert.equal(summary(), 'Continuing');
+    assert.ok(question instanceof HTMLElement);
+    await act(async () => question.click());
+    assert.match(renderedText(container), /Handed off/);
+    assert.doesNotMatch(renderedText(container), /Waiting for an answer|Answer with/);
+    await clickButton(container, 'Previous event');
+    assert.match(summary()!, /Waiting for a person/);
+    assert.match(renderedText(container), /Waiting for an answer/);
+    assert.doesNotMatch(renderedText(container), /Handed off/);
+    await clickButton(container, 'Go to latest');
+    assert.equal(summary(), 'Continuing');
   } finally {
     await close();
   }

@@ -626,10 +626,12 @@ test('a question handed to a successor reads as handed off, never as still waiti
     'Continued in part next-run'
   );
   assert.equal(
-    projectOutcome(doc, invocations, terminal, true, {}, undefined, [], { queued: true }).text,
+    projectOutcome(doc, invocations, terminal, true, {}, undefined, [], {
+      pendingHandoff: 'Queued',
+    }).text,
     'Queued'
   );
-  assert.equal(requestStatus(asked, { waiting: false, queued: true }), 'Handed off');
+  assert.equal(requestStatus(asked, { waiting: false, pendingHandoff: 'Queued' }), 'Handed off');
   // Its duration is final: the run stopped here and continued elsewhere.
   assert.deepEqual(
     projectOutcome(doc, invocations, terminal, false, { first: 1_000, at: 61_000 }, 'next-run')

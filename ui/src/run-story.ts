@@ -53,7 +53,8 @@ export type StoryEntry =
       group?: string;
       steps: StoryStep[];
     };
-export type StoryOutcome = { text: string; state: NodeState | 'queued'; facts: string[] };
+export type PendingHandoff = 'Queued' | 'Continuing';
+export type StoryOutcome = { text: string; state: NodeState; facts: string[] };
 
 type Execution = StoryStep & {
   start: number;
@@ -395,7 +396,11 @@ export function projectOutcome(
   /** The run an answer or resume continued this one in, which took over its open question. */
   successor?: string,
   controls: readonly ControlVisit[] = [],
-  position: { suspension?: RunSummary['suspension']; now?: number; queued?: boolean } = {}
+  position: {
+    suspension?: RunSummary['suspension'];
+    now?: number;
+    pendingHandoff?: PendingHandoff;
+  } = {}
 ): StoryOutcome {
   const executions = foldAttempts(document, invocations, controls, clock.at);
   const rounds = new Map<string, number>();
@@ -427,7 +432,7 @@ export function projectOutcome(
     return terminal.status === 'succeeded'
       ? { text: 'Run completed', state: 'succeeded', facts }
       : { text: `Run failed · ${humanize(terminal.reason)}`, state: 'failed', facts };
-  if (position.queued) return { text: 'Queued', state: 'queued', facts };
+  if (position.pendingHandoff) return { text: position.pendingHandoff, state: 'idle', facts };
   if (handedOff) return { text: `Continued in part ${successor}`, state: 'suspended', facts };
   if (asking?.request && position.now !== undefined && position.now >= asking.request.expiresAt)
     return { text: `Request deadline passed · ${asking.request.text}`, state: 'suspended', facts };

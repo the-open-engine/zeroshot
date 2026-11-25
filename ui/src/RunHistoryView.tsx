@@ -260,7 +260,7 @@ export function RunHistoryView({
     setRevealStep({ invocation: id, tick: Date.now() });
   }
   const latest = safePosition === moments.length - 1;
-  const queued = queuedAtHead(history, latest, listedPartId, listedPhase);
+  const pendingHandoff = pendingHandoffAtHead(history, latest, listedPartId, listedPhase);
   const toggle = <RunViewToggle layout={layout} setLayout={switchLayout} />;
   return (
     <main className="workspace history-workspace">
@@ -270,7 +270,7 @@ export function RunHistoryView({
             run={run}
             terminal={displayedTerminal}
             history={history}
-            queued={queued}
+            pendingHandoff={pendingHandoff}
             position={safePosition}
             momentsCount={moments.length}
             openLog={() =>
@@ -290,7 +290,7 @@ export function RunHistoryView({
                   // Steps not recorded yet may still run when live or replaying before the end.
                   open: !displayedTerminal && (history.isLiveRun || !latest || !history.loadedHead),
                   following,
-                  queued,
+                  pendingHandoff,
                   answerable: current && run.phase === 'suspended',
                   partHref,
                 })}
@@ -438,7 +438,13 @@ function runContext(
   projection: NonNullable<ReturnType<typeof useProjection>>,
   position: Pick<
     RunContext,
-    'terminal' | 'currentFailure' | 'open' | 'following' | 'answerable' | 'partHref' | 'queued'
+    | 'terminal'
+    | 'currentFailure'
+    | 'open'
+    | 'following'
+    | 'answerable'
+    | 'partHref'
+    | 'pendingHandoff'
   >
 ): RunContext {
   const successor = projection.successorRunId;
@@ -456,7 +462,7 @@ function runContext(
     now: projection.now,
     waiting:
       !position.terminal &&
-      !position.queued &&
+      !position.pendingHandoff &&
       !successor &&
       (!!projection.suspension?.request ||
         projection.invocations.some(
@@ -739,27 +745,24 @@ function useReplayTimer(replay: {
   }, [playing, cursorIndex, playbackNode]);
 }
 
-function queuedAtHead(
+/** At the live tip a confirmed successor has taken over even before its ledger opens. */
+function pendingHandoffAtHead(
   history: HistoryFeed,
   latest: boolean,
   listedPart?: string,
   listedPhase?: string
-) {
-  return (
-    listedPhase === 'queued' &&
-    listedPart === history.run?.currentPartId &&
-    latest &&
-    history.run?.phase === 'pending' &&
-    history.following &&
-    !history.restorePending
-  );
+): RunContext['pendingHandoff'] {
+  const { run } = history;
+  if (!latest || !history.following || history.restorePending || run?.phase !== 'pending') return;
+  if (!run.partId || !run.currentPartId || run.partId === run.currentPartId) return;
+  return listedPart === run.currentPartId && listedPhase === 'queued' ? 'Queued' : 'Continuing';
 }
 
 function RunHistoryHeader({
   run,
   terminal,
   history,
-  queued,
+  pendingHandoff,
   position,
   momentsCount,
   openLog,
@@ -769,7 +772,7 @@ function RunHistoryHeader({
   run: RunDetail;
   terminal: RunTerminal | undefined;
   history: HistoryFeed;
-  queued: boolean;
+  pendingHandoff?: RunContext['pendingHandoff'];
   position: number;
   momentsCount: number;
   openLog: () => void;
@@ -777,11 +780,11 @@ function RunHistoryHeader({
   embedded: boolean;
 }) {
   const preparing = isPreparingEnvironment(run, history.events);
-  const shownStatus = queued
-    ? 'Queued'
-    : history.loadedHead && position === momentsCount - 1
+  const shownStatus =
+    pendingHandoff ??
+    (history.loadedHead && position === momentsCount - 1
       ? currentHistoryState(run, terminal, preparing, position === 0)
-      : 'Replay';
+      : 'Replay');
   return (
     <>
       {!embedded && (

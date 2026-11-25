@@ -15,7 +15,7 @@ import {
   type RunTerminal,
   type RunSummary,
 } from './run-history';
-import { projectOutcome } from './run-story';
+import { projectOutcome, type PendingHandoff } from './run-story';
 import './run-story.css';
 
 /** What the Steps view needs about the run itself, beyond its executions. */
@@ -37,7 +37,7 @@ export type RunContext = {
   open: boolean;
   /** The view follows the latest event, so new output streams into open transcripts. */
   following: boolean;
-  queued?: boolean;
+  pendingHandoff?: PendingHandoff;
   /** The question is unresolved at this position. */
   waiting: boolean;
   answerable: boolean;
@@ -69,16 +69,27 @@ export function RunOutcomeBar({ run }: { run: RunContext }) {
     controls,
     suspension,
     now,
-    queued,
+    pendingHandoff,
   } = run;
   const outcome = useMemo(
     () =>
       projectOutcome(document, invocations, terminal, open, clock, successor, controls, {
         suspension,
         now,
-        queued,
+        pendingHandoff,
       }),
-    [document, invocations, terminal, open, clock, successor, controls, suspension, now, queued]
+    [
+      document,
+      invocations,
+      terminal,
+      open,
+      clock,
+      successor,
+      controls,
+      suspension,
+      now,
+      pendingHandoff,
+    ]
   );
   // Only the run's state is announced, and only while following it live: replay and its
   // running counts would otherwise re-announce on every step.

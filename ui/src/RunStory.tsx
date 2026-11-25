@@ -309,7 +309,7 @@ function storyStepStatus(step: StoryStep, run: RunContext) {
     step.state === 'suspended' &&
     !!step.request &&
     !step.request.resolution &&
-    (!!run.successor || !!run.queued);
+    (!!run.successor || !!run.pendingHandoff);
   const deadlinePassed =
     step.request &&
     !step.request.resolution &&

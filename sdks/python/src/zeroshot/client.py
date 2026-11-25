@@ -846,15 +846,13 @@ class Run:
         """Return the most recently observed head, or None before the first lookup."""
         return self._observed_part_id
 
-    async def _expected_part(self, part_id: str | None) -> str:
+    def _expected_part(self, part_id: str | None) -> str | None:
         if part_id is not None:
             if self.part_id is not None and self.part_id != part_id:
                 raise ValueError("part_id conflicts with the selected part")
             return part_id
         if self.part_id is not None:
             return self.part_id
-        if self._observed_part_id is None:
-            return (await self.status()).part_id
         return self._observed_part_id
 
     @property
@@ -1004,8 +1002,7 @@ class Run:
         arguments = [
             "resume",
             self.id,
-            "--part",
-            await self._expected_part(part_id),
+            *_part_arguments(self._expected_part(part_id)),
             *self._client._route_arguments(),
             *self._client._controller_arguments(),
             *self._client._forwarding_arguments(),
@@ -1058,8 +1055,7 @@ class Run:
                 [
                     "answer",
                     self.id,
-                    "--part",
-                    await self._expected_part(part_id),
+                    *_part_arguments(self._expected_part(part_id)),
                     "--input",
                     str(path),
                     *self._client._route_arguments(),
