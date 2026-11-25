@@ -94,6 +94,10 @@ cargo test --locked --package zeroshot --features ui --test native_v2_cli_portab
 cargo test --locked --package zeroshot --lib --features ui native_v2_cli::local::
 cargo test --locked --package zeroshot --features ui --test native_v2_cli_portable startup::
 
+# Profile and target registry store symlinks
+cargo test --locked --package zeroshot --features ui --lib native_v2_cli::profiles::tests
+cargo test --locked --package zeroshot --features ui --bin zeroshot native_v2_target::tests::management
+
 # Resume checkpoint policy and network authority
 cargo test --locked --package zeroshot --lib --features ui -- \
   native_v2_target_authority::tests::resume_refusals native_v2_target_authority::tests::checkpoint_opt_out
