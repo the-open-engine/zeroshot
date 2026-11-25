@@ -266,7 +266,7 @@ async fn steer_suspended_successor_keeps_receipts_for_continued_conversations() 
     assert_eq!(b["steer"]["receivedExecutions"], 0);
     let status = fixture.json(&["status", &run], "steer").await;
     assert_eq!(status["status"]["phase"], "suspended");
-    assert!(status["workspaceRecovery"]["successorRunId"].is_null());
+    assert_eq!(status["currentPartId"], run);
     let next = fixture.json(&["resume", &run], "steer").await;
     let next = next["currentPartId"].as_str().assert_value();
     fixture.wait_succeeded(next, "steer").await;

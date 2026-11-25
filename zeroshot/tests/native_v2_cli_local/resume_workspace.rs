@@ -77,15 +77,9 @@ async fn checkpoint_rollback_requires_consent_and_changes_nothing_without_it() {
          stderr:\n{stderr}"
     );
     work.assert_kept(&fixture);
-    let recovery = fixture
-        .json(&["status", &failed], "finish")
-        .await
-        .assert_key("workspaceRecovery")
-        .clone();
-    assert!(
-        recovery.assert_key("recoverable") == true && recovery.get("successorRunId").is_none(),
-        "a refused rollback must not claim a successor: {recovery}"
-    );
+    let status = fixture.json(&["status", &failed], "finish").await;
+    assert_eq!(status["currentPartId"], failed);
+    assert_eq!(status["workspaceRecovery"]["recoverable"], true);
     assert_eq!(
         fixture
             .json(&["list"], "finish")

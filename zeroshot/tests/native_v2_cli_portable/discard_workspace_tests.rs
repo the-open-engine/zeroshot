@@ -21,6 +21,12 @@ fn finished(fixture: &Fixture, id: &str) {
     }
 }
 
+fn assert_no_checkpoints(fixture: &Fixture, run: &str, part: &str) {
+    let result = fixture.json(&["checkpoints", run, "--part", part]);
+    assert_eq!(result["partId"], part);
+    assert!(result["checkpoints"].as_array().unwrap().is_empty());
+}
+
 fn assert_discard_refused(fixture: &Fixture, id: &str, message: &str) {
     let output = fixture
         .command(&["discard-workspace", id])
@@ -131,7 +137,8 @@ fn local_discard_frees_failed_lineage_preserves_checkout_and_allows_plain_resume
     fs::write(fixture.workspace.join(".env"), "new ignored bytes").unwrap();
     fs::write(fixture.workspace.join("seed"), "live checkout edits").unwrap();
     let before = tree(&fixture.workspace);
-    let statuses = [&original, &successor].map(|id| fixture.json(&["status", id]));
+    let statuses =
+        [&original, &successor].map(|id| fixture.json(&["status", &original, "--part", id]));
     let listing = fixture.json(&["list"]);
     let logs = fixture.command(&["logs", &original]).output().unwrap();
     assert_eq!(
@@ -141,13 +148,9 @@ fn local_discard_frees_failed_lineage_preserves_checkout_and_allows_plain_resume
     assert!(!repository.join("repository").exists());
     assert_eq!(tree(&fixture.workspace), before);
     for (id, status) in [&original, &successor].into_iter().zip(statuses) {
-        assert_eq!(fixture.json(&["status", id]), status);
-        assert!(
-            fixture.json(&["checkpoints", id])["checkpoints"]
-                .as_array()
-                .unwrap()
-                .is_empty()
-        );
+        assert_eq!(status["partId"], id.as_str());
+        assert_eq!(fixture.json(&["status", &original, "--part", id]), status);
+        assert_no_checkpoints(&fixture, &original, id);
         assert!(
             fixture
                 .root
@@ -370,12 +373,7 @@ fn local_discard_preserves_request_continuations_without_new_checkpoints() {
     let final_id = receipt(&resumed);
     finished(&fixture, &final_id);
     for id in [&original, &failed, &next, &answered, &final_id] {
-        assert!(
-            fixture.json(&["checkpoints", id])["checkpoints"]
-                .as_array()
-                .unwrap()
-                .is_empty()
-        );
+        assert_no_checkpoints(&fixture, &original, id);
         assert_eq!(fixture.json(&["discard-workspace", id])["discarded"], false);
     }
     assert_eq!(
@@ -438,12 +436,7 @@ fn local_discard_reconciles_the_restore_marker_left_by_an_interrupted_launcher()
     assert!(recovery.get("pendingRestore").is_none());
     assert_eq!(recovery["successorRunId"], successor);
     for id in [&original, &successor] {
-        assert!(
-            fixture.json(&["checkpoints", id])["checkpoints"]
-                .as_array()
-                .unwrap()
-                .is_empty()
-        );
+        assert_no_checkpoints(&fixture, &original, id);
         assert_eq!(fixture.json(&["discard-workspace", id])["discarded"], false);
     }
     let resumed = fixture

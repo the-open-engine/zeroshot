@@ -548,10 +548,13 @@ fn folder_resume_uses_stored_workspace_from_a_different_launcher() {
         !fixture.workspace.join("resumed.txt").exists(),
         "resume imported an old provider session"
     );
-    assert!(
-        !fixture.json(&["status", &original_id])["workspaceRecovery"]["recoverable"]
-            .as_bool()
-            .unwrap()
+    let current = fixture.json(&["status", &original_id]);
+    assert_eq!(current["currentPartId"], resumed_id);
+    let predecessor = fixture.json(&["status", &original_id, "--part", &original_id]);
+    assert_eq!(predecessor["workspaceRecovery"]["recoverable"], false);
+    assert_eq!(
+        predecessor["workspaceRecovery"]["successorRunId"],
+        resumed_id
     );
     guard.stop();
 }

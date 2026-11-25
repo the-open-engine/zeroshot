@@ -175,6 +175,7 @@ async fn interrupted_answer_launch_reconciles_before_accepting_a_retry() {
 
         let status = fixture.json(&["status", &run], "finish").await;
         assert_eq!(status["workspaceRecovery"]["recoverable"], false);
+        assert_eq!(status["currentPartId"], run);
         assert!(status["workspaceRecovery"]["successorRunId"].is_null());
         assert_eq!(fixture.own_inbox(&run).await["state"], "pending");
         let next = successor(&fixture.answer(&run, &approve()).await);
@@ -266,10 +267,7 @@ async fn expiry_is_lazy_and_answers_create_exactly_one_timeout_successor() {
         fixture.json(&["inbox", "list"], "finish").await["requests"][0]["state"],
         "expired"
     );
-    assert!(
-        fixture.json(&["status", &run], "finish").await["workspaceRecovery"]["successorRunId"]
-            .is_null()
-    );
+    assert_eq!(fixture.json(&["status", &run], "finish").await["currentPartId"], run);
     let out = fixture.answer(&run, &approve()).await;
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("expired"));
