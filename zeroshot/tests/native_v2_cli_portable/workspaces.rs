@@ -61,7 +61,7 @@ fn workspace_artifacts_follow_placement_and_survive_managed_cleanup() {
         let failed = settled(&fixture, &id, "finished");
         assert_eq!(failed["status"]["terminalResult"]["status"], "failed");
         let resumed = fixture
-            .command(&["resume", &id])
+            .command(&["resume", &id, "--restart"])
             .env("FIXTURE_MODE", "finish")
             .output()
             .unwrap();
@@ -267,7 +267,7 @@ fn managed_restart_restores_pinned_lane_before_executable_checks() {
         )
         .unwrap();
         let resumed = fixture
-            .command(&["resume", &id])
+            .command(&["resume", &id, "--restart"])
             .env("PATH", path(copy))
             .env("FIXTURE_MODE", "finish")
             .env("FIXTURE_RECEIPTS", &receipts)
@@ -331,7 +331,7 @@ fn managed_copy_startup_executes_pinned_scripts_after_source_deletion_and_restar
         fs::remove_file(copy.join("startup-proof")).unwrap();
         let successor = receipt(
             &fixture
-                .command(&["resume", &id])
+                .command(&["resume", &id, "--restart"])
                 .env("FIXTURE_MODE", "fail")
                 .output()
                 .unwrap(),
@@ -344,7 +344,7 @@ fn managed_copy_startup_executes_pinned_scripts_after_source_deletion_and_restar
         assert!(input_objects(&fixture) > 0);
         let finished = receipt(
             &fixture
-                .command(&["resume", &successor])
+                .command(&["resume", &successor, "--restart"])
                 .env("FIXTURE_MODE", "finish")
                 .output()
                 .unwrap(),
@@ -425,7 +425,7 @@ fn failed_managed_request_successor_keeps_files_matching_its_starting_history() 
     for mode in ["fail", "finish"] {
         let resumed = receipt(
             &fixture
-                .command(&["resume", &failed])
+                .command(&["resume", &failed, "--restart"])
                 .env("FIXTURE_MODE", mode)
                 .env("FIXTURE_RECEIPTS", &receipts)
                 .output()
@@ -567,7 +567,7 @@ fn managed_local_restart_reuses_pinned_root_and_only_disposes_the_copy() {
     fs::write(fixture.workspace.join("seed"), b"new upstream bytes").unwrap();
     let successor = receipt(
         &fixture
-            .command(&["resume", &id])
+            .command(&["resume", &id, "--restart"])
             .env("FIXTURE_MODE", "fail")
             .output()
             .unwrap(),
@@ -585,7 +585,7 @@ fn managed_local_restart_reuses_pinned_root_and_only_disposes_the_copy() {
     );
     let successor = receipt(
         &fixture
-            .command(&["resume", &successor])
+            .command(&["resume", &successor, "--restart"])
             .env("FIXTURE_MODE", "finish")
             .output()
             .unwrap(),
@@ -737,7 +737,7 @@ fn managed_local_file_selections_and_submission_retry_keep_original_bytes() {
     assert!(workspace.join("nested/empty").is_dir());
     let successor = receipt(
         &fixture
-            .command(&["resume", &original])
+            .command(&["resume", &original, "--restart"])
             .env("FIXTURE_MODE", "finish")
             .output()
             .unwrap(),
@@ -779,7 +779,7 @@ fn missing_in_place_folder_and_snapshot_restore_have_actionable_refusals() {
     let moved = fixture.root.path("temporarily-unavailable");
     fs::rename(&fixture.workspace, &moved).unwrap();
     let refused = fixture
-        .command(&["resume", &id])
+        .command(&["resume", &id, "--restart"])
         .env("FIXTURE_MODE", "finish")
         .output()
         .unwrap();
@@ -794,7 +794,7 @@ fn missing_in_place_folder_and_snapshot_restore_have_actionable_refusals() {
     fs::rename(moved, &fixture.workspace).unwrap();
     let successor = receipt(
         &fixture
-            .command(&["resume", &id])
+            .command(&["resume", &id, "--restart"])
             .env("FIXTURE_MODE", "finish")
             .output()
             .unwrap(),
@@ -838,7 +838,7 @@ fn managed_copy_replay_survives_missing_source_and_retains_conflict_checks() {
     fixture.write("input.json", &Value::Null);
     let successor = receipt(
         &fixture
-            .command(&["resume", &id])
+            .command(&["resume", &id, "--restart"])
             .env("FIXTURE_MODE", "finish")
             .output()
             .unwrap(),
@@ -1217,7 +1217,7 @@ fn assert_administrative_layout_isolation(seed_members: Option<&[&str]>) {
 
 #[cfg(unix)]
 #[test]
-fn managed_shutdown_preserves_live_edits_for_plain_resume() {
+fn managed_shutdown_preserves_live_edits_for_explicit_restart() {
     let fixture = Fixture::new().outside_workspace();
     runtime(&fixture, true);
     let id = receipt(
@@ -1250,7 +1250,7 @@ fn managed_shutdown_preserves_live_edits_for_plain_resume() {
     assert_eq!(fs::read(copy.join("seed")).unwrap(), b"keep shutdown edit");
     let successor = receipt(
         &fixture
-            .command(&["resume", &id])
+            .command(&["resume", &id, "--restart"])
             .env("FIXTURE_MODE", "fail")
             .output()
             .unwrap(),
@@ -1312,5 +1312,118 @@ fn explicit_stop_of_reconstructed_suspended_run_disposes_only_managed_folder() {
             assert_eq!(input_objects(&fixture), 0);
         }
         assert_eq!(fs::read(fixture.workspace.join("seed")).unwrap(), b"seed");
+    }
+}
+
+#[test]
+fn failed_workspace_resume_keeps_latest_checkpoint_and_in_place_authority() {
+    for managed in [false, true] {
+        let fixture = Fixture::new().outside_workspace();
+        runtime(&fixture, true);
+        let mut graph: Value =
+            serde_json::from_slice(&fs::read(fixture.root.path("graph.json")).unwrap()).unwrap();
+        graph["root"]["children"][1]["otherwise"]["artifacts"] =
+            json!({"seed":{"kind":"literal","path":"seed"}});
+        fixture.write("graph.json", &graph);
+        let mut command = fixture.run_command("fail", true);
+        command.arg("--workspace");
+        if managed {
+            command.arg("--copy-workspace");
+        }
+        let id = receipt(&command.output().unwrap());
+        let failed = settled(&fixture, &id, "finished");
+        let workspace = Path::new(failed["workspace"]["localDirectory"].as_str().unwrap());
+        fs::write(workspace.join("seed"), b"later workspace edit").unwrap();
+        fs::write(workspace.join("later"), b"untouched until consent").unwrap();
+        let checkpoints = fixture.json(&["checkpoints", &id]);
+        let refused = fixture.command(&["resume", &id]).output().unwrap();
+        assert!(!refused.status.success());
+        let diagnostic = String::from_utf8_lossy(&refused.stderr);
+        if managed {
+            let latest = checkpoints["checkpoints"]
+                .as_array()
+                .unwrap()
+                .last()
+                .unwrap();
+            assert!(
+                diagnostic.contains(latest["checkpointId"].as_str().unwrap()),
+                "{diagnostic}"
+            );
+            assert!(
+                diagnostic.contains("--discard-workspace-changes"),
+                "{diagnostic}"
+            );
+        } else {
+            assert!(checkpoints["checkpoints"].as_array().unwrap().is_empty());
+            assert!(diagnostic.contains("no entry checkpoints"), "{diagnostic}");
+            assert!(diagnostic.contains("--restart"), "{diagnostic}");
+            let refused = fixture
+                .command(&[
+                    "resume",
+                    &id,
+                    "--from-checkpoint",
+                    "forbidden",
+                    "--discard-workspace-changes",
+                ])
+                .output()
+                .unwrap();
+            assert!(!refused.status.success());
+            let diagnostic = String::from_utf8_lossy(&refused.stderr);
+            assert!(
+                diagnostic.contains("in-place workspaces cannot restore"),
+                "{diagnostic}"
+            );
+            assert!(diagnostic.contains("--restart"), "{diagnostic}");
+        }
+        assert_eq!(
+            fs::read(workspace.join("seed")).unwrap(),
+            b"later workspace edit"
+        );
+        assert!(workspace.join("later").exists());
+        assert_eq!(fixture.json(&["status", &id])["currentPartId"], id);
+        let option = if managed {
+            "--discard-workspace-changes"
+        } else {
+            "--restart"
+        };
+        let resumed = fixture
+            .command(&["resume", &id, option])
+            .env("FIXTURE_MODE", "finish")
+            .output()
+            .unwrap();
+        let part = receipt(&resumed);
+        let done = settled(&fixture, &part, "finished");
+        assert_eq!(
+            done["status"]["terminalResult"]["status"], "succeeded",
+            "{done}"
+        );
+        let artifact = &done["status"]["metadata"]["artifacts"]["seed"];
+        if managed {
+            assert!(!workspace.exists());
+            assert_eq!(fs::read(fixture.workspace.join("seed")).unwrap(), b"seed");
+            assert_eq!(artifact["address"]["scope"]["runId"], part);
+            let downloaded = fixture.root.path("restored-seed");
+            success(
+                &fixture
+                    .command(&[
+                        "file",
+                        "download",
+                        artifact["address"]["path"].as_str().unwrap(),
+                        downloaded.to_str().unwrap(),
+                        "--run",
+                        &part,
+                    ])
+                    .output()
+                    .unwrap(),
+            );
+            assert_eq!(fs::read(downloaded).unwrap(), b"seed");
+        } else {
+            assert_eq!(artifact["kind"], "local");
+            assert_eq!(
+                fs::read(workspace.join("seed")).unwrap(),
+                b"later workspace edit"
+            );
+            assert!(workspace.join("later").exists());
+        }
     }
 }

@@ -2014,6 +2014,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   managed roots disjoint from sources/state, and dispose only managed roots. Workspace identity
   travels with admitted definitions, status, history and recovery. In-place progress uses durable
   metadata without snapshotting, resetting or deleting the user's folder; file restore is refused.
+  Failed CLI resumes keep the latest-checkpoint default; in-place runs have no restorable entries
+  and require explicit `--restart`, while suspended continuation still uses the current folder.
   Checkpoint-free fresh managed local restarts rebuild the original pins only with an empty
   starting execution seed; successors retaining completed work keep the corresponding live copy.
   Defer launcher executable preflight for reconstruction, as for checkpoint restore; the controller

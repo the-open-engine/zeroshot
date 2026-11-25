@@ -36,6 +36,11 @@ including a subfolder inside a Git checkout. Your edits remain there after the r
 retain graph progress separately: resume uses the same folder's current contents and cannot
 restore an earlier version of your files.
 
+Continue a suspended in-place run with `zeroshot resume RUN_ID`. After failure, use
+`zeroshot resume RUN_ID --restart` to keep the current folder contents; in-place runs have no
+restorable entry checkpoints. Managed runs use the latest-checkpoint recovery default, with
+`--discard-workspace-changes` required before restoring a local managed copy.
+
 Use `--workspace --copy-workspace` to freeze that folder's contents and executable bits into a
 disposable managed copy. Linked worktrees and other external Git administrative pointers are refused; use in-place
 placement or select files without Git metadata. To start empty, use

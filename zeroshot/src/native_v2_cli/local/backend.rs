@@ -67,7 +67,7 @@ fn local_restore_selection(
         .is_some_and(|workspace| workspace.is_in_place())
         && (discard_workspace_changes || matches!(from, Some(RunResumeFrom::Checkpoint { .. })))
     {
-        return Err(NativeV2CliError::Usage("in-place workspaces cannot restore snapshots; use a plain resume to keep the current folder contents".into()));
+        return Err(NativeV2CliError::Usage("in-place workspaces cannot restore snapshots; use --restart to keep the current folder contents after a failed run".into()));
     }
     if !recovery.workspace_checkpoints_enabled()
         && (discard_workspace_changes || matches!(from, Some(RunResumeFrom::Checkpoint { .. })))
