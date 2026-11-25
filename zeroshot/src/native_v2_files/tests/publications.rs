@@ -223,7 +223,8 @@ fn local_reference_open_never_rebases_confinement_during_root_exchange() {
     let exchange = move || {
         assert_eq!(
             unsafe {
-                libc::renameat2(
+                libc::syscall(
+                    libc::SYS_renameat2,
                     libc::AT_FDCWD,
                     first.as_ptr(),
                     libc::AT_FDCWD,
