@@ -286,11 +286,7 @@ async fn missing_publication_after_validation_is_runtime_failure_without_model_c
     )
     .await;
     let store = attach(&mut harness, temp.path(), false);
-    std::fs::rename(
-        temp.path().join("workspace/report"),
-        temp.path().join("moved"),
-    )
-    .unwrap();
+    std::fs::remove_dir_all(temp.path().join("workspace/report")).unwrap();
     let error = harness.supervisor.drive().await.unwrap_err();
     assert!(
         error

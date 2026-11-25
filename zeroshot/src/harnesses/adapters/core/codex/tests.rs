@@ -52,7 +52,7 @@ use crate::worker_catalog::{self, ReasoningEffort};
 
 const SCRIPT: &str = r#"#!/bin/sh
 set -eu
-prompt=$(/usr/bin/cat)
+prompt=$(cat)
 {
   /usr/bin/printf '%s\n' '---'
   for argument in "$@"; do
@@ -81,7 +81,7 @@ for argument in "$@"; do
 done
 test -n "$schema_path"
 /usr/bin/printf 'schema_path=%s\n' "$schema_path" >> "$CAPTURE_PATH"
-/usr/bin/printf 'schema=%s\n' "$(/usr/bin/cat "$schema_path")" >> "$CAPTURE_PATH"
+/usr/bin/printf 'schema=%s\n' "$(cat "$schema_path")" >> "$CAPTURE_PATH"
 
 resumed=false
 thread_id=${THREAD_ID-thread-123}

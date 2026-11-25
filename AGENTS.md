@@ -2371,6 +2371,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Unix tests that create executable fixtures use
   `openengine_cluster_testkit::fixture::write_executable`; its isolated writer is reaped before
   use so parallel test forks cannot inherit writable executable descriptors.
+- Portable provider fixtures resolve `cat` through the harness's pinned native PATH
+  (`/usr/bin:/bin`); macOS installs it in `/bin`. Preserve safe provider diagnostics and
+  underlying I/O errors when a fixture capture is unavailable.
 - Python test doubles use `openengine_cluster_testkit::fixture::python3_script`, which resolves
   the test PATH's actual interpreter before entering a pinned or cleared child environment.
 - Portable CLI/SDK boundary tests use the repository `.venv` when available, otherwise Python 3

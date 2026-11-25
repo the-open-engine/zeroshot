@@ -33,16 +33,18 @@ async fn response(
     );
     if contained {
         use std::os::unix::fs::PermissionsExt;
-        fs::write(directory.child("capture"), "").assert_value();
+        fs::write(directory.child("capture"), "").expect("create contained fixture capture");
         fs::set_permissions(
             directory.child("capture"),
             fs::Permissions::from_mode(0o666),
         )
-        .assert_value();
+        .expect("permit contained fixture capture writes");
         adapter = Arc::new(NativeV2CodexAdapter::new(adapter.config.clone()));
     }
-    fs::create_dir_all(directory.child("workspace/report/nested")).assert_value();
-    fs::write(directory.child("workspace/report/nested/file"), "current").assert_value();
+    fs::create_dir_all(directory.child("workspace/report/nested"))
+        .expect("create filepath fixture tree");
+    fs::write(directory.child("workspace/report/nested/file"), "current")
+        .expect("write filepath fixture member");
     let admitted = admitted_with_output(
         binding(
             SessionScope::Execution,
@@ -68,7 +70,14 @@ async fn response(
     )
     .await;
     let (logs, outcome) = complete_with_logs(handle).await;
-    let capture = fs::read_to_string(directory.child("capture")).assert_value();
+    // The harness retains these already-redacted diagnostics for any later fixture assertion.
+    eprintln!(
+        "filepath fixture: kind={kind}, contained={contained}, initial={initial:?}, \
+         corrected={corrected:?}, malformed={malformed}\nprovider outcome: {outcome:?}\n\
+         provider logs:\n{logs}"
+    );
+    let capture = fs::read_to_string(directory.child("capture"))
+        .unwrap_or_else(|error| panic!("read filepath fixture capture: {error:?}"));
     let expected_uid = format!(
         "uid={}",
         if contained {
@@ -98,7 +107,7 @@ async fn response(
     );
     // A response validates only. The fixture never has a file-store host or publication.
     assert!(!directory.child("store").exists());
-    (outcome.assert_value(), capture)
+    (outcome.expect("filepath fixture provider outcome"), capture)
 }
 
 #[tokio::test]
