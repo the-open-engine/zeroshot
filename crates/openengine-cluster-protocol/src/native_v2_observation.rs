@@ -19,6 +19,7 @@ use crate::{
 
 #[path = "native_v2_observation/failure.rs"]
 mod failure;
+mod publications;
 pub use failure::*;
 
 /// Non-negative token counter that remains exact in JavaScript clients.

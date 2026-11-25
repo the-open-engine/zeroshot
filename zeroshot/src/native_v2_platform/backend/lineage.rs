@@ -46,15 +46,27 @@ impl NativeV2PlatformController {
         part_id: Option<&RunId>,
     ) -> Result<RunStatusResult, NativeV2PlatformError> {
         let selected = selected_part(family, part_id)?;
-        let mut result = self.status(RunStatusParams::new(selected.clone())).await?;
+        let result = self.status(RunStatusParams::new(selected.clone())).await?;
+        self.project_status_result(family, result, part_id.is_none())
+            .await
+    }
+
+    pub(super) async fn project_status_result(
+        &self,
+        family: &RunLineage,
+        mut result: RunStatusResult,
+        aggregate: bool,
+    ) -> Result<RunStatusResult, NativeV2PlatformError> {
         result.run_id = family.root().clone();
         result.current_part_id = family.current().clone();
-        result.part_id = selected.clone();
-        family.project_recovery(selected, &mut result.workspace_recovery);
-        if part_id.is_none() {
+        family.project_recovery(&result.part_id, &mut result.workspace_recovery);
+        if aggregate {
             self.aggregate_status(family, &mut result.status, &mut result.at_cursor)
                 .await?;
         }
+        result
+            .fit_published_steering()
+            .map_err(|_| RunLedgerError::Corrupt)?;
         Ok(result)
     }
 

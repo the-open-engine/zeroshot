@@ -2467,6 +2467,8 @@ python -m mkdocs build --strict
   request attachments are omitted from ordinary status/vector views and retained in the inbox.
   Managed file receipts retain the producing part’s file address in logical and exact reads. A
   suspended part’s publications remain protected until its successor is committed and admitted.
+  Final statuses keep the full file receipt. If the serialized response exceeds the existing byte
+  limit, omit the oldest steering summaries, count them in `omittedSteers`, and retain their vectors.
   Generic history definitions, pages, SSE and run lists use the same suspension redaction;
   private request-preparation payloads stay hidden while their event cursors remain contiguous.
   Publication hosts must preflight the complete receipt through the caller's record/response

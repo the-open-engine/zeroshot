@@ -545,3 +545,77 @@ fn empty_context_lists_preserve_direct_and_hosted_observation_shapes() {
     check::<RunWatchEventNotification>(watch.clone());
     check::<HostedRunWatchEventNotification>(watch);
 }
+
+#[test]
+fn logical_publication_status_keeps_the_receipt_and_newest_steers_when_the_physical_status_fits() {
+    use openengine_cluster_protocol::{HostedRunStatusResult, MAX_REQUEST_RESPONSE_BYTES};
+
+    let root = "0199f33f-3b44-7d21-9000-000000000031";
+    let part = "0199f33f-3b44-7d21-9000-000000000032";
+    let mut physical = publication_with_steers(part);
+    let spare = MAX_REQUEST_RESPONSE_BYTES - 8 - serde_json::to_vec(&physical).assert_value().len();
+    // Distribute padding across portable file names so every publication and steer remains
+    // individually admissible. The qualified cursor alone will use more than the eight bytes left.
+    let RunStatus::Finished { metadata, .. } = &mut physical.status else {
+        unreachable!()
+    };
+    let count = metadata.artifacts.len();
+    for (index, file) in metadata.artifacts.values_mut().enumerate() {
+        let openengine_cluster_protocol::PublishedFile::Managed { address, .. } = file else {
+            unreachable!()
+        };
+        let pad = spare / count + usize::from(index < spare % count);
+        address.path = openengine_cluster_protocol::FilePath::new(format!(
+            "{}{}",
+            address.path.as_str(),
+            "a".repeat(pad)
+        ))
+        .assert_value();
+    }
+    assert_eq!(
+        serde_json::to_vec(&physical).assert_value().len(),
+        MAX_REQUEST_RESPONSE_BYTES - 8
+    );
+    physical.fit_published_steering().assert_value();
+    assert_eq!(physical.steering.steers.len(), 56);
+    let mut grouped = physical.clone();
+    grouped.run_id = RunId::new(root);
+    grouped.at_cursor = Cursor::new(format!("{part}@v2:1234"));
+    assert!(serde_json::to_vec(&grouped).assert_value().len() > MAX_REQUEST_RESPONSE_BYTES);
+    let mut hosted = HostedRunStatusResult::from(grouped.clone());
+    grouped.fit_published_steering().assert_value();
+    hosted.fit_published_steering().assert_value();
+
+    assert_eq!(grouped.status, physical.status);
+    assert_eq!(grouped.steering.steers, physical.steering.steers[1..]);
+    assert_eq!(grouped.steering.omitted_steers, 10);
+    let serialized = serde_json::to_vec(&grouped).assert_value();
+    assert!(serialized.len() <= MAX_REQUEST_RESPONSE_BYTES);
+    assert_eq!(serialized, serde_json::to_vec(&hosted).assert_value());
+}
+
+fn publication_with_steers(part: &str) -> RunStatusResult {
+    let networks: Vec<_> = (0..1000)
+        .map(|i| format!("review_{i:05}_{}", "x".repeat(27)))
+        .collect();
+    let network =
+        json!({"networks":networks,"origin":{"node":"work","nodeInstance":1,"execution":"1"}});
+    let steers: Vec<_> = (0..56)
+        .map(|i| {
+            json!({
+                "id":format!("steer-{i}"),"mode":"once","network":network,
+                "createdAt":1000,"textBytes":1,"excerpt":"x","receivedExecutions":0,"executions":[]
+            })
+        })
+        .collect();
+    let files: serde_json::Map<_,_> = (0..2600).map(|i| {
+        let key = format!("f{i:04}");
+        let path = format!("final/{key}/{}", "x".repeat(120));
+        (key, json!({"kind":"managed","target":"direct-target","address":{"scope":{"kind":"run","runId":part},"path":path}}))
+    }).collect();
+    serde_json::from_value(json!({
+        "runId":part,"partId":part,"currentPartId":part,"atCursor":"v2:1234","title":"Receipt","size":"medium",
+        "status":{"phase":"finished","terminalResult":{"status":"succeeded","output":null},"metadata":{"artifacts":files}},
+        "steers":steers,"omittedSteers":9
+    })).assert_value()
+}

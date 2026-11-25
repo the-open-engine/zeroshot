@@ -122,6 +122,7 @@ impl LocalCliBackend {
             result.at_cursor = part_cursor(&result.part_id, &result.at_cursor);
             scope_diagnostic_cursors(&result.part_id, &mut result.status);
         }
+        result.fit_published_steering()?;
         Ok(result)
     }
 
@@ -145,6 +146,7 @@ impl LocalCliBackend {
             let previous = self.previous_usage(lineage, &result.part_id).await?;
             crate::v2_run_ledger::merge_usage(&mut metadata.token_usage, previous.as_ref())?;
         }
+        result.fit_published_steering()?;
         Ok(())
     }
 

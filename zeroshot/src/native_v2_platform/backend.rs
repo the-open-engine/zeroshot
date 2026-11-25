@@ -177,6 +177,9 @@ impl ClusterBackend for NativeV2PlatformController {
         self.aggregate_status(&family, &mut result.status, &mut result.at_cursor)
             .await
             .map_err(platform_backend_error)?;
+        result
+            .fit_published_steering()
+            .map_err(|_| platform_backend_error(RunLedgerError::Corrupt.into()))?;
         Ok(result)
     }
 
@@ -204,17 +207,13 @@ impl ClusterBackend for NativeV2PlatformController {
         let (family, run_id) = self
             .current_target(&params.run_id, params.part_id.as_ref())
             .await?;
-        let mut result = self
+        let result = self
             .suspend(RunStatusParams { run_id, ..params })
             .await
             .map_err(platform_backend_error)?;
-        result.run_id = family.root().clone();
-        result.current_part_id = family.current().clone();
-        family.project_recovery(family.current(), &mut result.workspace_recovery);
-        self.aggregate_status(&family, &mut result.status, &mut result.at_cursor)
+        self.project_status_result(&family, result, true)
             .await
-            .map_err(platform_backend_error)?;
-        Ok(result)
+            .map_err(platform_backend_error)
     }
 
     async fn inbox_list(
