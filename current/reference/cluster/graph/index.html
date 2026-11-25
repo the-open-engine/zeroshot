@@ -2770,7 +2770,7 @@ runtime authority. A policy binding contains one versioned policy reference and 
 <code>deny</code> as its default. Registry descriptors and policy implementations are outside this contract.</p>
 <h2 id="closed-payload-algebra-and-subtyping">Closed payload algebra and subtyping<a class="headerlink" href="#closed-payload-algebra-and-subtyping" title="Permanent link">&para;</a></h2>
 <p><code>PayloadType</code> is tagged by <code>kind</code> and is closed over <code>null</code>, <code>boolean</code>, <code>integer</code>, <code>number</code>,
-<code>string</code>, structural <code>record</code>, homogeneous <code>array</code>, and finite <code>enum</code>. A record maps field names to
+<code>string</code>, <code>filepath</code>, structural <code>record</code>, homogeneous <code>array</code>, and finite <code>enum</code>. A record maps field names to
 <code>{ type, required }</code>. Enum labels are non-empty, unique, sorted, and finite. The algebra contains no
 unions, references, definitions, tuples, custom schema keywords, regex constraints, or arbitrary
 JSON Schema.</p>
@@ -2814,6 +2814,22 @@ subtype. An optional field of <code>T</code> may be absent from <code>S</code>; 
 target value. A required source field may satisfy an optional target field. An optional source field
 never satisfies a required target field. Extra source fields are allowed. The relation is recursive,
 deterministic, side-effect free, and never delegates to general JSON Schema evaluation.</p>
+<p>A <code>filepath</code> is a nonempty string naming an existing regular file or folder inside the execution
+workspace. Worker and verifier responses validate these paths, including nested fields, through
+the ordinary response correction flow. It has no MIME constraint and is distinct from <code>string</code>;
+an ordinary string never triggers filesystem access. Validation alone publishes nothing.</p>
+<p>Request verifiers (<code>builtin.request.ask@1</code>) and <code>succeed</code> nodes accept an optional <code>artifacts</code> map:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">"folder"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"literal"</span><span class="p">,</span><span class="w"> </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"report"</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">"file"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"binding"</span><span class="p">,</span><span class="w"> </span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"source"</span><span class="p">:</span><span class="w"> </span><span class="s2">"state"</span><span class="p">,</span><span class="w"> </span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"reportPath"</span><span class="p">]</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="p">}</span>
+</code></pre></div>
+<p>Bindings must select <code>filepath</code> fields. Literal paths are relative to the working root or absolute
+paths confined to it. At an executed request or outer graph success, the host rechecks every
+selected path before exposing the complete set. A profile's internal success continues its caller
+without publishing. Unselected branches and ordinary node results expose no files. Artifact
+declarations participate in graph identity and saved-profile expansion. See
+<a href="../../target-files/">target files</a> for capture, access and retention.</p>
 <h2 id="production-full-graph-verification">Production full-graph verification<a class="headerlink" href="#production-full-graph-verification" title="Permanent link">&para;</a></h2>
 <p>The verifier runs deterministic synchronous structural and semantic passes before accessing the
 worker registry. Any structural diagnostic prevents registry lookup. Worker absence, unavailable
@@ -2961,7 +2977,7 @@ further diagnostics. The path shows field names with their <code>[index]</code> 
 The message is never shortened. The count and then the path only use the bytes the message leaves
 within 1,024 bytes: the count is left out when it does not fit, and <code>.../</code> replaces leading path
 segments that do not fit:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>graph verification rejected the graph at root/`run`/children[1]/`check`/branches: control analysis of this condition exceeds 65536 count states or 1048576 search steps (and 1 more diagnostic)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>graph verification rejected the graph at root/`run`/children[1]/`check`/branches: control analysis of this condition exceeds 65536 count states or 1048576 search steps (and 1 more diagnostic)
 </code></pre></div>
 <p><code>StructuralBounds</code> carries a termination witness, a positive executable-visit upper limit,
 a positive concurrency upper limit, and positive per-node attempt ceilings. Maps rely on runtime
@@ -3031,7 +3047,7 @@ potential contributors until actual outcomes settle the join.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-22">22 November 2026</time>
+    Last updated <time datetime="2026-11-25">25 November 2026</time>
   </span>
 
     

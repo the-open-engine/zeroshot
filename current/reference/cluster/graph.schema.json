@@ -24,6 +24,45 @@
       ],
       "type": "object"
     },
+    "ArtifactPath": {
+      "description": "An explicitly published workspace path. Bindings require the distinct filepath type.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "literal",
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "binding",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/DataSelector"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "ArtifactProducer": {
       "additionalProperties": false,
       "properties": {
@@ -406,6 +445,16 @@
         {
           "additionalProperties": false,
           "properties": {
+            "artifacts": {
+              "additionalProperties": false,
+              "description": "Files exposed only by builtin.request.ask@1. Ordinary verifiers cannot publish.",
+              "patternProperties": {
+                "^[A-Za-z_][A-Za-z0-9_.-]*$": {
+                  "$ref": "#/$defs/ArtifactPath"
+                }
+              },
+              "type": "object"
+            },
             "attempts": {
               "maximum": 9007199254740991,
               "minimum": 1,
@@ -824,6 +873,16 @@
         {
           "additionalProperties": false,
           "properties": {
+            "artifacts": {
+              "additionalProperties": false,
+              "description": "Files exposed only when this success terminates the outer graph.",
+              "patternProperties": {
+                "^[A-Za-z_][A-Za-z0-9_.-]*$": {
+                  "$ref": "#/$defs/ArtifactPath"
+                }
+              },
+              "type": "object"
+            },
             "bindings": {
               "items": {
                 "$ref": "#/$defs/InputBinding"
@@ -1298,6 +1357,19 @@
           "properties": {
             "kind": {
               "const": "string",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "filepath",
               "type": "string"
             }
           },
