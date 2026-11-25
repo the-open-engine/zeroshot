@@ -140,7 +140,12 @@ fn load(directory: &Path) -> Result<Session> {
         return Err(invalid("unsupported initialization session"));
     }
     for run in &session.runs {
-        validate_paths(&run.workspace, &session.state_root, directory)?;
+        if !run.workspace.is_absolute() {
+            return Err(invalid("recorded workspace must be absolute"));
+        }
+        if run.repository.is_some() {
+            validate_paths(&run.workspace, &session.state_root, directory)?;
+        }
     }
     Ok(session)
 }
@@ -286,7 +291,11 @@ async fn finish_review(
     staged: (MemorySnapshot, BTreeSet<String>),
 ) -> Result<Value> {
     let (snapshot, new_ids) = staged;
-    let workspaces = runs.iter().map(|run| run.workspace.clone()).collect();
+    let workspaces = runs
+        .iter()
+        .filter(|run| run.repository.is_some())
+        .map(|run| run.workspace.clone())
+        .collect();
     let source_digest = checkouts::sources_digest(session, &workspaces).await?;
     let mut review = Review {
         schema_version: 2,
@@ -324,6 +333,18 @@ impl Review {
 }
 
 impl HistoricalRun {
+    async fn source_guard(
+        &self,
+        lessons: &[crate::active_memory::Lesson],
+    ) -> crate::active_memory::source_guard::SourceGuard {
+        if self.repository.is_some() {
+            crate::active_memory::source_guard::SourceGuard::capture(&self.workspace, lessons).await
+        } else {
+            // Graph-only history remains usable after a disposable workspace is removed.
+            Default::default()
+        }
+    }
+
     fn accepts(&self, scope: &crate::active_memory::LessonScope) -> bool {
         use crate::active_memory::LessonScope;
         match scope {

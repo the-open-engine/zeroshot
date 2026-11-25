@@ -13,6 +13,7 @@ pub(super) async fn validate(
     directory: &Path,
 ) -> Result<(Vec<LessonMutation>, usize)> {
     let mut source_files = BTreeMap::new();
+    let no_source_files = BTreeSet::new();
     let mut reconciliation = Reconciliation {
         pending: review
             .snapshot
@@ -26,7 +27,7 @@ pub(super) async fn validate(
     };
     for entry in &review.tasks {
         let (output, changes) = validate_task(session, entry, directory).await?;
-        if !source_files.contains_key(&entry.run.workspace) {
+        if entry.run.repository.is_some() && !source_files.contains_key(&entry.run.workspace) {
             source_files.insert(
                 entry.run.workspace.clone(),
                 files::source_files(&entry.run.workspace).await?,
@@ -37,7 +38,11 @@ pub(super) async fn validate(
             changes,
             SourceAuthority {
                 workspace: &entry.run.workspace,
-                files: &source_files[&entry.run.workspace],
+                files: if entry.run.repository.is_some() {
+                    &source_files[&entry.run.workspace]
+                } else {
+                    &no_source_files
+                },
             },
         )?;
     }
@@ -75,7 +80,7 @@ async fn validate_task(
             .map(crate::active_memory::Lesson::version)
             .collect(),
     };
-    let inspected = SourceGuard::capture(&entry.run.workspace, &snapshot.lessons).await;
+    let inspected = entry.run.source_guard(&snapshot.lessons).await;
     let unknown = SourceGuard::default();
     let source = tasks::response_source(&input, &inspected, &unknown)?;
     let context = loaded

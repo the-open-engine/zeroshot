@@ -71,7 +71,7 @@ pub(super) async fn sources_digest(
     for run in session
         .runs
         .iter()
-        .filter(|run| workspaces.contains(&run.workspace))
+        .filter(|run| run.repository.is_some() && workspaces.contains(&run.workspace))
     {
         if !checked.insert(&run.workspace) {
             continue;

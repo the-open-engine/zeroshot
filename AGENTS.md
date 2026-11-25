@@ -234,6 +234,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Source-only historical admissions match repository IDs independently resolved from the current
   checkout/registered remote; historical or folder aliases never prove identity, and remote-bearing
   admissions retain their stronger remote-derived proof.
+  Historical workspace-mode runs retain graph-only memory authority, including outside Git or after
+  managed-folder disposal. They have no repository identity or tasks and grant no current-source
+  authority or fingerprints; repository-mode histories retain checkout identity and source validation.
   The file bridge exports the runtime prompts and reuses its admission validators, never recovers old
   controllers, resolves provider credentials, or writes historical run ledgers. Digest-bound responses,
   source fingerprints, complete coverage, expected revisions and retained tombstones gate publication.

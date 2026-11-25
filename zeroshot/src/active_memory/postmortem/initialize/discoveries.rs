@@ -37,7 +37,7 @@ async fn validate_run(
     directory: &Path,
 ) -> Result<Vec<LessonMutation>> {
     let loaded = history::discovery(session, run).await?;
-    let inspected = SourceGuard::capture(&run.workspace, &[]).await;
+    let inspected = run.source_guard(&[]).await;
     let unknown = SourceGuard::default();
     let mut mutations = Vec::new();
     for task in &run.tasks {

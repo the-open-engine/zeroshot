@@ -19,6 +19,8 @@ cargo test --locked --package zeroshot --lib --features ui -- \
 # Context repositories and environment
 cargo test --locked --package zeroshot --lib --features ui -- \
   native_v2_admission::tests::context native_v2_admission::tests::workspaces caller_git_config context_git_trust context_path_is_reserved
+cargo test --locked --package zeroshot --lib --features ui -- \
+  active_memory::postmortem::tests::initialization
 cargo test --locked --package openengine-cluster-protocol --test native_v2_run --test native_v2_observation
 cargo test --locked --package openengine-cluster-protocol --lib native_v2_run::environment::tests
 
