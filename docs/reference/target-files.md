@@ -68,8 +68,8 @@ sets and discardable checkpoint lineages at least 60 days after their latest ter
 protected. Cleanup reuses resume/discard locks and reports `publications` and `checkpointLineages`
 removed; repeating it reports zero. Library files, live local outputs, logs and ledgers are outside
 its selection. Physical bytes are released only when their final retained reference is gone.
-Discarding a failed local run's checkpoints still allows plain resume in its current checkout;
-restoring a discarded snapshot is unavailable.
+Discarding a failed local run's checkpoints still allows `zeroshot resume RUN_ID --restart` in its
+current checkout; restoring a discarded snapshot is unavailable.
 
 ## Transport and host contract
 

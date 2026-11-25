@@ -432,8 +432,8 @@ provide every declared signal and every required output field. Unknown fields, s
 are refused as `invalid_request`, naming the path, without consuming the request. A second answer
 names the accepted successor. `resume`, including checkpoint selection, refuses requests and names
 `answer` before resolving credentials; after an answer it names the successor instead. If that
-successor fails or is lost, `resume` on it starts again right after the answer: the request stays
-answered, the question is not asked again, and `node_instance` agents continue their conversations
+successor fails or is lost, `resume --restart` on it starts again right after the answer: the request
+stays answered, the question is not asked again, and `node_instance` agents continue their conversations
 from when the question was asked. Only a successor lost in the instant it starts, before its
 starting point is recorded, restarts at the root with new conversations and asks again.
 
