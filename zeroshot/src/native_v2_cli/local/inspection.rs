@@ -22,21 +22,25 @@ impl LocalCliBackend {
         id: &RunId,
     ) -> Result<(PortableControllerPaths, File), NativeV2CliError> {
         let (paths, directory) = self.recorded_directory(id)?;
-        if !require_existing_ledger(&paths.ledger()).map_err(local_io)? {
-            return Err(NativeV2CliError::RunNotFound {
-                run_id: id.as_str().to_owned(),
-            });
-        }
+        require_run_ledger(&paths, id)?;
         Ok((paths, directory))
     }
 
-    fn recorded_directory(
+    pub(super) fn recorded_directory(
         &self,
         id: &RunId,
     ) -> Result<(PortableControllerPaths, File), NativeV2CliError> {
-        let paths = self.existing_run_paths(id)?;
+        let paths = PortableControllerPaths::new(self.run_storage(id)?);
         let directory =
-            crate::execution::platform::open_directory(paths.storage()).map_err(local_io)?;
+            crate::execution::platform::open_directory(paths.storage()).map_err(|error| {
+                if error.kind() == std::io::ErrorKind::NotFound {
+                    NativeV2CliError::RunNotFound {
+                        run_id: id.as_str().to_owned(),
+                    }
+                } else {
+                    local_io(error)
+                }
+            })?;
         Ok((paths, directory))
     }
 
@@ -63,7 +67,7 @@ impl LocalCliBackend {
         &self,
         params: RunStatusParams,
     ) -> Result<RunStatusResult, NativeV2CliError> {
-        let (paths, _directory) = self.recorded_storage(&params.run_id)?;
+        let (paths, _directory) = self.recorded_directory(&params.run_id)?;
         Ok(read_ledger(&paths, &params.run_id).await?.1)
     }
 
@@ -73,7 +77,7 @@ impl LocalCliBackend {
         timeout: Duration,
     ) -> Result<Inspection, NativeV2CliError> {
         let deadline = Instant::now() + timeout;
-        let (paths, _directory) = self.recorded_storage(id)?;
+        let (paths, _directory) = self.recorded_directory(id)?;
         let (observation, mut status) = match read_ledger(&paths, id).await {
             Ok(recorded) => recorded,
             // A controller that still answers reports what its ledger cannot, such as a runtime
@@ -117,9 +121,7 @@ impl LocalCliBackend {
                 } => {
                     // The controller may have committed its terminal while the probe was in
                     // flight. Durable completion wins over an availability observation.
-                    if let Ok(current) = observation
-                        .status(RunStatusParams { run_id: id.clone() })
-                        .await
+                    if let Ok(current) = observation.status(RunStatusParams::new(id.clone())).await
                     {
                         status = current;
                     }
@@ -163,6 +165,7 @@ impl LocalCliBackend {
             }
             Inspection::Recorded(observation, status) => (observation, status),
         };
+        let family = params.part_id.is_none().then(|| self.clone());
         let (_, mut replay) = observation.watch(params).await.map_err(local_error)?;
         Ok(ChannelSubscription::recorded(move |sender| async move {
             let result = async {
@@ -179,7 +182,7 @@ impl LocalCliBackend {
                         return Ok(());
                     }
                 }
-                finish_recorded(&sender, &status).await
+                finish_recorded(&sender, &status, family.as_ref()).await
             }
             .await;
             if let Err(error) = result {
@@ -206,6 +209,7 @@ impl LocalCliBackend {
             }
             Inspection::Recorded(observation, status) => (observation, status),
         };
+        let family = params.part_id.is_none().then(|| self.clone());
         let (_, mut replay) = observation.logs(params).await.map_err(local_error)?;
         Ok(ChannelSubscription::recorded(move |sender| async move {
             let result = async {
@@ -222,7 +226,7 @@ impl LocalCliBackend {
                         return Ok(());
                     }
                 }
-                finish_recorded(&sender, &status).await
+                finish_recorded(&sender, &status, family.as_ref()).await
             }
             .await;
             if let Err(error) = result {
@@ -243,7 +247,7 @@ impl LocalCliBackend {
                 return controller_request(
                     &params.run_id.clone(),
                     "attach",
-                    spawn_attach(transport, params).established(),
+                    spawn_attach(transport, params, None).established(),
                 )
                 .await;
             }
@@ -257,6 +261,7 @@ impl LocalCliBackend {
         }
         let (_, mut replay) = observation
             .logs(RunLogsParams {
+                part_id: None,
                 run_id: params.run_id.clone(),
                 from_cursor: None,
                 execution: Some(params.execution.clone()),
@@ -272,6 +277,7 @@ impl LocalCliBackend {
                 {
                     let event = RunAttachEventNotification {
                         subscription_id: log.subscription_id,
+                        part_id: params.run_id.clone(),
                         run_id: params.run_id.clone(),
                         execution: params.execution.clone(),
                         event: openengine_cluster_protocol::AgentAttachEvent::Output {
@@ -289,7 +295,7 @@ impl LocalCliBackend {
                         return Ok(());
                     }
                 }
-                finish_recorded(&sender, &status).await
+                finish_recorded(&sender, &status, None).await
             }
             .await;
             if let Err(error) = result {
@@ -399,7 +405,7 @@ impl LocalCliBackend {
     /// Explicit controls may recover a confirmed dead controller. Inspection never calls this.
     pub(super) async fn confirm_loss_for_resume(&self, id: &RunId) -> Result<(), NativeV2CliError> {
         let status = self
-            .read_recorded_status(RunStatusParams { run_id: id.clone() })
+            .read_recorded_status(RunStatusParams::new(id.clone()))
             .await;
         if status.is_ok_and(|status| {
             matches!(
@@ -451,15 +457,26 @@ impl LocalCliBackend {
     }
 }
 
+fn require_run_ledger(paths: &PortableControllerPaths, id: &RunId) -> Result<(), NativeV2CliError> {
+    if require_existing_ledger(&paths.ledger()).map_err(local_io)? {
+        Ok(())
+    } else {
+        Err(NativeV2CliError::RunNotFound {
+            run_id: id.as_str().to_owned(),
+        })
+    }
+}
+
 /// Opens the retained ledger without a controller, a schema change or a write.
 async fn read_ledger(
     paths: &PortableControllerPaths,
     id: &RunId,
 ) -> Result<(NativeV2Observability, RunStatusResult), NativeV2CliError> {
+    require_run_ledger(paths, id)?;
     let ledger = Arc::new(SqliteRunLedger::open_read_only(paths.ledger()).map_err(local_error)?);
     let observation = NativeV2Observability::new(ledger);
     let status = observation
-        .status(RunStatusParams { run_id: id.clone() })
+        .status(RunStatusParams::new(id.clone()))
         .await
         .map_err(local_error)?;
     Ok((observation, status))
@@ -468,12 +485,22 @@ async fn read_ledger(
 async fn finish_recorded<E>(
     sender: &tokio::sync::mpsc::Sender<Result<CliSubscriptionItem<E>, NativeV2CliError>>,
     status: &RunStatusResult,
+    family: Option<&LocalCliBackend>,
 ) -> Result<(), NativeV2CliError> {
     if !matches!(
         status.status,
         RunStatus::Finished { .. } | RunStatus::Suspended { .. }
     ) {
-        return Err(controller_unavailable(status));
+        // A lost controller can leave a nonterminal last record. After an
+        // accepted handoff that record is the end of this physical ledger.
+        match family {
+            Some(backend)
+                if backend
+                    .next_stream_part(&status.run_id, false)
+                    .await?
+                    .is_some() => {}
+            _ => return Err(controller_unavailable(status)),
+        }
     }
     let _ = sender
         .send(Ok(CliSubscriptionItem::Closed {

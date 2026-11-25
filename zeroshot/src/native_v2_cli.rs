@@ -332,6 +332,7 @@ pub enum RunGraph {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunSelector {
+    pub part_id: Option<openengine_cluster_protocol::RunId>,
     pub controller: local::LocalControllerMode,
     pub target: Option<String>,
     pub run_id: openengine_cluster_protocol::RunId,
@@ -382,6 +383,7 @@ pub struct RunCheckpointsCommand {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunWatchCommand {
+    pub follow: bool,
     pub run: RunSelector,
     pub after: Option<Cursor>,
 }

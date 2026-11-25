@@ -605,6 +605,17 @@
           "schema": {
             "type": "string"
           }
+        },
+        {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "Select one physical part of this run. Omission addresses the logical run.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
         }
       ],
       "result": {
@@ -628,6 +639,17 @@
           "required": true,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "Select one physical part of this run. Omission addresses the logical run.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         {
@@ -662,6 +684,17 @@
           "required": true,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "Select one physical part of this run. Omission addresses the logical run.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         {
@@ -712,6 +745,17 @@
           }
         },
         {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "Select one physical part of this run. Omission addresses the logical run.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        {
           "name": "execution",
           "required": true,
           "schema": {
@@ -744,6 +788,17 @@
           "schema": {
             "type": "string"
           }
+        },
+        {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "When supplied, the observed part must still be current.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
         }
       ],
       "result": {
@@ -767,6 +822,17 @@
           "required": true,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "When supplied, the observed part must still be current.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         {
@@ -814,6 +880,17 @@
           "schema": {
             "type": "string"
           }
+        },
+        {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "Select one physical part of this run. Omission addresses the logical run.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
         }
       ],
       "result": {
@@ -837,6 +914,17 @@
           "required": true,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "Select one physical part of this run. Omission addresses the logical run.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         {
@@ -926,6 +1014,17 @@
           "schema": {
             "type": "string"
           }
+        },
+        {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "Select one physical part of this run. Omission addresses the logical run.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
         }
       ],
       "result": {
@@ -952,6 +1051,17 @@
           }
         },
         {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "Select one physical part of this run. Omission addresses the logical run.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        {
           "name": "id",
           "required": true,
           "schema": {
@@ -962,7 +1072,7 @@
       "result": {
         "name": "runVectorResult",
         "schema": {
-          "$ref": "schema.json#/$defs/RunVector"
+          "$ref": "schema.json#/$defs/RunVectorResult"
         }
       },
       "summary": "Read one vector entry in full",
@@ -982,6 +1092,17 @@
           "required": true,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "Select one physical part of this run. Omission addresses the logical run.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         {
@@ -1037,6 +1158,17 @@
           }
         },
         {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "When supplied, the observed part must still be current.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        {
           "name": "runtime",
           "required": true,
           "schema": {
@@ -1058,7 +1190,7 @@
       }
     },
     {
-      "description": "Omitting from or selecting restart restarts a failed run where it started, on the latest retained workspace: a submitted run at its graph root, a successor at the boundary it began at, so an accepted answer stays accepted. Selecting checkpoint restores the matching workspace and predecessor outputs and reruns the named node or atomic concurrent group. Graph, input, source and delivery metadata remain fixed. Optional runtime completely replaces the saved runtime after ordinary admission; omission keeps it. Runtime replacement requires resume_runtime (openengine.resume-runtime/v1). Credentials are resolved again for the successor. Checkpoint continuations and suspended successors restore captured node-instance provider conversations, and so does a restart of such a successor; the restart of a submitted run starts new ones. Suspended command/wait runs continue without restoring files. Request suspensions require from.kind answer with signals and output, or explicit expiry. Requests require request_ask (openengine.request-ask/v1); deadline expiry settles the held verifier with timeout.",
+      "description": "RunId identifies the original submission. PartId must identify its current part. A successful resume returns the same runId and the new currentPartId. Omitting from or selecting restart restarts a failed run where it started, on the latest retained workspace: a submitted run at its graph root, a successor at the boundary it began at, so an accepted answer stays accepted. Selecting checkpoint restores the matching workspace and predecessor outputs and reruns the named node or atomic concurrent group. Graph, input, source and delivery metadata remain fixed. Optional runtime completely replaces the saved runtime after ordinary admission; omission keeps it. Runtime replacement requires resume_runtime (openengine.resume-runtime/v1). Credentials are resolved again for the successor. Checkpoint continuations and suspended successors restore captured node-instance provider conversations, and so does a restart of such a successor; the restart of a submitted run starts new ones. Suspended command/wait runs continue without restoring files. Request suspensions require from.kind answer with signals and output, or explicit expiry. Requests require request_ask (openengine.request-ask/v1); deadline expiry settles the held verifier with timeout.",
       "name": "run/resume",
       "paramStructure": "by-name",
       "params": [
@@ -1070,7 +1202,15 @@
           }
         },
         {
-          "name": "successorRunId",
+          "name": "partId",
+          "required": true,
+          "schema": {
+            "description": "Part observed by the caller. This must still be the current part when resume claims it.",
+            "type": "string"
+          }
+        },
+        {
+          "name": "successorPartId",
           "required": true,
           "schema": {
             "type": "string"
@@ -1206,6 +1346,17 @@
           "required": true,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "partId",
+          "required": false,
+          "schema": {
+            "description": "When supplied, the observed part must still be current.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       ],

@@ -245,7 +245,7 @@ async fn local_controller_sigterm_allows_teardown_past_the_base_shutdown_limit()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn local_resume_reuses_saved_hooks_and_assigns_a_fresh_run_id() {
+async fn local_resume_reuses_saved_hooks_with_the_new_part_identity() {
     let fixture =
         LocalFixture::new().with_hook_worker("printf 'worker\\n' >> hook-order\nprintf 'null\\n'");
     let original = fixture
@@ -263,9 +263,11 @@ async fn local_resume_reuses_saved_hooks_and_assigns_a_fresh_run_id() {
 
     let output = fixture.output(&["resume", &original], "finish").await;
     assert_success(&output, "resume local environment run");
-    let successor = receipt_run_id(&output);
+    let receipt: Value = serde_json::from_slice(&output.stdout).assert_value();
+    assert_eq!(receipt["runId"], original);
+    let successor = receipt["currentPartId"].as_str().assert_value();
     assert_ne!(successor, original);
-    fixture.wait_succeeded(&successor, "finish").await;
+    fixture.wait_succeeded(&original, "finish").await;
     assert_eq!(
         fixture.hook_file("hook-order"),
         format!(
@@ -318,8 +320,8 @@ printf 'teardown %s\n' "$ZEROSHOT_RUN_ID" >> hook-order
     fs::write(fixture.repository.join("slow-teardown"), b"").assert_value();
 
     let resumed = fixture.json(&["resume", &original], "hold").await;
-    let successor = resumed["runId"].as_str().assert_value();
-    assert_eq!(resumed["resumedFrom"], original);
+    let successor = resumed["currentPartId"].as_str().assert_value();
+    assert_eq!(resumed["resumedFromPartId"], original);
     let resumed_running = fixture.wait_running(successor).await;
     assert_eq!(
         resumed_running["status"]["activeExecutions"][0]["node"],

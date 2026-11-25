@@ -364,7 +364,7 @@ fn contained_nested_job_checkpoint_recovery_has_one_successor() {
     let resumed: Value =
         serde_json::from_slice(&outcomes.iter().find(|o| o.status.success()).unwrap().stdout)
             .unwrap();
-    let successor = resumed["runId"].as_str().unwrap();
+    let successor = resumed["currentPartId"].as_str().unwrap();
     wait_until(|| fixture.json(&["status", successor])["status"]["phase"] == "finished");
     assert_eq!(
         fixture.json(&["status", successor])["status"]["terminalResult"]["status"],

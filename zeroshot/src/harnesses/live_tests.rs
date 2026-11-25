@@ -412,6 +412,7 @@ async fn steer_live_tool_call_records_carrier_receipt() {
                                     RunSteerParams {
                                         node: None,
                                         mode: openengine_cluster_protocol::SteeringMode::Standing,
+                                        part_id: None,
                                         run_id: self.run.clone(),
                                         text: "Keep the requested output contract.".into(),
                                     },

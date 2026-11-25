@@ -54,8 +54,8 @@ async function connect(origin) {
       if (message.error) waiter.reject(new Error(JSON.stringify(message.error)));
       else waiter.resolve(message.result);
     } else if (message.params?.record) {
-      const { runId, record } = message.params;
-      logs.set(runId, [...(logs.get(runId) || []), record.message]);
+      const { partId, record } = message.params;
+      logs.set(partId, [...(logs.get(partId) || []), record.message]);
     }
   });
   await new Promise((resolve, reject) => {
@@ -238,15 +238,35 @@ async function resume(context) {
   const initial = await terminal(context.client, request.runId);
   assert.equal(initial.status.terminalResult.reason, 'fixture_failed', JSON.stringify(initial));
   assert.equal(initial.workspaceRecovery?.recoverable, true, JSON.stringify(initial));
-  const successorRunId = uuidV7();
-  await context.client.rpc('run/resume', { runId: request.runId, successorRunId, connections: {} });
-  await context.client.rpc('run/logs', { runId: successorRunId });
-  const successor = await terminal(context.client, successorRunId);
+  const successorPartId = uuidV7();
+  const resumed = await context.client.rpc('run/resume', {
+    runId: request.runId,
+    partId: initial.currentPartId,
+    successorPartId,
+    connections: {},
+  });
+  assert.equal(resumed.runId, request.runId);
+  assert.equal(resumed.currentPartId, successorPartId);
+  await context.client.rpc('run/logs', { runId: request.runId, partId: successorPartId });
+  const successor = await terminal(context.client, request.runId);
+  assert.equal(successor.currentPartId, successorPartId);
   assert.equal(successor.status.terminalResult.reason, 'fixture_failed', JSON.stringify(successor));
-  await expectLog(context.client, successorRunId, 'startup-attempt=2');
-  for (const runId of [request.runId, successorRunId]) {
+  await expectLog(context.client, successorPartId, 'startup-attempt=2');
+  for (const runId of [request.runId, successorPartId]) {
     assert.equal(messages(context.client, runId).match(/setup-per-attempt/g)?.length, 1);
   }
+  const { runs } = await context.client.rpc('run/list', {});
+  assert.deepEqual(
+    runs
+      .filter((run) => [request.runId, successorPartId].includes(run.runId))
+      .map((run) => run.currentPartId),
+    [successorPartId]
+  );
+  const page = await fetch(new URL(`/ui/api/runs/${successorPartId}`, context.origin));
+  assert.equal(page.status, 200);
+  const detail = await page.json();
+  assert.equal(detail.runId, request.runId);
+  assert.deepEqual(detail.parts, [request.runId, successorPartId]);
   process.stdout.write('Resume reran setup and startup around restored workspace files\n');
 }
 

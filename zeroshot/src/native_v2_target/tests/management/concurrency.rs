@@ -144,7 +144,7 @@ async fn delayed_submission_receipt_cannot_restore_removed_resume_permissions() 
         server_release.notified().await;
         write_http_response(
             &mut stream,
-            &serde_json::json!({"runId": server_run}).to_string(),
+            &serde_json::json!({"runId": server_run, "currentPartId": server_run}).to_string(),
         )
         .await;
     });

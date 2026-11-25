@@ -78,7 +78,11 @@ async fn record_content(
         })?;
     let steer = summary(vector).ok_or(RunLedgerError::InvalidEvent("invalid steer vector"))?;
     ledger.append(&run_id, vec![event]).await?;
-    Ok(RunSteerResult { run_id, steer })
+    Ok(RunSteerResult {
+        part_id: run_id.clone(),
+        run_id,
+        steer,
+    })
 }
 
 #[cfg(test)]

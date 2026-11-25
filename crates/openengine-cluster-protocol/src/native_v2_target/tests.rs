@@ -288,7 +288,8 @@ fn commit_identity_rejects_values_that_are_not_one_exact_git_identity() {
                 serde_json::from_value::<TargetRunRequest>(request).is_err(),
                 "run {field} {identity}"
             );
-            let mut resume = serde_json::json!({"runId": "run-1", "successorRunId": "run-2"});
+            let mut resume =
+                serde_json::json!({"runId": "run-1", "partId":"run-1", "successorPartId": "run-2"});
             resume[field] = identity.clone();
             assert!(
                 serde_json::from_value::<crate::RunResumeParams>(resume).is_err(),
@@ -348,7 +349,7 @@ fn commit_identity_rejects_values_that_are_not_one_exact_git_identity() {
 
 #[test]
 fn resume_params_carry_an_optional_commit_identity_and_co_author() {
-    let older = serde_json::json!({"runId": "run-1", "successorRunId": "run-2"});
+    let older = serde_json::json!({"runId": "run-1", "partId":"run-1", "successorPartId": "run-2"});
     let resume = serde_json::from_value::<crate::RunResumeParams>(older.clone()).assert_value();
     assert_eq!(
         (&resume.commit_identity, &resume.commit_co_author),

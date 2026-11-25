@@ -133,6 +133,7 @@ async fn restore_after_restic_move_probe() {
     let points = list(
         &directory,
         RunCheckpointsParams {
+            part_id: None,
             run_id: RunId::new("restore-test"),
             after: None,
             limit: None,

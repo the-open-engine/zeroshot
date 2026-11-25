@@ -90,7 +90,7 @@ mod wire_contract {
                             }
                             let request: openengine_cluster_protocol::RunProfileRunRequest = serde_json::from_str(&request.body).assert_value();
                             zeroshot_engine::native_v2_admission::validate_workspace_mode(request.workspace.as_ref(), &selected, request.environment.as_ref()).assert_value();
-                            json!({"runId":"018f5e78-7f95-7c22-8d98-3f15af20c991"}).to_string()
+                            json!({"runId":"018f5e78-7f95-7c22-8d98-3f15af20c991","currentPartId":"018f5e78-7f95-7c22-8d98-3f15af20c991"}).to_string()
                         }
                         _ => panic!("unexpected client request {} {}", request.method, request.path),
                     };

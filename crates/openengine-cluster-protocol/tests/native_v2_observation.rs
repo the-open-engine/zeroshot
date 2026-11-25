@@ -97,6 +97,8 @@ fn status_exposes_every_parallel_execution_without_private_identity() {
 
         steering: Default::default(),
         context_sources: Vec::new(),
+        part_id: RunId::new("run-1"),
+        current_part_id: RunId::new("run-1"),
         run_id: RunId::new("run-1"),
         title: title(),
         source: Some(source()),
@@ -111,7 +113,7 @@ fn status_exposes_every_parallel_execution_without_private_identity() {
     assert_eq!(
         value,
         json!({
-            "runId": "run-1",
+            "runId": "run-1", "partId":"run-1", "currentPartId":"run-1",
             "title": "Repair checkout flow",
             "source": {
                 "repository": "open-engine/zeroshot",
@@ -149,7 +151,7 @@ fn status_exposes_every_parallel_execution_without_private_identity() {
     );
     assert!(
         serde_json::from_value::<RunStatusResult>(json!({
-            "runId": "run-1",
+            "runId": "run-1", "partId":"run-1", "currentPartId":"run-1",
             "title": "Repair checkout flow",
             "source": {
                 "repository": "open-engine/zeroshot",
@@ -171,6 +173,7 @@ fn status_exposes_every_parallel_execution_without_private_identity() {
 #[test]
 fn watch_and_logs_use_required_run_id_and_exclusive_resume_cursor() {
     let watch = RunWatchParams {
+        part_id: None,
         run_id: RunId::new("run-1"),
         from_cursor: Some(Cursor::new("v2:7")),
     };
@@ -180,6 +183,7 @@ fn watch_and_logs_use_required_run_id_and_exclusive_resume_cursor() {
     );
 
     let logs = RunLogsParams {
+        part_id: None,
         run_id: RunId::new("run-1"),
         from_cursor: Some(Cursor::new("v2:7")),
         execution: Some(execution("opaque-verifier-b")),
@@ -234,6 +238,7 @@ fn durable_events_carry_run_and_stable_cursor() {
         recorded_at: None,
         context_sources: Vec::new(),
         subscription_id: SubscriptionId::new("watch-1"),
+        part_id: RunId::new("run-1"),
         run_id: RunId::new("run-1"),
         title: title(),
         source: Some(source()),
@@ -277,7 +282,7 @@ fn durable_events_carry_run_and_stable_cursor() {
     );
 
     let value = json!({
-        "subscriptionId": "logs-1",
+        "subscriptionId": "logs-1", "partId":"run-1",
         "runId": "run-1",
         "cursor": "v2:9",
         "timestamp": 1725000000123_u64,
@@ -305,6 +310,7 @@ fn durable_events_carry_run_and_stable_cursor() {
 #[test]
 fn attach_is_live_read_only_and_explicitly_selects_one_execution() {
     let params = RunAttachParams {
+        part_id: None,
         run_id: RunId::new("run-1"),
         execution: execution("opaque-verifier-b"),
     };
@@ -322,7 +328,7 @@ fn attach_is_live_read_only_and_explicitly_selects_one_execution() {
     );
 
     let value = json!({
-        "subscriptionId": "attach-1",
+        "subscriptionId": "attach-1", "partId":"run-1",
         "runId": "run-1",
         "execution": "opaque-verifier-b",
         "event": { "type": "output", "text": "live output" }
@@ -339,9 +345,7 @@ fn attach_is_live_read_only_and_explicitly_selects_one_execution() {
 
 #[test]
 fn force_is_the_only_stop_shape_and_returns_durable_status() {
-    let params = RunForceParams {
-        run_id: RunId::new("run-1"),
-    };
+    let params = RunForceParams::new(RunId::new("run-1"));
     assert_eq!(
         serde_json::to_value(&params).assert_value(),
         json!({ "runId": "run-1" })
@@ -359,6 +363,8 @@ fn force_is_the_only_stop_shape_and_returns_durable_status() {
 
         steering: Default::default(),
         context_sources: Vec::new(),
+        part_id: RunId::new("run-1"),
+        current_part_id: RunId::new("run-1"),
         run_id: RunId::new("run-1"),
         title: title(),
         source: Some(source()),
@@ -400,6 +406,8 @@ fn controller_availability_is_optional_observation_metadata() {
 
             steering: Default::default(),
             context_sources: Vec::new(),
+            part_id: RunId::new("run-1"),
+            current_part_id: RunId::new("run-1"),
             run_id: RunId::new("run-1"),
             title: title(),
             source: None,
@@ -456,7 +464,7 @@ fn observation_recording_times_are_optional_exact_and_shared_with_hosted() {
     for time in [None, Some(1), Some(MAX_SAFE_GENERATION)] {
         let mut active = json!({"execution":"opaque:1", "node":"worker", "mapIndices":[3]});
         let mut watch = json!({
-            "subscriptionId":"watch-1", "runId":"run-1", "title":"Timing", "size":"small",
+            "subscriptionId":"watch-1", "runId":"run-1", "partId":"run-1", "title":"Timing", "size":"small",
             "cursor":"v2:2", "status":{"phase":"running", "activeExecutions":[]}
         });
         if let Some(time) = time {
@@ -487,7 +495,7 @@ fn observation_recording_times_are_optional_exact_and_shared_with_hosted() {
         );
         assert!(
             serde_json::from_value::<RunWatchEventNotification>(json!({
-                "subscriptionId":"watch-1", "runId":"run-1", "title":"Timing", "size":"small",
+                "subscriptionId":"watch-1", "runId":"run-1", "partId":"run-1", "title":"Timing", "size":"small",
                 "cursor":"v2:2", "status":{"phase":"admitted"}, "recordedAt": invalid
             }))
             .is_err()
@@ -517,7 +525,7 @@ fn empty_context_lists_preserve_direct_and_hosted_observation_shapes() {
         assert_eq!(serde_json::to_value(decoded).assert_value(), pinned);
     }
     let status = json!({
-        "runId":"run-compat", "title":"Compatibility", "source":source(),
+        "runId":"run-compat", "partId":"run-compat", "currentPartId":"run-compat", "title":"Compatibility", "source":source(),
         "size":"host", "atCursor":"v2:7", "status":{
             "phase":"running", "activeExecutions":[{
                 "execution":"work-1", "node":"worker", "startedAt":1725000000123_u64
@@ -540,10 +548,97 @@ fn empty_context_lists_preserve_direct_and_hosted_observation_shapes() {
         assert_eq!(serde_json::to_value(hosted).assert_value(), list);
     }
     let mut watch = status;
+    watch.as_object_mut().assert_value().remove("currentPartId");
     watch.as_object_mut().assert_value().remove("atCursor");
     watch["cursor"] = json!("v2:7");
     watch["subscriptionId"] = json!("watch-compat");
     watch["recordedAt"] = json!(1725000000999_u64);
     check::<RunWatchEventNotification>(watch.clone());
     check::<HostedRunWatchEventNotification>(watch);
+}
+
+#[test]
+fn logical_publication_status_keeps_the_receipt_and_newest_steers_when_the_physical_status_fits() {
+    use openengine_cluster_protocol::{HostedRunStatusResult, MAX_REQUEST_RESPONSE_BYTES};
+
+    let root = "0199f33f-3b44-7d21-9000-000000000031";
+    let part = "0199f33f-3b44-7d21-9000-000000000032";
+    for workspace in [
+        None,
+        Some(openengine_cluster_protocol::RunWorkspace {
+            placement: openengine_cluster_protocol::WorkspacePlacement::Managed,
+            local_directory: Some(format!("/selected/{}", "folder-é/".repeat(200))),
+            seeds: Vec::new(),
+            copy_root: true,
+        }),
+    ] {
+        let mut physical = publication_with_steers(part);
+        physical.workspace = workspace;
+        let spare =
+            MAX_REQUEST_RESPONSE_BYTES - 8 - serde_json::to_vec(&physical).assert_value().len();
+        // Distribute padding across portable file names so every publication and steer remains
+        // individually admissible. The qualified cursor alone will use more than the eight bytes left.
+        let RunStatus::Finished { metadata, .. } = &mut physical.status else {
+            unreachable!()
+        };
+        let count = metadata.artifacts.len();
+        for (index, file) in metadata.artifacts.values_mut().enumerate() {
+            let openengine_cluster_protocol::PublishedFile::Managed { address, .. } = file else {
+                unreachable!()
+            };
+            let pad = spare / count + usize::from(index < spare % count);
+            address.path = openengine_cluster_protocol::FilePath::new(format!(
+                "{}{}",
+                address.path.as_str(),
+                "a".repeat(pad)
+            ))
+            .assert_value();
+        }
+        assert_eq!(
+            serde_json::to_vec(&physical).assert_value().len(),
+            MAX_REQUEST_RESPONSE_BYTES - 8
+        );
+        physical.fit_published_steering().assert_value();
+        assert_eq!(physical.steering.steers.len(), 56);
+        let mut grouped = physical.clone();
+        grouped.run_id = RunId::new(root);
+        grouped.at_cursor = Cursor::new(format!("{part}@v2:1234"));
+        assert!(serde_json::to_vec(&grouped).assert_value().len() > MAX_REQUEST_RESPONSE_BYTES);
+        let mut hosted = HostedRunStatusResult::from(grouped.clone());
+        grouped.fit_published_steering().assert_value();
+        hosted.fit_published_steering().assert_value();
+
+        assert_eq!(grouped.status, physical.status);
+        assert_eq!(grouped.steering.steers, physical.steering.steers[1..]);
+        assert_eq!(grouped.steering.omitted_steers, 10);
+        let serialized = serde_json::to_vec(&grouped).assert_value();
+        assert!(serialized.len() <= MAX_REQUEST_RESPONSE_BYTES);
+        assert_eq!(serialized, serde_json::to_vec(&hosted).assert_value());
+    }
+}
+
+fn publication_with_steers(part: &str) -> RunStatusResult {
+    let networks: Vec<_> = (0..1000)
+        .map(|i| format!("review_{i:05}_{}", "x".repeat(27)))
+        .collect();
+    let network =
+        json!({"networks":networks,"origin":{"node":"work","nodeInstance":1,"execution":"1"}});
+    let steers: Vec<_> = (0..56)
+        .map(|i| {
+            json!({
+                "id":format!("steer-{i}"),"mode":"once","network":network,
+                "createdAt":1000,"textBytes":1,"excerpt":"x","receivedExecutions":0,"executions":[]
+            })
+        })
+        .collect();
+    let files: serde_json::Map<_,_> = (0..2600).map(|i| {
+        let key = format!("f{i:04}");
+        let path = format!("final/{key}/{}", "x".repeat(120));
+        (key, json!({"kind":"managed","target":"direct-target","address":{"scope":{"kind":"run","runId":part},"path":path}}))
+    }).collect();
+    serde_json::from_value(json!({
+        "runId":part,"partId":part,"currentPartId":part,"atCursor":"v2:1234","title":"Receipt","size":"medium",
+        "status":{"phase":"finished","terminalResult":{"status":"succeeded","output":null},"metadata":{"artifacts":files}},
+        "steers":steers,"omittedSteers":9
+    })).assert_value()
 }

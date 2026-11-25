@@ -6,7 +6,7 @@ use openengine_cluster_client::{
     SubscriptionTransport, TransportError,
 };
 use openengine_cluster_protocol::{
-    ConnectionKey, ConnectionScope, EnvironmentVariableName, ExecutionRef, IdempotencyKey,
+    ConnectionKey, ConnectionScope, Cursor, EnvironmentVariableName, ExecutionRef, IdempotencyKey,
     StackSource, RequestId, RunId, RunProfileName, RunProfileScope, RunTitle, SourceBranchId,
     SourceRepositoryId, StaticConnectionValues, SubscriptionCloseReason, SubscriptionId,
 };
@@ -18,6 +18,8 @@ use super::*;
 
 #[path = "reconnect_tests.rs"]
 mod reconnect_tests;
+#[path = "steering_command_tests.rs"]
+mod steering_command_tests;
 
 struct FailingTransport {
     requests: Arc<Mutex<Vec<Value>>>,
@@ -70,6 +72,7 @@ impl SubscriptionTransport for FailingTransport {
 struct StubConnector<T = FailingTransport> {
     transport: Arc<T>,
     hosted_status: Option<CliRunStatusResult>,
+    status_reads: Mutex<Vec<(String, RunStatusParams)>>,
 }
 
 impl StubConnector {
@@ -79,6 +82,7 @@ impl StubConnector {
                 requests: Arc::new(Mutex::new(Vec::new())),
             }),
             hosted_status,
+            status_reads: Mutex::default(),
         }
     }
 }
@@ -192,10 +196,22 @@ where
 
     async fn hosted_run_status(
         &self,
-        _name: &str,
-        _params: RunStatusParams,
+        name: &str,
+        params: RunStatusParams,
     ) -> Result<Option<CliRunStatusResult>, NativeV2CliError> {
+        self.status_reads
+            .lock()
+            .assert_value()
+            .push((name.into(), params));
         Ok(self.hosted_status.clone())
+    }
+
+    async fn connect_steering(
+        &self,
+        name: &str,
+        run_id: RunId,
+    ) -> Result<Arc<Self::Transport>, NativeV2CliError> {
+        self.connect(name, Some(run_id)).await
     }
 
     async fn hosted_run_watch(
@@ -232,7 +248,7 @@ fn selector() -> RunProfileSelector {
 
 fn status(phase: &str) -> CliRunStatusResult {
     serde_json::from_value(json!({
-        "runId":"run-contract",
+        "partId":"run-contract","currentPartId":"run-contract","runId":"run-contract",
         "title":"Contract",
         "source":{
             "repository":"owner/repository",
@@ -432,6 +448,7 @@ async fn wave7_cli_contract_oecp_default_optional_authority_is_refused() {
         commit_identity: None,
         commit_co_author: None,
 
+        part_id: run_id.clone(),
         run_id: run_id.clone(),
         successor_run_id,
         from: None,
@@ -561,6 +578,7 @@ async fn oecp_optional_authority_defaults_are_explicit_and_fail_closed() {
             .run_checkpoints(
                 Some("prod"),
                 openengine_cluster_protocol::RunCheckpointsParams {
+                    part_id: None,
                     run_id: run_id.clone(),
                     after: None,
                     limit: None,
@@ -576,6 +594,7 @@ async fn oecp_optional_authority_defaults_are_explicit_and_fail_closed() {
             .run_resume(
                 Some("prod"),
                 openengine_cluster_protocol::RunResumeParams {
+                    part_id: run_id.clone(),
                     runtime: None,
                     run_id: run_id.clone(),
                     successor_run_id: RunId::new("default-authority-successor"),
@@ -598,7 +617,10 @@ async fn oecp_optional_authority_defaults_are_explicit_and_fail_closed() {
         backend
             .run_discard_workspace(
                 Some("prod"),
-                openengine_cluster_protocol::RunDiscardWorkspaceParams { run_id },
+                openengine_cluster_protocol::RunDiscardWorkspaceParams {
+                    part_id: None,
+                    run_id
+                },
             )
             .await
             .assert_error()
@@ -618,6 +640,7 @@ async fn wave7_cli_contract_oecp_subscription_framing_and_hosted_refusals_are_ex
             .run_watch(
                 Some("prod"),
                 RunWatchParams {
+                    part_id: None,
                     run_id: run_id.clone(),
                     from_cursor: Some(Cursor::new("cloud:9")),
                 },
@@ -630,6 +653,7 @@ async fn wave7_cli_contract_oecp_subscription_framing_and_hosted_refusals_are_ex
             .run_logs(
                 Some("prod"),
                 RunLogsParams {
+                    part_id: None,
                     run_id: run_id.clone(),
                     from_cursor: Some(Cursor::new("v2:2")),
                     execution: None,
@@ -643,6 +667,7 @@ async fn wave7_cli_contract_oecp_subscription_framing_and_hosted_refusals_are_ex
             .run_attach(
                 Some("prod"),
                 RunAttachParams {
+                    part_id: None,
                     run_id: run_id.clone(),
                     execution: ExecutionRef::new("worker-1").assert_value(),
                 },
@@ -662,57 +687,72 @@ async fn wave7_cli_contract_oecp_subscription_framing_and_hosted_refusals_are_ex
 }
 
 #[tokio::test]
-async fn wave7_cli_contract_oecp_hosted_operations_and_task_cursors_fail_closed() {
-    let run_id = RunId::new("run-contract");
-    let hosted = NamedTargetCliBackend::new(StubConnector::new(Some(status("queued"))));
-    assert!(
-        hosted
-            .run_watch(
-                Some("prod"),
-                RunWatchParams {
-                    run_id: run_id.clone(),
-                    from_cursor: None,
-                },
-            )
-            .await
-            .assert_error()
-            .to_string()
-            .contains("did not provide its run watch")
-    );
-    assert!(
-        hosted
-            .run_logs(
-                Some("prod"),
-                RunLogsParams {
-                    run_id: run_id.clone(),
-                    from_cursor: None,
-                    execution: None,
-                },
-            )
-            .await
-            .assert_error()
-            .to_string()
-            .contains("did not provide its retained logs")
-    );
-    assert!(
-        hosted
-            .run_force(Some("prod"), RunForceParams { run_id })
-            .await
-            .assert_error()
-            .to_string()
-            .contains("did not provide its force operation")
-    );
+async fn hosted_capsule_actions_use_the_selected_physical_part_and_refuse_stale_steers() {
+    let root = RunId::new("run-contract");
+    let child = RunId::new("second-part");
+    let mut active = status("admitted");
+    active.current_part_id = child.clone();
+    active.part_id = child.clone();
 
-    assert!(task_is_active(&status("admitted").status));
-    assert!(!task_is_active(&status("queued").status));
-    assert_eq!(
-        task_cursor(Some(Cursor::new("v2:7")))
-            .assert_value()
-            .as_str(),
-        "v2:7"
+    let connector = StubConnector::new(Some(active));
+    let requests = connector.transport.requests.clone();
+    let mut grouped = NamedTargetCliBackend::new(connector);
+    let observed = grouped
+        .run_status(Some("prod"), RunStatusParams::new(root.clone()))
+        .await
+        .assert_value();
+    assert_eq!(observed.part_id, child);
+    let steer = openengine_cluster_protocol::RunSteerParams {
+        run_id: root.clone(),
+        part_id: None,
+        node: None,
+        mode: Default::default(),
+        text: "wait".into(),
+    };
+    grouped
+        .run_steer(Some("prod"), steer.clone())
+        .await
+        .assert_error();
+    grouped
+        .run_attach(
+            Some("prod"),
+            RunAttachParams {
+                run_id: root.clone(),
+                part_id: Some(child.clone()),
+                execution: ExecutionRef::new("worker").assert_value(),
+            },
+        )
+        .await
+        .assert_error();
+    {
+        let calls = requests.lock().assert_value();
+        assert_eq!(calls[0]["method"], "run/steer");
+        assert_eq!(calls[1]["method"], "run/attach");
+        for call in calls.iter() {
+            assert_eq!(call["params"]["runId"], child.as_str());
+            assert_eq!(call["params"]["partId"], child.as_str());
+        }
+    }
+    grouped
+        .connector
+        .hosted_status
+        .as_mut()
+        .assert_value()
+        .part_id = root.clone();
+    let error = grouped
+        .run_steer(
+            Some("prod"),
+            openengine_cluster_protocol::RunSteerParams {
+                part_id: Some(root),
+                ..steer
+            },
+        )
+        .await
+        .assert_error();
+    assert!(
+        matches!(error, NativeV2CliError::Remote { code, .. } if code == openengine_cluster_protocol::RUN_CONFLICT)
     );
-    assert!(task_cursor(Some(Cursor::new("cloud:7"))).is_none());
-    assert!(task_cursor(None).is_none());
+    assert_eq!(requests.lock().assert_value().len(), 2);
 }
 
 async fn forward_watch_script(
@@ -752,6 +792,7 @@ async fn forward_watch_script(
     let transport = NdjsonTransport::new(client_read, client_write);
     let (_, mut stream) = RunSubscriptionClient::new(&transport)
         .run_watch(RunWatchParams {
+            part_id: None,
             run_id: RunId::new("run-contract"),
             from_cursor: None,
         })
@@ -759,7 +800,7 @@ async fn forward_watch_script(
         .assert_value();
     let (sender, mut receiver) = mpsc::channel(4);
     if consumer_is_open {
-        forward(&mut stream, sender).await;
+        forward(&mut stream, sender, |event| Ok(event.into())).await;
         let mut items = Vec::new();
         while let Some(item) = receiver.recv().await {
             items.push(item);
@@ -768,7 +809,7 @@ async fn forward_watch_script(
         items
     } else {
         drop(receiver);
-        forward(&mut stream, sender).await;
+        forward(&mut stream, sender, |event| Ok(event.into())).await;
         server.await.assert_value();
         Vec::new()
     }
@@ -811,7 +852,7 @@ async fn oecp_forwarding_preserves_close_errors_eof_and_consumer_drop() {
                 "method":"event",
                 "params":{
                     "subscriptionId":"watch-forward",
-                    "runId":"run-contract",
+                    "partId":"run-contract","runId":"run-contract",
                     "cursor":"v2:1",
                     "title":"Forwarding contract",
                     "source":{
@@ -838,9 +879,7 @@ async fn queued_hosted_run_refuses_suspend_without_contacting_the_run() {
     let error = backend
         .run_suspend(
             Some("prod"),
-            RunStatusParams {
-                run_id: RunId::new("run-contract"),
-            },
+            RunStatusParams::new(RunId::new("run-contract")),
         )
         .await
         .assert_error();

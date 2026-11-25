@@ -623,8 +623,15 @@ test('a question handed to a successor reads as handed off, never as still waiti
   const asked = invocations[0].request!;
   assert.equal(
     projectOutcome(doc, invocations, terminal, false, {}, 'next-run').text,
-    'Continued in run next-run'
+    'Continued in part next-run'
   );
+  assert.equal(
+    projectOutcome(doc, invocations, terminal, true, {}, undefined, [], {
+      pendingHandoff: 'Queued',
+    }).text,
+    'Queued'
+  );
+  assert.equal(requestStatus(asked, { waiting: false, pendingHandoff: 'Queued' }), 'Handed off');
   // Its duration is final: the run stopped here and continued elsewhere.
   assert.deepEqual(
     projectOutcome(doc, invocations, terminal, false, { first: 1_000, at: 61_000 }, 'next-run')
@@ -649,7 +656,7 @@ test('a question handed to a successor reads as handed off, never as still waiti
   const now = Date.UTC(2026, 5, 1);
   assert.equal(
     requestStatus(asked, { waiting: false, successor: 'next-run' }, now),
-    'Handed off to run next-run'
+    'Handed off to part next-run'
   );
   assert.match(requestStatus(asked, { waiting: false }, now), /closed without an answer$/);
   // A deadline in another year names its year, so it cannot be misread.

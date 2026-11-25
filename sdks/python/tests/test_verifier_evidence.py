@@ -32,6 +32,7 @@ def test_verifier_results_loop_counts_and_nested_paths():
     log = _log_event(
         {
             "runId": "run",
+            "partId": "part-1",
             "cursor": "v2:7",
             "timestamp": 1,
             "execution": "stable-id",
@@ -43,6 +44,8 @@ def test_verifier_results_loop_counts_and_nested_paths():
     status = _status(
         {
             "runId": "run",
+            "partId": "part-1",
+            "currentPartId": "part-1",
             "title": "Map",
             "size": "host",
             "atCursor": "v2:6",

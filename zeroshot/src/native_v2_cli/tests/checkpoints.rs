@@ -34,6 +34,7 @@ async fn checkpoint_listing_emits_one_typed_page_without_resolving_secrets() {
             [Call::Checkpoints {
                 target: target.map(str::to_owned),
                 params: RunCheckpointsParams {
+                    part_id: None,
                     run_id: RunId::new("run-failed"),
                     after: Some(CheckpointId::new("entry-7").assert_value()),
                     limit: Some(1),

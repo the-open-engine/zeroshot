@@ -26,12 +26,7 @@ async fn mixed_hosted_operations_reuse_one_validated_persisted_token() {
     );
     let target = hosted_target("local", origin);
     authority
-        .hosted_run_status(
-            &target,
-            RunStatusParams {
-                run_id: RunId::new("run-hosted"),
-            },
-        )
+        .hosted_run_status(&target, RunStatusParams::new(RunId::new("run-hosted")))
         .await
         .assert_value();
     authority

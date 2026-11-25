@@ -92,6 +92,7 @@ impl NativeV2CliBackend for InProcessCliBackend {
             .submit_with_exact_environment(params, environment)
             .await
             .map(|receipt| RunSubmitResult {
+                current_part_id: receipt.run_id.clone(),
                 run_id: receipt.run_id,
             })
             .map_err(cli_protocol_error)

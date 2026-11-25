@@ -65,9 +65,7 @@ async fn recorded_execution_timing(ledger: Arc<dyn RunLedger>, now: Arc<AtomicU6
         .assert_value();
     let service = NativeV2Observability::new(ledger.clone());
     let status = service
-        .status(RunStatusParams {
-            run_id: run_id.clone(),
-        })
+        .status(RunStatusParams::new(run_id.clone()))
         .await
         .assert_value();
     let status_json = serde_json::to_value(&status).assert_value();
@@ -86,6 +84,7 @@ async fn recorded_execution_timing(ledger: Arc<dyn RunLedger>, now: Arc<AtomicU6
     );
     let (_, mut watch) = service
         .watch(RunWatchParams {
+            part_id: None,
             run_id: run_id.clone(),
             from_cursor: None,
         })
@@ -145,6 +144,7 @@ async fn recorded_execution_timing(ledger: Arc<dyn RunLedger>, now: Arc<AtomicU6
     assert_eq!(serde_json::to_value(hosted).assert_value(), settled);
     let (_, mut resumed) = service
         .watch(RunWatchParams {
+            part_id: None,
             run_id: run_id.clone(),
             from_cursor: Some(transitions[0].cursor.clone()),
         })
@@ -158,7 +158,7 @@ async fn recorded_execution_timing(ledger: Arc<dyn RunLedger>, now: Arc<AtomicU6
     now.store(50_000, Ordering::SeqCst);
     ledger.request_force_stop(&run_id).await.assert_value();
     let status = service
-        .status(RunStatusParams { run_id })
+        .status(RunStatusParams::new(run_id))
         .await
         .assert_value();
     let status = serde_json::to_value(status).assert_value();
@@ -227,6 +227,7 @@ async fn imported_prerequisites_report_import_time_without_inventing_active_star
     let service = NativeV2Observability::new(ledger);
     let (_, mut watch) = service
         .watch(RunWatchParams {
+            part_id: None,
             run_id: successor,
             from_cursor: None,
         })

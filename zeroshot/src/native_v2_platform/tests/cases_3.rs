@@ -107,17 +107,13 @@ async fn distinct_nonterminal_runs_are_both_admitted() {
     );
 
     controller
-        .force(RunForceParams {
-            run_id: first.run_id.clone(),
-        })
+        .force(RunForceParams::new(first.run_id.clone()))
         .await
         .assert_value_with("first force stop");
     terminal(&controller, &first.run_id).await;
 
     controller
-        .force(RunForceParams {
-            run_id: second.run_id.clone(),
-        })
+        .force(RunForceParams::new(second.run_id.clone()))
         .await
         .assert_value_with("second force stop");
     terminal(&controller, &second.run_id).await;
@@ -141,9 +137,7 @@ async fn exact_retry_dedupes_and_changed_retry_conflicts() {
     .await;
     harness
         .controller
-        .force(RunForceParams {
-            run_id: first.run_id.clone(),
-        })
+        .force(RunForceParams::new(first.run_id.clone()))
         .await
         .assert_value_with("cleanup");
 }
@@ -185,9 +179,7 @@ async fn exact_source_revision_participates_in_retry_identity() {
     wait_for_allocations(harness.allocator.as_ref(), 1).await;
     harness
         .controller
-        .force(RunForceParams {
-            run_id: first.run_id,
-        })
+        .force(RunForceParams::new(first.run_id))
         .await
         .assert_value_with("cleanup");
 }
@@ -230,9 +222,7 @@ async fn detached_submitter_does_not_cancel_preparation_or_allow_duplicate_alloc
     );
     allocator.release();
     controller
-        .force(RunForceParams {
-            run_id: receipt.run_id,
-        })
+        .force(RunForceParams::new(receipt.run_id))
         .await
         .assert_value();
 }
@@ -264,9 +254,7 @@ async fn force_destroys_live_capsule_before_one_terminal_result() {
     let (harness, receipt) = started_harness(Behavior::Hang).await;
     harness
         .controller
-        .force(RunForceParams {
-            run_id: receipt.run_id.clone(),
-        })
+        .force(RunForceParams::new(receipt.run_id.clone()))
         .await
         .assert_value_with("force");
     assert_failed_cleanup(

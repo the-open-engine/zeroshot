@@ -676,6 +676,7 @@ where
             .await?;
         let fixed = openengine_cluster_client::ClusterClient::new(transport.as_ref())
             .run_resume_requirements(openengine_cluster_protocol::RunResumeRequirementsParams {
+                part_id: Some(run_id.clone()),
                 run_id: run_id.clone(),
                 runtime: runtime.clone(),
             })
@@ -740,11 +741,11 @@ where
         let target = self.direct_recovery_target(name)?;
         let mut trusted = self
             .registry
-            .recovery_authorization_with_source(&target.id, &params.run_id)
+            .recovery_authorization_with_source(&target.id, &params.part_id)
             .map_err(cli_target_error)?;
         if let Some(runtime) = &params.runtime {
             trusted.connections = self
-                .replacement_workspace_recovery_requirements(name, &params.run_id, runtime)
+                .replacement_workspace_recovery_requirements(name, &params.part_id, runtime)
                 .await?;
         }
         if params.connection_resolver.is_some()

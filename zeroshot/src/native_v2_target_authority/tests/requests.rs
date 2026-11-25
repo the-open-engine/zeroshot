@@ -39,10 +39,16 @@ impl CapsuleAllocator for RequestAllocator {
         NoAllocation.destroy_or_confirm_absent(run, exit).await
     }
     async fn workspace_recovery(&self, run: &RunId) -> WorkspaceRecovery {
-        let successor = self.claims.lock().assert_value().get(run).cloned();
+        let claims = self.claims.lock().assert_value();
+        let successor = claims.get(run).cloned();
+        let parent = claims
+            .iter()
+            .find(|(_, child)| *child == run)
+            .map(|(source, _)| source.clone());
         WorkspaceRecovery {
             recoverable: successor.is_none(),
             successor_run_id: successor,
+            resumed_from: parent,
             ..Default::default()
         }
     }
@@ -236,14 +242,13 @@ async fn direct_request_discovery_inbox_and_expiry_resume_use_the_controller_led
         .assert_value();
     assert_eq!(page.requests[0].state, RequestState::Expired);
     let show = client
-        .inbox_show(RunStatusParams {
-            run_id: ids[2].clone(),
-        })
+        .inbox_show(RunStatusParams::new(ids[2].clone()))
         .await
         .assert_value();
     assert_eq!(show.request.text, "Approve?");
     let params = RunResumeParams {
         runtime: None,
+        part_id: ids[2].clone(),
         run_id: ids[2].clone(),
         successor_run_id: other_run_id(),
         from: Some(
@@ -268,21 +273,137 @@ async fn direct_request_discovery_inbox_and_expiry_resume_use_the_controller_led
             .contains("expired")
     );
     let show = client
-        .inbox_show(RunStatusParams {
-            run_id: ids[2].clone(),
-        })
+        .inbox_show(RunStatusParams::new(ids[2].clone()))
         .await
         .assert_value();
     assert_eq!(show.successor_run_id, Some(other_run_id()));
     assert_eq!(show.state, RequestState::Expired);
-    assert!(
-        client
-            .run_resume(params)
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains(other_run_id().as_str())
-    );
+    assert_logical_run(&client, &ids[2], params).await;
     assert_eq!(ledger.list().await.assert_value().len(), 4);
     task.abort();
+}
+
+async fn assert_logical_run(
+    client: &ClusterClient<DialedWebSocketTransport>,
+    root: &RunId,
+    params: RunResumeParams,
+) {
+    let stale_force = openengine_cluster_protocol::RunForceParams {
+        run_id: root.clone(),
+        part_id: Some(root.clone()),
+    };
+    for error in [
+        client.run_resume(params).await.unwrap_err(),
+        client.run_force(stale_force).await.unwrap_err(),
+    ] {
+        let (code, details) = match error {
+            openengine_cluster_client::ClientError::Rpc(error) => {
+                let data = error.data.assert_value();
+                (data.code, data.details)
+            }
+            openengine_cluster_client::ClientError::Backend(error) => (error.code, error.details),
+            other => panic!("expected a remote conflict, got {other}"),
+        };
+        assert_eq!(code, openengine_cluster_protocol::RUN_CONFLICT);
+        assert_eq!(
+            details.assert_value()["currentPartId"],
+            json!(other_run_id())
+        );
+    }
+    let rows = client
+        .run_list(openengine_cluster_protocol::RunListParams {})
+        .await
+        .assert_value()
+        .runs;
+    assert_eq!(rows.len(), 3);
+    let resumed = rows.iter().find(|row| row.run_id == *root).assert_value();
+    assert_eq!(resumed.current_part_id, other_run_id());
+    let original = client
+        .run_status(RunStatusParams {
+            run_id: root.clone(),
+            part_id: Some(root.clone()),
+        })
+        .await
+        .assert_value();
+    assert!(matches!(
+        original.status,
+        openengine_cluster_protocol::RunStatus::Suspended { .. }
+    ));
+    assert_eq!(original.current_part_id, other_run_id());
+    assert_eq!(original.part_id, *root);
+}
+
+#[tokio::test]
+async fn an_earlier_question_bookmark_finds_the_new_question_and_keeps_both_vector_addresses() {
+    use openengine_cluster_protocol::{RunVectorParams, RunVectorsParams};
+
+    let ledger = Arc::new(FakeRunLedger::new());
+    let root = seed(&ledger, 1, false).await;
+    let child = seed(&ledger, 2, false).await;
+    let unrelated = seed(&ledger, 3, false).await;
+    let allocator = Arc::new(RequestAllocator::default());
+    allocator
+        .claims
+        .lock()
+        .assert_value()
+        .insert(root.clone(), child.clone());
+    let factory = Arc::new(RequestFactory { ledger, allocator });
+    let (_, endpoint, server) = direct_test_server(factory).await;
+    let client = connect_client(&endpoint, None).await;
+
+    for alias in [&root, &child] {
+        let latest = client
+            .inbox_show(RunStatusParams::new(alias.clone()))
+            .await
+            .assert_value();
+        assert_eq!((&latest.run_id, &latest.part_id), (&root, &child));
+        assert_eq!(latest.request.id.as_str(), "question-2");
+
+        for part in [&root, &child] {
+            let exact = RunStatusParams {
+                run_id: alias.clone(),
+                part_id: Some(part.clone()),
+            };
+            let question = client.inbox_show(exact).await.assert_value();
+            assert_eq!((&question.run_id, &question.part_id), (&root, part));
+            let vectors = client
+                .run_vectors(RunVectorsParams {
+                    run_id: alias.clone(),
+                    part_id: Some(part.clone()),
+                    after: None,
+                    limit: None,
+                })
+                .await
+                .assert_value();
+            assert_eq!((&vectors.run_id, &vectors.part_id), (&root, part));
+            let recorded = vectors
+                .vectors
+                .iter()
+                .find(|item| item.id == question.request.id)
+                .assert_value();
+            assert_eq!((&recorded.run_id, &recorded.part_id), (&root, part));
+            let event = client
+                .run_vector(RunVectorParams {
+                    run_id: alias.clone(),
+                    part_id: Some(part.clone()),
+                    id: recorded.id.clone(),
+                })
+                .await
+                .assert_value();
+            assert_eq!((&event.run_id, &event.part_id), (&root, part));
+        }
+    }
+    let foreign = RunStatusParams {
+        run_id: root.clone(),
+        part_id: Some(unrelated.clone()),
+    };
+    assert!(client.inbox_show(foreign.clone()).await.is_err());
+    assert!(client.run_status(foreign).await.is_err());
+    let other = client
+        .inbox_show(RunStatusParams::new(unrelated.clone()))
+        .await
+        .assert_value();
+    assert_eq!(other.run_id, unrelated);
+    assert_eq!(other.request.id.as_str(), "question-3");
+    server.abort();
 }

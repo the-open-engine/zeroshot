@@ -453,9 +453,9 @@ async fn restored_source_rejections_skip_postmortem_after_an_authored_refusal_br
 
 async fn observed_status(harness: &Harness) -> openengine_cluster_protocol::RunStatus {
     crate::native_v2_observability::NativeV2Observability::new(harness.ledger.clone())
-        .status(openengine_cluster_protocol::RunStatusParams {
-            run_id: harness.supervisor.run_id.clone(),
-        })
+        .status(openengine_cluster_protocol::RunStatusParams::new(
+            harness.supervisor.run_id.clone(),
+        ))
         .await
         .assert_value()
         .status
@@ -491,6 +491,7 @@ async fn graph_result_is_visible_and_logged_while_postmortem_waits_then_only_ter
             crate::native_v2_observability::NativeV2Observability::new(harness.ledger.clone());
         let (_, mut watch) = service
             .watch(RunWatchParams {
+                part_id: None,
                 run_id: harness.supervisor.run_id.clone(),
                 from_cursor: None,
             })

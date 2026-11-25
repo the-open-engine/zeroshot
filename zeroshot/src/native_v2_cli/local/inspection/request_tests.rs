@@ -12,9 +12,7 @@ async fn unreadable_ledger_does_not_retry_an_unanswered_controller() {
     let fixture = Fixture::new(false, false).await;
     let status = fixture
         .backend
-        .read_recorded_status(RunStatusParams {
-            run_id: fixture.id.clone(),
-        })
+        .read_recorded_status(RunStatusParams::new(fixture.id.clone()))
         .await
         .unwrap();
     let paths = fixture.backend.paths(&fixture.id).unwrap();
@@ -22,9 +20,9 @@ async fn unreadable_ledger_does_not_retry_an_unanswered_controller() {
     std::fs::write(paths.ledger(), b"not a database").unwrap();
     tokio::time::timeout(LIMIT, async {
         let (status, list) = tokio::join!(
-            fixture.backend.status_local(RunStatusParams {
-                run_id: fixture.id.clone()
-            }),
+            fixture
+                .backend
+                .status_local(RunStatusParams::new(fixture.id.clone())),
             fixture.backend.list_local(),
         );
         assert!(matches!(
@@ -70,9 +68,7 @@ fn list_keeps_all_runs_with_a_low_descriptor_limit() {
         for fixture in &fixtures {
             let status = fixture
                 .backend
-                .read_recorded_status(RunStatusParams {
-                    run_id: fixture.id.clone(),
-                })
+                .read_recorded_status(RunStatusParams::new(fixture.id.clone()))
                 .await
                 .unwrap();
             endpoints.push(ServedEndpoint::start(
@@ -116,9 +112,7 @@ async fn force_reply_has_one_deadline_and_names_the_queued_request() {
     let fixture = Fixture::new(false, false).await;
     let recorded = fixture
         .backend
-        .read_recorded_status(RunStatusParams {
-            run_id: fixture.id.clone(),
-        })
+        .read_recorded_status(RunStatusParams::new(fixture.id.clone()))
         .await
         .unwrap();
     let gate = Arc::new(ForceGate::default());
@@ -135,9 +129,9 @@ async fn force_reply_has_one_deadline_and_names_the_queued_request() {
     let before = tree(fixture.root.path());
     let error = tokio::time::timeout(
         LIMIT,
-        fixture.backend.force_local(RunForceParams {
-            run_id: fixture.id.clone(),
-        }),
+        fixture
+            .backend
+            .force_local(RunForceParams::new(fixture.id.clone())),
     )
     .await
     .expect("force-stop must return within one request deadline")
@@ -161,9 +155,7 @@ async fn stalled_status_bounds_inspection_resume_and_stream_replay() {
     let fixture = Fixture::new(false, false).await;
     let recorded = fixture
         .backend
-        .read_recorded_status(RunStatusParams {
-            run_id: fixture.id.clone(),
-        })
+        .read_recorded_status(RunStatusParams::new(fixture.id.clone()))
         .await
         .unwrap();
     let controller = LiveController::new(None, &recorded);
@@ -174,9 +166,7 @@ async fn stalled_status_bounds_inspection_resume_and_stream_replay() {
             async {
                 let status = fixture
                     .backend
-                    .status_local(RunStatusParams {
-                        run_id: fixture.id.clone(),
-                    })
+                    .status_local(RunStatusParams::new(fixture.id.clone()))
                     .await
                     .unwrap();
                 assert_eq!(status.status, recorded.status);
@@ -188,6 +178,7 @@ async fn stalled_status_bounds_inspection_resume_and_stream_replay() {
                     .run_checkpoints(
                         None,
                         openengine_cluster_protocol::RunCheckpointsParams {
+                            part_id: None,
                             run_id: fixture.id.clone(),
                             after: None,
                             limit: None,
@@ -200,12 +191,7 @@ async fn stalled_status_bounds_inspection_resume_and_stream_replay() {
             async {
                 let error = fixture
                     .backend
-                    .run_resume_status(
-                        None,
-                        RunStatusParams {
-                            run_id: fixture.id.clone(),
-                        },
-                    )
+                    .run_resume_status(None, RunStatusParams::new(fixture.id.clone()))
                     .await
                     .unwrap_err();
                 assert!(error.to_string().contains("unknown"));
@@ -214,6 +200,7 @@ async fn stalled_status_bounds_inspection_resume_and_stream_replay() {
                 let mut stream = fixture
                     .backend
                     .inspect_watch(RunWatchParams {
+                        part_id: None,
                         run_id: fixture.id.clone(),
                         from_cursor: None,
                     })
@@ -225,6 +212,7 @@ async fn stalled_status_bounds_inspection_resume_and_stream_replay() {
                 let mut stream = fixture
                     .backend
                     .inspect_logs(RunLogsParams {
+                        part_id: None,
                         run_id: fixture.id.clone(),
                         from_cursor: None,
                         execution: None,
@@ -237,6 +225,7 @@ async fn stalled_status_bounds_inspection_resume_and_stream_replay() {
                 let mut stream = fixture
                     .backend
                     .inspect_attach(RunAttachParams {
+                        part_id: None,
                         run_id: fixture.id.clone(),
                         execution: fixture.execution.clone(),
                     })
@@ -265,9 +254,7 @@ async fn list_probes_all_stalled_controllers_in_one_interval_and_keeps_other_run
     for fixture in fixtures.iter().chain([&responding]) {
         let status = fixture
             .backend
-            .read_recorded_status(RunStatusParams {
-                run_id: fixture.id.clone(),
-            })
+            .read_recorded_status(RunStatusParams::new(fixture.id.clone()))
             .await
             .unwrap();
         let current = (fixture.id == responding.id).then_some(status.clone());
@@ -300,25 +287,56 @@ struct RequestController {
     status: RunStatusResult,
     status_delay: Duration,
     acknowledge: bool,
+    close: Option<SubscriptionCloseReason>,
     entered: tokio::sync::Notify,
 }
 
-struct Quiet;
+struct ControllerStream(Option<SubscriptionCloseReason>);
 
 #[async_trait]
-impl<E: Send> RunSubscriptionSource<E> for Quiet {
+impl<E: Send> RunSubscriptionSource<E> for ControllerStream {
     async fn next(&mut self) -> Option<RunSubscriptionItem<E>> {
+        if let Some(reason) = self.0.take() {
+            return Some(RunSubscriptionItem::Closed { reason });
+        }
         std::future::pending().await
     }
 }
 
 impl RequestController {
-    async fn acknowledgement(&self) -> SubscriptionId {
+    async fn new(
+        fixture: &Fixture,
+        status_delay: Duration,
+        acknowledge: bool,
+        close: Option<SubscriptionCloseReason>,
+    ) -> Arc<Self> {
+        let status = fixture
+            .backend
+            .read_recorded_status(RunStatusParams::new(fixture.id.clone()))
+            .await
+            .unwrap();
+        Arc::new(Self {
+            status,
+            status_delay,
+            acknowledge,
+            close,
+            entered: tokio::sync::Notify::new(),
+        })
+    }
+
+    async fn subscribe<E: Send + 'static, R>(
+        &self,
+        receipt: impl FnOnce(SubscriptionId) -> R,
+    ) -> Result<(R, RunSubscriptionStream<E>), BackendError> {
         self.entered.notify_one();
         if !self.acknowledge {
             std::future::pending::<()>().await;
         }
-        SubscriptionId::new(uuid::Uuid::now_v7().to_string())
+        let id = SubscriptionId::new(uuid::Uuid::now_v7().to_string());
+        Ok((
+            receipt(id),
+            RunSubscriptionStream::new(ControllerStream(self.close)),
+        ))
     }
 }
 
@@ -357,14 +375,12 @@ impl ClusterBackend for RequestController {
         _context: &ConnectionContext,
         params: RunWatchParams,
     ) -> Result<(RunWatchResult, RunWatchEventStream), BackendError> {
-        Ok((
-            RunWatchResult {
-                subscription_id: self.acknowledgement().await,
-                run_id: params.run_id,
-                at_cursor: self.status.at_cursor.clone(),
-            },
-            RunSubscriptionStream::new(Quiet),
-        ))
+        self.subscribe(|subscription_id| RunWatchResult {
+            subscription_id,
+            run_id: params.run_id,
+            at_cursor: self.status.at_cursor.clone(),
+        })
+        .await
     }
 
     async fn run_logs(
@@ -372,14 +388,12 @@ impl ClusterBackend for RequestController {
         _context: &ConnectionContext,
         params: RunLogsParams,
     ) -> Result<(RunLogsResult, RunLogEventStream), BackendError> {
-        Ok((
-            RunLogsResult {
-                subscription_id: self.acknowledgement().await,
-                run_id: params.run_id,
-                at_cursor: self.status.at_cursor.clone(),
-            },
-            RunSubscriptionStream::new(Quiet),
-        ))
+        self.subscribe(|subscription_id| RunLogsResult {
+            subscription_id,
+            run_id: params.run_id,
+            at_cursor: self.status.at_cursor.clone(),
+        })
+        .await
     }
 
     async fn run_attach(
@@ -387,14 +401,13 @@ impl ClusterBackend for RequestController {
         _context: &ConnectionContext,
         params: RunAttachParams,
     ) -> Result<(RunAttachResult, RunAttachEventStream), BackendError> {
-        Ok((
-            RunAttachResult {
-                subscription_id: self.acknowledgement().await,
-                run_id: params.run_id,
-                execution: params.execution,
-            },
-            RunSubscriptionStream::new(Quiet),
-        ))
+        self.subscribe(|subscription_id| RunAttachResult {
+            subscription_id,
+            part_id: params.run_id.clone(),
+            run_id: params.run_id,
+            execution: params.execution,
+        })
+        .await
     }
 
     async fn run_suspend(
@@ -410,19 +423,7 @@ impl ClusterBackend for RequestController {
 #[tokio::test]
 async fn subscription_acknowledgements_and_suspend_reply_have_a_deadline() {
     let fixture = Fixture::new(false, false).await;
-    let status = fixture
-        .backend
-        .read_recorded_status(RunStatusParams {
-            run_id: fixture.id.clone(),
-        })
-        .await
-        .unwrap();
-    let controller = Arc::new(RequestController {
-        status,
-        status_delay: Duration::ZERO,
-        acknowledge: false,
-        entered: tokio::sync::Notify::new(),
-    });
+    let controller = RequestController::new(&fixture, Duration::ZERO, false, None).await;
     let _endpoint = ServedEndpoint::start(
         &fixture.backend.paths(&fixture.id).unwrap(),
         controller.clone(),
@@ -437,6 +438,7 @@ async fn subscription_acknowledgements_and_suspend_reply_have_a_deadline() {
                 match operation {
                     "watch" => backend
                         .inspect_watch(RunWatchParams {
+                            part_id: None,
                             run_id,
                             from_cursor: None,
                         })
@@ -444,6 +446,7 @@ async fn subscription_acknowledgements_and_suspend_reply_have_a_deadline() {
                         .map(|_| ()),
                     "logs" => backend
                         .inspect_logs(RunLogsParams {
+                            part_id: None,
                             run_id,
                             from_cursor: None,
                             execution: None,
@@ -451,11 +454,15 @@ async fn subscription_acknowledgements_and_suspend_reply_have_a_deadline() {
                         .await
                         .map(|_| ()),
                     "attach" => backend
-                        .inspect_attach(RunAttachParams { run_id, execution })
+                        .inspect_attach(RunAttachParams {
+                            part_id: None,
+                            run_id,
+                            execution,
+                        })
                         .await
                         .map(|_| ()),
                     _ => backend
-                        .run_suspend(None, RunStatusParams { run_id })
+                        .run_suspend(None, RunStatusParams::new(run_id))
                         .await
                         .map(|_| ()),
                 }
@@ -479,25 +486,12 @@ async fn subscription_acknowledgements_and_suspend_reply_have_a_deadline() {
 #[tokio::test]
 async fn delayed_status_is_current_and_established_streams_can_remain_quiet() {
     let fixture = Fixture::new(false, false).await;
-    let status = fixture
-        .backend
-        .read_recorded_status(RunStatusParams {
-            run_id: fixture.id.clone(),
-        })
-        .await
-        .unwrap();
-    let controller = Arc::new(RequestController {
-        status: status.clone(),
-        status_delay: Duration::from_secs(2),
-        acknowledge: true,
-        entered: tokio::sync::Notify::new(),
-    });
+    let controller = RequestController::new(&fixture, Duration::from_secs(2), true, None).await;
+    let status = controller.status.clone();
     let _endpoint = ServedEndpoint::start(&fixture.backend.paths(&fixture.id).unwrap(), controller);
     let current = fixture
         .backend
-        .status_local(RunStatusParams {
-            run_id: fixture.id.clone(),
-        })
+        .status_local(RunStatusParams::new(fixture.id.clone()))
         .await
         .unwrap();
     assert_eq!(current.status, status.status);
@@ -508,6 +502,7 @@ async fn delayed_status_is_current_and_established_streams_can_remain_quiet() {
     let mut watch = fixture
         .backend
         .inspect_watch(RunWatchParams {
+            part_id: None,
             run_id: fixture.id.clone(),
             from_cursor: None,
         })
@@ -516,6 +511,7 @@ async fn delayed_status_is_current_and_established_streams_can_remain_quiet() {
     let mut logs = fixture
         .backend
         .inspect_logs(RunLogsParams {
+            part_id: None,
             run_id: fixture.id.clone(),
             from_cursor: None,
             execution: None,
@@ -525,6 +521,7 @@ async fn delayed_status_is_current_and_established_streams_can_remain_quiet() {
     let mut attach = fixture
         .backend
         .inspect_attach(RunAttachParams {
+            part_id: None,
             run_id: fixture.id.clone(),
             execution: fixture.execution.clone(),
         })
@@ -541,4 +538,63 @@ async fn delayed_status_is_current_and_established_streams_can_remain_quiet() {
         .await
         .is_err()
     );
+}
+
+#[tokio::test]
+async fn live_local_subscriptions_preserve_native_close_reasons() {
+    for reason in [
+        SubscriptionCloseReason::SlowConsumer,
+        SubscriptionCloseReason::SourceUnavailable,
+    ] {
+        let fixture = Fixture::new(false, false).await;
+        let backend = &fixture.backend;
+        let controller = RequestController::new(&fixture, Duration::ZERO, true, Some(reason)).await;
+        let _endpoint = ServedEndpoint::start(&backend.paths(&fixture.id).unwrap(), controller);
+        let mut watch = backend
+            .run_watch(
+                None,
+                RunWatchParams {
+                    run_id: fixture.id.clone(),
+                    part_id: None,
+                    from_cursor: None,
+                },
+            )
+            .await
+            .unwrap();
+        let mut logs = backend
+            .run_logs(
+                None,
+                RunLogsParams {
+                    run_id: fixture.id.clone(),
+                    part_id: None,
+                    from_cursor: None,
+                    execution: None,
+                },
+            )
+            .await
+            .unwrap();
+        let mut attach = backend
+            .run_attach(
+                None,
+                RunAttachParams {
+                    run_id: fixture.id,
+                    part_id: None,
+                    execution: fixture.execution,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            watch.next().await.unwrap(),
+            Some(CliSubscriptionItem::Closed { reason })
+        );
+        assert_eq!(
+            logs.next().await.unwrap(),
+            Some(CliSubscriptionItem::Closed { reason })
+        );
+        assert_eq!(
+            attach.next().await.unwrap(),
+            Some(CliSubscriptionItem::Closed { reason })
+        );
+    }
 }

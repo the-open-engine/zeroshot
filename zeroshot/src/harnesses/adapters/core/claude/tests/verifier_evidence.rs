@@ -144,6 +144,7 @@ async fn verifier_evidence_redacts_the_same_declared_and_ambient_auth_marker_bef
         );
         let (_, mut logs) = NativeV2Observability::new(ledger)
             .logs(RunLogsParams {
+                part_id: None,
                 run_id,
                 from_cursor: None,
                 execution: None,

@@ -39,13 +39,18 @@ pub(super) fn final_preflight(
     let status = RunStatusResult {
         steering: Default::default(),
         run_id: snapshot.run_id.clone(),
+        part_id: snapshot.run_id.clone(),
+        current_part_id: snapshot.run_id.clone(),
         title: snapshot.title.clone(),
         source: snapshot.source.clone(),
         workspace: snapshot.workspace.clone(),
         context_sources: snapshot.context_sources.clone(),
         size: snapshot.size.clone(),
         // Later finalization may advance the cursor; reserve its full existing integer width.
-        at_cursor: crate::v2_run_ledger::cursor_for(u64::MAX),
+        at_cursor: crate::native_v2_observability::history::parts::part_cursor(
+            &snapshot.run_id,
+            &crate::v2_run_ledger::cursor_for(u64::MAX),
+        ),
         status: RunStatus::Finished {
             terminal_result: primary.result.clone(),
             metadata: RunMetadata {
@@ -120,6 +125,7 @@ pub(super) fn request_preflight(
         request.artifacts = files.clone();
         response(&InboxShowResult {
             run_id: run_id.clone(),
+            part_id: run_id.clone(),
             node: node.clone(),
             created_at: *created_at,
             request: *request.clone(),

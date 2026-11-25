@@ -40,6 +40,11 @@ pub(super) async fn try_publish(
             "network messages cannot use --target".into(),
         ));
     }
+    if run.part_id.as_ref().is_some_and(|part| part != &run.run_id) {
+        return Err(NativeV2CliError::Usage(
+            "network messages require --part to match the execution's run ID".into(),
+        ));
+    }
     let path = capability.map(PathBuf::from).ok_or_else(|| {
         NativeV2CliError::Usage("this node has no network publishing mandate".into())
     })?;
@@ -82,6 +87,7 @@ pub(super) async fn execute<B: super::NativeV2CliBackend>(
                 run.target.as_deref(),
                 openengine_cluster_protocol::RunSteerParams {
                     node,
+                    part_id: run.part_id,
                     run_id: run.run_id,
                     text: read_steer_text(text)?,
                     mode,

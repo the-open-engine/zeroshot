@@ -16,6 +16,34 @@ pub(super) struct WorkspacePreparation<'a> {
 }
 
 impl ProductionCapsuleAllocator {
+    pub(super) fn prepare_capsule_workspace(
+        &self,
+        pending: &PendingCapsule<'_>,
+        request: &CapsuleBuildRequest<'_>,
+        paths: &CapsuleBuildPaths,
+    ) -> Result<CapsuleFilesystem, CapsuleAllocationUnavailable> {
+        if request.install_source {
+            pending.state.create_run_directory()?;
+        } else {
+            pending.state.capture_run_directory()?;
+        }
+        if request.transfer_retained_workspace {
+            transfer_retained_workspace_to_writer(&paths.workspace, pending.process_pool)?;
+        }
+        let filesystem =
+            (self.prepare_filesystem)(&paths.workspace, &paths.runtime_home, pending.process_pool)?;
+        let identity = pending
+            .process_pool
+            .identity(HostedProcessScope::Environment)
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+        #[cfg(test)]
+        let owner = (!self.portable_test_processes()).then_some(identity);
+        #[cfg(not(test))]
+        let owner = Some(identity);
+        environment::prepare_tools(&pending.state.run_root, owner)?;
+        Ok(filesystem)
+    }
+
     pub(super) fn file_publisher(
         &self,
         workspace: &Path,

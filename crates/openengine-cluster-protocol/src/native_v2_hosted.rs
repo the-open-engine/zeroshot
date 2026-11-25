@@ -63,6 +63,8 @@ impl From<RunStatus> for HostedRunStatus {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct HostedRunStatusResult {
     pub run_id: RunId,
+    pub part_id: RunId,
+    pub current_part_id: RunId,
     pub title: RunTitle,
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -82,41 +84,32 @@ pub struct HostedRunStatusResult {
     pub steering: crate::RunSteeringStatus,
 }
 
-impl From<RunStatusResult> for HostedRunStatusResult {
-    fn from(result: RunStatusResult) -> Self {
-        Self {
-            run_id: result.run_id,
-            title: result.title,
-            source: result.source,
-            workspace: result.workspace,
-            context_sources: result.context_sources,
-            size: result.size,
-            at_cursor: result.at_cursor,
-            status: result.status.into(),
-            controller: result.controller,
-            workspace_recovery: result.workspace_recovery,
-            steering: result.steering,
+macro_rules! hosted_status_from {
+    ($result:ty) => {
+        impl From<$result> for HostedRunStatusResult {
+            fn from(result: $result) -> Self {
+                Self {
+                    run_id: result.run_id,
+                    part_id: result.part_id,
+                    current_part_id: result.current_part_id,
+                    title: result.title,
+                    source: result.source,
+                    workspace: result.workspace,
+                    context_sources: result.context_sources,
+                    size: result.size,
+                    at_cursor: result.at_cursor,
+                    status: result.status.into(),
+                    controller: result.controller,
+                    workspace_recovery: result.workspace_recovery,
+                    steering: result.steering,
+                }
+            }
         }
-    }
+    };
 }
 
-impl From<RunForceResult> for HostedRunStatusResult {
-    fn from(result: RunForceResult) -> Self {
-        Self {
-            run_id: result.run_id,
-            title: result.title,
-            source: result.source,
-            workspace: result.workspace,
-            context_sources: result.context_sources,
-            size: result.size,
-            at_cursor: result.at_cursor,
-            status: result.status.into(),
-            controller: result.controller,
-            workspace_recovery: result.workspace_recovery,
-            steering: result.steering,
-        }
-    }
-}
+hosted_status_from!(RunStatusResult);
+hosted_status_from!(RunForceResult);
 
 /// Force returns the same run projection as status.
 pub type HostedRunForceResult = HostedRunStatusResult;
@@ -143,6 +136,7 @@ pub struct HostedRunWatchEventNotification {
     pub recorded_at: Option<crate::UnixTimestampMillis>,
     pub subscription_id: SubscriptionId,
     pub run_id: RunId,
+    pub part_id: RunId,
     pub title: RunTitle,
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -162,6 +156,7 @@ impl From<RunWatchEventNotification> for HostedRunWatchEventNotification {
             recorded_at: event.recorded_at,
             subscription_id: event.subscription_id,
             run_id: event.run_id,
+            part_id: event.part_id,
             title: event.title,
             source: event.source,
             workspace: event.workspace,

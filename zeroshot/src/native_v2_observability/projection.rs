@@ -5,6 +5,8 @@ pub(super) fn status_result(
 ) -> Result<RunStatusResult, NativeV2ObservationError> {
     Ok(RunStatusResult {
         steering: Default::default(),
+        part_id: snapshot.run_id.clone(),
+        current_part_id: snapshot.run_id.clone(),
         run_id: snapshot.run_id.clone(),
         title: snapshot.title.clone(),
         source: snapshot.source.clone(),
@@ -144,6 +146,7 @@ pub(super) fn log_notification(
             .and_then(|id| snapshot.executions.get(&id))
             .map_or_else(Vec::new, |node| node.occurrence.map_indices.clone()),
         subscription_id: subscription_id.clone(),
+        part_id: snapshot.run_id.clone(),
         run_id: snapshot.run_id.clone(),
         cursor: stored.cursor.clone(),
         timestamp: *timestamp,

@@ -266,9 +266,9 @@ async fn steer_suspended_successor_keeps_receipts_for_continued_conversations() 
     assert_eq!(b["steer"]["receivedExecutions"], 0);
     let status = fixture.json(&["status", &run], "steer").await;
     assert_eq!(status["status"]["phase"], "suspended");
-    assert!(status["workspaceRecovery"]["successorRunId"].is_null());
+    assert_eq!(status["currentPartId"], run);
     let next = fixture.json(&["resume", &run], "steer").await;
-    let next = next["runId"].as_str().assert_value();
+    let next = next["currentPartId"].as_str().assert_value();
     fixture.wait_succeeded(next, "steer").await;
     wait_for_exit(fixture.ready_pid(next)).await;
     let check = steer_read(&fixture, "steer-prompt-check-1-1");
@@ -281,17 +281,18 @@ async fn steer_suspended_successor_keeps_receipts_for_continued_conversations() 
     let launch: Vec<String> =
         serde_json::from_str(&steer_read(&fixture, "steer-launch-worker-2-1")).assert_value();
     assert!(launch.iter().any(|arg| arg == "resume"));
-    let vectors = fixture.json(&["vectors", next], "steer").await;
+    let vectors = fixture.json(&["vectors", &run, "--part", next], "steer").await;
     let entries = vectors["vectors"].as_array().assert_value();
     assert!(entries.iter().any(|v| v["kind"] == "steer_receipt"
-        && v["runId"] == run
+        && v["runId"] == run && v["partId"] == run
         && v["steerId"] == a["steer"]["id"]));
     assert!(entries.iter().any(|v| v["kind"] == "steer_receipt"
-        && v["runId"] == next
+        && v["runId"] == run && v["partId"] == next
         && v["steerId"] == b["steer"]["id"]));
-    let refusal = fixture.output(&["steer", &run, "too late"], "steer").await;
+    let refusal = fixture.output(&["steer", &run, "--part", &run, "too late"], "steer").await;
     assert_eq!(refusal.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&refusal.stderr).contains(next));
+    let error = String::from_utf8_lossy(&refusal.stderr);
+    assert!(error.contains("current") && error.contains(next), "{error}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -318,13 +319,13 @@ async fn steer_restoration_io_fallback_receives_standing_direction_in_fresh_conv
     let home = fixture.harness_environment.get("CODEX_HOME").assert_value();
     fs::write(Path::new(home).join("sessions"), "restore blocker").assert_value();
     let next = fixture.json(&["resume", &run], "steer").await;
-    let next = next["runId"].as_str().assert_value();
+    let next = next["currentPartId"].as_str().assert_value();
     fixture.wait_succeeded(next, "steer").await;
     wait_for_exit(fixture.ready_pid(next)).await;
     let launch: Vec<String> =
         serde_json::from_str(&steer_read(&fixture, "steer-launch-worker-2-1")).assert_value();
     assert!(!launch.iter().any(|arg| arg == "resume"));
-    let logs = fixture.output(&["logs", next], "steer").await;
+    let logs = fixture.output(&["logs", &run, "--part", next], "steer").await;
     assert!(
         String::from_utf8_lossy(&logs.stdout)
             .contains("starts a new conversation: provider conversation storage is unavailable")
@@ -429,7 +430,7 @@ async fn steer_request_answer_continues_conversation_with_only_new_direction() {
             "steer",
         )
         .await;
-    let next = response["runId"].as_str().assert_value();
+    let next = response["currentPartId"].as_str().assert_value();
     fixture.wait_suspended(next).await;
     wait_for_exit(fixture.ready_pid(next)).await;
     let prompt = steer_read(&fixture, "steer-prompt-worker-2-1");
@@ -512,7 +513,7 @@ async fn steer_selected_older_checkpoint_inherits_only_receipts_in_saved_convers
             "steer",
         )
         .await;
-    let next = next["runId"].as_str().assert_value();
+    let next = next["currentPartId"].as_str().assert_value();
     fixture.wait_succeeded(next, "steer").await;
     let prompt = steer_read(&fixture, "steer-prompt-worker-2-1");
     assert!(!prompt.contains("direction-before-snapshot"));
@@ -528,7 +529,7 @@ async fn steer_selected_older_checkpoint_inherits_only_receipts_in_saved_convers
             !steer_read(&fixture, &format!("steer-tool-worker-2-1-{call}")).contains("<steer>")
         );
     }
-    let vectors = fixture.json(&["vectors", next], "steer").await;
+    let vectors = fixture.json(&["vectors", &run, "--part", next], "steer").await;
     let after = status["steers"][1]["id"].as_str().assert_value();
     assert_eq!(
         vectors["vectors"]

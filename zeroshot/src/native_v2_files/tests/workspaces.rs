@@ -479,7 +479,7 @@ async fn queued_factory_run_keeps_pinned_inputs_after_conflicting_run_id_submiss
     );
     assert_eq!(std::fs::read(&source).assert_value(), b"replacement");
     controller
-        .force(openengine_cluster_protocol::RunForceParams { run_id: run })
+        .force(openengine_cluster_protocol::RunForceParams::new(run))
         .await
         .assert_value();
 }

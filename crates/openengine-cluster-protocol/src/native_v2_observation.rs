@@ -19,6 +19,7 @@ use crate::{
 
 #[path = "native_v2_observation/failure.rs"]
 mod failure;
+mod publications;
 pub use failure::*;
 
 /// Non-negative token counter that remains exact in JavaScript clients.
@@ -214,6 +215,19 @@ pub enum RunStatus {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunStatusParams {
     pub run_id: RunId,
+    /// Select one physical part of this run. Omission addresses the logical run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part_id: Option<RunId>,
+}
+
+impl RunStatusParams {
+    /// Address the current part by its logical run ID.
+    pub fn new(run_id: RunId) -> Self {
+        Self {
+            run_id,
+            part_id: None,
+        }
+    }
 }
 
 /// Availability observed by a reader, separate from the run's durable status.
@@ -253,6 +267,10 @@ macro_rules! define_run_status_projection {
         pub struct $name {
             $(#[$run_id_attribute])?
             pub run_id: RunId,
+            /// Part whose state is projected.
+            pub part_id: RunId,
+            /// Latest accepted part, including when inspecting an earlier part.
+            pub current_part_id: RunId,
             $(#[$title_attribute])?
             pub title: RunTitle,
             $(#[$source_attribute])?
@@ -316,6 +334,9 @@ impl WorkspaceRecovery {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunWatchParams {
     pub run_id: RunId,
+    /// Select one physical part of this run. Omission addresses the logical run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part_id: Option<RunId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from_cursor: Option<Cursor>,
 }
@@ -340,6 +361,8 @@ pub struct RunWatchEventNotification {
     pub recorded_at: Option<UnixTimestampMillis>,
     pub subscription_id: SubscriptionId,
     pub run_id: RunId,
+    /// Part that owns this record.
+    pub part_id: RunId,
     pub title: RunTitle,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<ResolvedSource>,
@@ -362,6 +385,9 @@ pub struct RunWatchEventNotification {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunLogsParams {
     pub run_id: RunId,
+    /// Select one physical part of this run. Omission addresses the logical run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part_id: Option<RunId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from_cursor: Option<Cursor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -386,6 +412,8 @@ pub struct RunLogEventNotification {
     pub map_indices: Vec<u64>,
     pub subscription_id: SubscriptionId,
     pub run_id: RunId,
+    /// Part that owns this record.
+    pub part_id: RunId,
     pub cursor: Cursor,
     /// Producer-captured Unix epoch milliseconds, preserved unchanged by durable replay.
     pub timestamp: UnixTimestampMillis,
@@ -402,6 +430,9 @@ pub struct RunLogEventNotification {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunAttachParams {
     pub run_id: RunId,
+    /// Select one physical part of this run. Omission addresses the logical run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part_id: Option<RunId>,
     pub execution: ExecutionRef,
 }
 
@@ -410,6 +441,8 @@ pub struct RunAttachParams {
 pub struct RunAttachResult {
     pub subscription_id: SubscriptionId,
     pub run_id: RunId,
+    /// Part that owns this record.
+    pub part_id: RunId,
     pub execution: ExecutionRef,
 }
 
@@ -420,6 +453,8 @@ pub struct RunAttachResult {
 pub struct RunAttachEventNotification {
     pub subscription_id: SubscriptionId,
     pub run_id: RunId,
+    /// Part that owns this record.
+    pub part_id: RunId,
     pub execution: ExecutionRef,
     pub event: AgentAttachEvent,
 }
@@ -429,6 +464,19 @@ pub struct RunAttachEventNotification {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunForceParams {
     pub run_id: RunId,
+    /// When supplied, the observed part must still be current.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part_id: Option<RunId>,
+}
+
+impl RunForceParams {
+    /// Address the current part by its logical run ID.
+    pub fn new(run_id: RunId) -> Self {
+        Self {
+            run_id,
+            part_id: None,
+        }
+    }
 }
 
 define_run_status_projection!(

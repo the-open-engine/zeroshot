@@ -306,6 +306,7 @@ This method has no parameters.
 | Name | Required | Schema |
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>partId</code> | No | <code>{&quot;description&quot;:&quot;Select one physical part of this run. Omission addresses the logical run.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 
 #### Result
 
@@ -324,6 +325,7 @@ This method has no parameters.
 | Name | Required | Schema |
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>partId</code> | No | <code>{&quot;description&quot;:&quot;Select one physical part of this run. Omission addresses the logical run.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 | <code>fromCursor</code> | No | <code>{&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 
 #### Result
@@ -343,6 +345,7 @@ This method has no parameters.
 | Name | Required | Schema |
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>partId</code> | No | <code>{&quot;description&quot;:&quot;Select one physical part of this run. Omission addresses the logical run.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 | <code>fromCursor</code> | No | <code>{&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 | <code>execution</code> | No | <code>{&quot;maxLength&quot;:128,&quot;minLength&quot;:1,&quot;pattern&quot;:&quot;^[^\\u0000-\\u001f\\u007f-\\u009f]+$&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 
@@ -363,6 +366,7 @@ This method has no parameters.
 | Name | Required | Schema |
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>partId</code> | No | <code>{&quot;description&quot;:&quot;Select one physical part of this run. Omission addresses the logical run.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 | <code>execution</code> | Yes | <code>{&quot;maxLength&quot;:128,&quot;minLength&quot;:1,&quot;pattern&quot;:&quot;^[^\\u0000-\\u001f\\u007f-\\u009f]+$&quot;,&quot;type&quot;:&quot;string&quot;}</code> |
 
 #### Result
@@ -382,6 +386,7 @@ This method has no parameters.
 | Name | Required | Schema |
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>partId</code> | No | <code>{&quot;description&quot;:&quot;When supplied, the observed part must still be current.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 
 #### Result
 
@@ -400,6 +405,7 @@ This method has no parameters.
 | Name | Required | Schema |
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>partId</code> | No | <code>{&quot;description&quot;:&quot;When supplied, the observed part must still be current.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 | <code>text</code> | Yes | <a href="../schema.json#/$defs/NodeInstructions"><code>schema.json#/$defs/NodeInstructions</code></a> |
 | <code>mode</code> | No | <a href="../schema.json#/$defs/SteeringMode"><code>schema.json#/$defs/SteeringMode</code></a> |
 | <code>node</code> | No | <a href="../schema.json#/$defs/RunSteerParams/properties/node"><code>schema.json#/$defs/RunSteerParams/properties/node</code></a> |
@@ -421,6 +427,7 @@ This method has no parameters.
 | Name | Required | Schema |
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>partId</code> | No | <code>{&quot;description&quot;:&quot;Select one physical part of this run. Omission addresses the logical run.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 
 #### Result
 
@@ -439,6 +446,7 @@ This method has no parameters.
 | Name | Required | Schema |
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>partId</code> | No | <code>{&quot;description&quot;:&quot;Select one physical part of this run. Omission addresses the logical run.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 | <code>after</code> | No | <a href="../schema.json#/$defs/RunVectorsParams/properties/after"><code>schema.json#/$defs/RunVectorsParams/properties/after</code></a> |
 | <code>limit</code> | No | <code>{&quot;format&quot;:&quot;uint32&quot;,&quot;maximum&quot;:100,&quot;minimum&quot;:1,&quot;type&quot;:[&quot;integer&quot;,&quot;null&quot;]}</code> |
 
@@ -482,6 +490,7 @@ Read-only vector-backed request inbox. Requires request_ask, kind openengine.req
 | Name | Required | Schema |
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>partId</code> | No | <code>{&quot;description&quot;:&quot;Select one physical part of this run. Omission addresses the logical run.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 
 #### Result
 
@@ -500,13 +509,14 @@ Read-only vector-backed request inbox. Requires request_ask, kind openengine.req
 | Name | Required | Schema |
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>partId</code> | No | <code>{&quot;description&quot;:&quot;Select one physical part of this run. Omission addresses the logical run.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 | <code>id</code> | Yes | <a href="../schema.json#/$defs/VectorId"><code>schema.json#/$defs/VectorId</code></a> |
 
 #### Result
 
 | Name | Schema |
 | --- | --- |
-| <code>runVectorResult</code> | <a href="../schema.json#/$defs/RunVector"><code>schema.json#/$defs/RunVector</code></a> |
+| <code>runVectorResult</code> | <a href="../schema.json#/$defs/RunVectorResult"><code>schema.json#/$defs/RunVectorResult</code></a> |
 
 ### <code>run/checkpoints</code>
 
@@ -521,6 +531,7 @@ Lists checkpoints in increasing sequence order. The after cursor is exclusive. O
 | Name | Required | Schema |
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>partId</code> | No | <code>{&quot;description&quot;:&quot;Select one physical part of this run. Omission addresses the logical run.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 | <code>after</code> | No | <code>{&quot;anyOf&quot;:[{&quot;$ref&quot;:&quot;#/$defs/CheckpointId&quot;},{&quot;type&quot;:&quot;null&quot;}]}</code> |
 | <code>limit</code> | No | <code>{&quot;format&quot;:&quot;uint32&quot;,&quot;maximum&quot;:100,&quot;minimum&quot;:1,&quot;type&quot;:[&quot;integer&quot;,&quot;null&quot;]}</code> |
 
@@ -541,6 +552,7 @@ Lists checkpoints in increasing sequence order. The after cursor is exclusive. O
 | Name | Required | Schema |
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>partId</code> | No | <code>{&quot;description&quot;:&quot;When supplied, the observed part must still be current.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 | <code>runtime</code> | Yes | <a href="../schema.json#/$defs/RunResumeRequirementsParams/properties/runtime"><code>schema.json#/$defs/RunResumeRequirementsParams/properties/runtime</code></a> |
 
 #### Result
@@ -551,7 +563,7 @@ Lists checkpoints in increasing sequence order. The after cursor is exclusive. O
 
 ### <code>run/resume</code>
 
-Omitting from or selecting restart restarts a failed run where it started, on the latest retained workspace: a submitted run at its graph root, a successor at the boundary it began at, so an accepted answer stays accepted. Selecting checkpoint restores the matching workspace and predecessor outputs and reruns the named node or atomic concurrent group. Graph, input, source and delivery metadata remain fixed. Optional runtime completely replaces the saved runtime after ordinary admission; omission keeps it. Runtime replacement requires resume_runtime (openengine.resume-runtime/v1). Credentials are resolved again for the successor. Checkpoint continuations and suspended successors restore captured node-instance provider conversations, and so does a restart of such a successor; the restart of a submitted run starts new ones. Suspended command/wait runs continue without restoring files. Request suspensions require from.kind answer with signals and output, or explicit expiry. Requests require request_ask (openengine.request-ask/v1); deadline expiry settles the held verifier with timeout.
+RunId identifies the original submission. PartId must identify its current part. A successful resume returns the same runId and the new currentPartId. Omitting from or selecting restart restarts a failed run where it started, on the latest retained workspace: a submitted run at its graph root, a successor at the boundary it began at, so an accepted answer stays accepted. Selecting checkpoint restores the matching workspace and predecessor outputs and reruns the named node or atomic concurrent group. Graph, input, source and delivery metadata remain fixed. Optional runtime completely replaces the saved runtime after ordinary admission; omission keeps it. Runtime replacement requires resume_runtime (openengine.resume-runtime/v1). Credentials are resolved again for the successor. Checkpoint continuations and suspended successors restore captured node-instance provider conversations, and so does a restart of such a successor; the restart of a submitted run starts new ones. Suspended command/wait runs continue without restoring files. Request suspensions require from.kind answer with signals and output, or explicit expiry. Requests require request_ask (openengine.request-ask/v1); deadline expiry settles the held verifier with timeout.
 
 | Parameter structure | Transport | Server push | Inbound notifications |
 | --- | --- | --- | --- |
@@ -562,7 +574,8 @@ Omitting from or selecting restart restarts a failed run where it started, on th
 | Name | Required | Schema |
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
-| <code>successorRunId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>partId</code> | Yes | <code>{&quot;description&quot;:&quot;Part observed by the caller. This must still be the current part when resume claims it.&quot;,&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>successorPartId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
 | <code>runtime</code> | No | <a href="../schema.json#/$defs/RunResumeParams/properties/runtime"><code>schema.json#/$defs/RunResumeParams/properties/runtime</code></a> |
 | <code>from</code> | No | <code>{&quot;anyOf&quot;:[{&quot;$ref&quot;:&quot;#/$defs/RunResumeFrom&quot;},{&quot;type&quot;:&quot;null&quot;}],&quot;description&quot;:&quot;Omission preserves restarting from the latest retained workspace.&quot;}</code> |
 | <code>connections</code> | No | <code>{&quot;additionalProperties&quot;:false,&quot;description&quot;:&quot;Fresh static connection values for the successor attempt.&quot;,&quot;patternProperties&quot;:{&quot;^[^\\u0000-\\u001f\\u007f-\\u009f]+$&quot;:{&quot;$ref&quot;:&quot;#/$defs/StaticConnectionValues&quot;}},&quot;type&quot;:&quot;object&quot;}</code> |
@@ -589,6 +602,7 @@ Omitting from or selecting restart restarts a failed run where it started, on th
 | Name | Required | Schema |
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>partId</code> | No | <code>{&quot;description&quot;:&quot;When supplied, the observed part must still be current.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 
 #### Result
 

@@ -118,7 +118,7 @@ fn run_submission_response(response: &RunResponse) -> (&'static str, String) {
     match response {
         RunResponse::Accepted => (
             "200 OK",
-            r#"{"runId":"018f5e78-7f95-7c22-8d98-3f15af20c991"}"#.to_owned(),
+            r#"{"runId":"018f5e78-7f95-7c22-8d98-3f15af20c991","currentPartId":"018f5e78-7f95-7c22-8d98-3f15af20c991"}"#.to_owned(),
         ),
         RunResponse::Rejected => (
             "400 Bad Request",

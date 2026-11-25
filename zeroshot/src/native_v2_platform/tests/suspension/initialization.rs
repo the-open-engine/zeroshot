@@ -155,13 +155,7 @@ async fn rejected_initialization_leaves_source_resumable(point: FailurePoint, su
         .assert_value();
     }
     let before = inner.get(&source).await.assert_value().assert_value();
-    let allocator = Arc::new(SuspensionAllocator {
-        runtime,
-        policy: Default::default(),
-        store: Arc::new(SuspensionStore::default()),
-        successor: StdMutex::new(None),
-        preparation_gate: None,
-    });
+    let allocator = Arc::new(SuspensionAllocator::new(runtime));
     let ledger = Arc::new(InitializationLedger {
         inner: inner.clone(),
         successor: RunId::new("rejected-successor"),
@@ -191,7 +185,7 @@ async fn rejected_initialization_leaves_source_resumable(point: FailurePoint, su
         inner.get(&source).await.assert_value().assert_value(),
         before
     );
-    assert!(allocator.successor.lock().assert_value().is_none());
+    assert!(allocator.successors.lock().assert_value().is_empty());
     assert!(controller.runtimes.lock().await.is_empty());
     assert!(allocator.claim_controller(&ledger.successor).await.is_ok());
     assert_eq!(allocator.runtime.allocation_count(), 0);
@@ -199,9 +193,7 @@ async fn rejected_initialization_leaves_source_resumable(point: FailurePoint, su
     assert_eq!(cleanup.exits(), vec![RunRuntimeExit::RuntimeLost]);
     assert!(
         controller
-            .status(RunStatusParams {
-                run_id: source.clone()
-            })
+            .status(RunStatusParams::new(source.clone()))
             .await
             .assert_value()
             .workspace_recovery
@@ -219,6 +211,7 @@ async fn rejected_initialization_leaves_source_resumable(point: FailurePoint, su
     ));
     let vectors = controller
         .vectors(RunVectorsParams {
+            part_id: None,
             run_id: resumed.run_id,
             after: None,
             limit: None,
@@ -317,7 +310,7 @@ async fn inbox_cursor_and_limit_do_not_load_histories_outside_the_page() {
             ..Default::default()
         },
         store: Arc::new(SuspensionStore::default()),
-        successor: StdMutex::new(None),
+        successors: StdMutex::default(),
         preparation_gate: None,
     });
     let controller = NativeV2PlatformController::new_with_delivery_policy(
@@ -354,9 +347,7 @@ async fn inbox_cursor_and_limit_do_not_load_histories_outside_the_page() {
     );
     assert!(
         controller
-            .inbox_show(RunStatusParams {
-                run_id: RunId::new("inbox-c")
-            })
+            .inbox_show(RunStatusParams::new(RunId::new("inbox-c")))
             .await
             .is_err()
     );
@@ -364,4 +355,123 @@ async fn inbox_cursor_and_limit_do_not_load_histories_outside_the_page() {
         ledger.failed.load(Ordering::SeqCst),
         "the outside history read failure was armed"
     );
+}
+
+#[tokio::test]
+async fn watch_and_reconnect_match_status_when_a_successor_cannot_report_usage() {
+    use openengine_cluster_protocol::{Cursor, RunWatchParams, TokenCount, TokenUsage};
+    use crate::native_v2_contract::TokenUsageDelta;
+
+    let (ledger, _, runtime) = runtime_parts(Arc::new(FakeDriver::new(Behavior::Hang)));
+    let allocator = Arc::new(SuspensionAllocator::new(runtime));
+    let controller = NativeV2PlatformController::new(ledger.clone(), allocator.clone())
+        .await
+        .assert_value();
+    let root = request(Value::Null);
+    let mut child = request(Value::Null);
+    child.run_id = RunId::new("usage-child");
+    child.submission.submission_key = IdempotencyKey::new("usage-child").assert_value();
+    persist_request(ledger.as_ref(), &root).await;
+    persist_request(ledger.as_ref(), &child).await;
+
+    let known = TokenCount::new(9).assert_value();
+    ledger
+        .append(
+            &root.run_id,
+            vec![
+                RunEvent::RunStarted,
+                RunEvent::RunTokenUsageObserved {
+                    usage: Some(TokenUsageDelta {
+                        input_tokens: known,
+                        output_tokens: known,
+                        cache_read_input_tokens: Some(known),
+                        cache_creation_input_tokens: Some(known),
+                    }),
+                },
+                RunEvent::Suspended {
+                    suspension: RunSuspension::Command {
+                        node: NodeName::new("deliver").assert_value(),
+                        created_at: UnixTimestampMillis::MIN,
+                    },
+                },
+            ],
+        )
+        .await
+        .assert_value();
+    let open_watch = async |from_cursor: Option<Cursor>| {
+        controller
+            .watch(RunWatchParams {
+                run_id: root.run_id.clone(),
+                part_id: None,
+                from_cursor,
+            })
+            .await
+            .assert_value()
+            .1
+    };
+    let mut live = open_watch(None).await;
+    assert!(
+        live.read_available()
+            .await
+            .assert_value()
+            .iter()
+            .any(|event| matches!(event.status, RunStatus::Suspended { .. }))
+    );
+
+    allocator
+        .successors
+        .lock()
+        .assert_value()
+        .insert(root.run_id.clone(), child.run_id.clone());
+    ledger
+        .append(
+            &child.run_id,
+            vec![
+                RunEvent::RunStarted,
+                RunEvent::RunTokenUsageObserved { usage: None },
+                RunEvent::Terminal {
+                    result: TerminalResult::Succeeded {
+                        output: Value::Null,
+                    },
+                },
+            ],
+        )
+        .await
+        .assert_value();
+
+    let status = ClusterBackend::run_status(
+        &controller,
+        &ConnectionContext::default(),
+        RunStatusParams::new(root.run_id.clone()),
+    )
+    .await
+    .assert_value();
+    let RunStatus::Finished { metadata, .. } = &status.status else {
+        panic!("expected finished")
+    };
+    assert_eq!(
+        metadata.token_usage,
+        Some(TokenUsage {
+            input_tokens: known,
+            output_tokens: known,
+            cache_read_input_tokens: None,
+            cache_creation_input_tokens: None,
+            complete: false,
+        })
+    );
+    let reconnect = open_watch(Some(Cursor::new("usage-child@v2:1"))).await;
+    for mut watch in [live, reconnect] {
+        let terminal = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let event = watch.recv().await.assert_value().assert_value();
+                if matches!(event.status, RunStatus::Finished { .. }) {
+                    break event;
+                }
+            }
+        })
+        .await
+        .assert_value();
+        assert_eq!(terminal.status, status.status);
+        assert_eq!(terminal.cursor, status.at_cursor);
+    }
 }

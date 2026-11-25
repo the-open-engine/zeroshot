@@ -232,6 +232,15 @@ pub enum CheckpointRestoreSelection {
     Checkpoint { checkpoint_id: CheckpointId },
 }
 
+impl CheckpointRestoreSelection {
+    pub(crate) fn checkpoint_id(&self) -> Option<&CheckpointId> {
+        match self {
+            Self::Checkpoint { checkpoint_id } => Some(checkpoint_id),
+            Self::Latest | Self::Continue => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct RecoveryPoint {

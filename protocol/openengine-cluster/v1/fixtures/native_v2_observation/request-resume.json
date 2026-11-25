@@ -9,6 +9,7 @@
       "decision": "approved"
     }
   },
+  "partId": "run-1",
   "runId": "run-1",
-  "successorRunId": "run-2"
+  "successorPartId": "run-2"
 }

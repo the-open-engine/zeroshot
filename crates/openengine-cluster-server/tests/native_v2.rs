@@ -58,6 +58,8 @@ fn status(phase: RunStatus, at: u64) -> RunStatusResult {
 
         steering: Default::default(),
         context_sources: Vec::new(),
+        part_id: run_id(),
+        current_part_id: run_id(),
         run_id: run_id(),
         title: title(),
         source: Some(native_v2_source_fixture()),
@@ -101,7 +103,10 @@ impl ClusterBackend for FakeBackend {
     ) -> Result<RunSubmitResult, BackendError> {
         assert_eq!(params.run_id, run_id());
         assert_eq!(params.submission.initial_input, Value::Null);
-        Ok(RunSubmitResult { run_id: run_id() })
+        Ok(RunSubmitResult {
+            current_part_id: run_id(),
+            run_id: run_id(),
+        })
     }
 
     async fn run_list(
@@ -145,6 +150,7 @@ impl ClusterBackend for FakeBackend {
                 RunSubscriptionItem::Event(RunWatchEventNotification {
                     workspace: None,
 
+                    part_id: run_id(),
                     recorded_at: None,
                     context_sources: Vec::new(),
                     subscription_id,
@@ -165,6 +171,7 @@ impl ClusterBackend for FakeBackend {
                 RunSubscriptionItem::Event(RunWatchEventNotification {
                     workspace: None,
 
+                    part_id: run_id(),
                     recorded_at: None,
                     context_sources: Vec::new(),
                     subscription_id: SubscriptionId::new("watch-1"),
@@ -196,6 +203,7 @@ impl ClusterBackend for FakeBackend {
                 at_cursor: cursor(3),
             },
             stream(vec![RunSubscriptionItem::Event(RunLogEventNotification {
+                part_id: run_id(),
                 subscription_id,
                 run_id: run_id(),
                 cursor: cursor(4),
@@ -220,11 +228,13 @@ impl ClusterBackend for FakeBackend {
         Ok((
             RunAttachResult {
                 subscription_id: subscription_id.clone(),
+                part_id: run_id(),
                 run_id: run_id(),
                 execution: execution(),
             },
             stream(vec![
                 RunSubscriptionItem::Event(RunAttachEventNotification {
+                    part_id: run_id(),
                     subscription_id,
                     run_id: run_id(),
                     execution: execution(),
@@ -256,6 +266,8 @@ impl ClusterBackend for FakeBackend {
 
             steering: Default::default(),
             context_sources: Vec::new(),
+            part_id: result.run_id.clone(),
+            current_part_id: result.run_id.clone(),
             run_id: result.run_id,
             title: result.title,
             source: result.source,
@@ -331,6 +343,7 @@ async fn typed_direct_subscription_surface_reuses_run_observation_values() {
     let dispatcher = Dispatcher::new(FakeBackend, ConnectionContext::default());
     let (_, mut watch) = dispatcher
         .run_watch(RunWatchParams {
+            part_id: None,
             run_id: run_id(),
             from_cursor: None,
         })
@@ -348,6 +361,7 @@ async fn typed_direct_subscription_surface_reuses_run_observation_values() {
 
     let (_, mut logs) = dispatcher
         .run_logs(RunLogsParams {
+            part_id: None,
             run_id: run_id(),
             from_cursor: None,
             execution: None,
@@ -361,6 +375,7 @@ async fn typed_direct_subscription_surface_reuses_run_observation_values() {
 
     let (_, mut attach) = dispatcher
         .run_attach(RunAttachParams {
+            part_id: None,
             run_id: run_id(),
             execution: execution(),
         })

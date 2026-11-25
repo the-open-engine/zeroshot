@@ -345,6 +345,7 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
             .map_err(project_platform_error)?
         {
             return Ok(TargetRunReceipt {
+                current_part_id: receipt.run_id.clone(),
                 run_id: receipt.run_id,
             });
         }
@@ -438,6 +439,7 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
         }
         let receipt = receipt.map_err(project_platform_error)?;
         Ok(TargetRunReceipt {
+            current_part_id: receipt.run_id.clone(),
             run_id: receipt.run_id,
         })
     }

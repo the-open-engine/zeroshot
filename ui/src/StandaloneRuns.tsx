@@ -1,3 +1,4 @@
+import { mergeRunPage, runMenuStatus, searchRunMenu } from './run-menu';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, ChevronDown, ChevronRight, RefreshCw, Search } from 'lucide-react';
 import { AppHeader } from './AppHeader';
@@ -5,7 +6,7 @@ import { RunHistoryBoundary } from './RunHistoryBoundary';
 import { workspaceStorageKeys } from './workspace-storage';
 import { RunHistoryView } from './RunHistoryView';
 import { createExampleRunHistory } from './run-history-source';
-import { humanize, suspensionStatus, type RunSummary } from './run-history';
+import type { RunSummary } from './run-history';
 import type { Bootstrap } from './api';
 import type { WorkspaceServices } from './workspace-services';
 
@@ -19,32 +20,15 @@ const dateLabel = (time?: number | null) =>
         minute: '2-digit',
       })
     : '';
-const runState = (run: RunSummary) =>
-  run.phase === 'suspended'
-    ? suspensionStatus(run.suspension)
-    : run.phase === 'running' && run.suspendRequested
-      ? 'Suspension requested'
-      : humanize(run.terminal?.status ?? (run.phase === 'finished' ? 'Finished' : run.phase));
-function mergeRuns(previous: RunSummary[], incoming: RunSummary[]) {
-  const byId = new Map(previous.map((run) => [run.runId, run]));
-  for (const run of incoming) {
-    const old = byId.get(run.runId);
-    if (old?.phase === 'finished' && run.phase !== 'finished' && run.historyAvailable) continue;
-    if (
-      old?.phase === 'suspended' &&
-      ['admitted', 'running', 'stopping'].includes(run.phase) &&
-      run.historyAvailable
-    )
-      continue;
-    byId.set(run.runId, run);
-  }
-  return [...byId.values()].sort((a, b) => b.runId.localeCompare(a.runId));
-}
 function selectedRun() {
-  const [kind, id] = window.location.hash.slice(1).split('/').slice(1);
+  const [kind, id, section, part] = window.location.hash.slice(1).split('/').slice(1);
   try {
     return id && ['local', 'example'].includes(kind)
-      ? { example: kind === 'example', id: decodeURIComponent(id) }
+      ? {
+          example: kind === 'example',
+          id: decodeURIComponent(id),
+          part: section === 'parts' && part ? decodeURIComponent(part) : undefined,
+        }
       : undefined;
   } catch {
     return undefined;
@@ -65,6 +49,15 @@ function StandaloneRunsContent({ services, bootstrap, viewScope }: StandaloneRun
   const storage = workspaceStorageKeys(services.mount, bootstrap.workspace);
   const exampleSource = useMemo(() => createExampleRunHistory(services.mount), [services.mount]);
   const [selection, setSelection] = useState(selectedRun);
+  const source = useMemo(
+    () =>
+      selection?.example
+        ? exampleSource
+        : selection?.part && history.forPart
+          ? history.forPart(selection.part)
+          : history,
+    [selection?.example, selection?.part, exampleSource, history]
+  );
   const [runs, setRuns] = useState<RunSummary[]>([]),
     [examples, setExamples] = useState<RunSummary[]>([]);
   const [listCursor, setListCursor] = useState<string | null>(null),
@@ -87,7 +80,7 @@ function StandaloneRunsContent({ services, bootstrap, viewScope }: StandaloneRun
         try {
           const result = await history.list(undefined, controller.signal);
           if (!controller.signal.aborted) {
-            setRuns((previous) => mergeRuns(previous, result.runs));
+            setRuns((previous) => mergeRunPage(previous, result));
             if (!listLoadedMore.current) setListCursor(result.nextCursor);
             setListError('');
           }
@@ -114,7 +107,7 @@ function StandaloneRunsContent({ services, bootstrap, viewScope }: StandaloneRun
     setListError('');
     try {
       const result = await history.list(more ? (listCursor ?? undefined) : undefined);
-      setRuns((previous) => mergeRuns(previous, result.runs));
+      setRuns((previous) => mergeRunPage(previous, result, more ? listCursor : undefined));
       if (more) listLoadedMore.current = true;
       if (more || !listLoadedMore.current) setListCursor(result.nextCursor);
     } catch (error) {
@@ -124,9 +117,9 @@ function StandaloneRunsContent({ services, bootstrap, viewScope }: StandaloneRun
       setLoadingList(false);
     }
   }
-  function choose(run: RunSummary) {
+  function choose(run: Pick<RunSummary, 'runId' | 'example'>) {
     setSidebar(false);
-    window.location.hash = `runs/${run.example ? 'example' : 'local'}/${encodeURIComponent(run.runId)}`;
+    window.location.hash = runLink(run.runId, run.example);
   }
   async function showExamples() {
     setExamplesOpen((open) => !open);
@@ -138,10 +131,10 @@ function StandaloneRunsContent({ services, bootstrap, viewScope }: StandaloneRun
         setExampleError(message(error));
       }
   }
-  const filtered = runs.filter((run) =>
-    `${run.title} ${run.runId}`.toLowerCase().includes(query.toLowerCase())
+  const { matches: filtered, lookupId } = searchRunMenu(runs, query);
+  const latest = runs.find(
+    (run) => run.historyAvailable || (run.phase === 'queued' && (run.partCount ?? 1) > 1)
   );
-  const latest = runs.find((run) => run.historyAvailable);
   // The list's periodic refresh brings the successor a suspended run gains while its page is open.
   const listed = (selection?.example ? examples : runs).find((run) => run.runId === selection?.id);
   return (
@@ -172,7 +165,17 @@ function StandaloneRunsContent({ services, bootstrap, viewScope }: StandaloneRun
               <RefreshCw size={15} className={loadingList ? 'spin' : ''} />
             </button>
           </div>
-          <label className="run-search">
+          <form
+            className="run-search"
+            id="search-runs"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (lookupId) {
+                setQuery('');
+                choose({ runId: lookupId });
+              } else if (filtered.length === 1) choose(filtered[0]);
+            }}
+          >
             <Search size={14} />
             <input
               aria-label="Search runs"
@@ -180,11 +183,19 @@ function StandaloneRunsContent({ services, bootstrap, viewScope }: StandaloneRun
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
-          </label>
+          </form>
           <div className="run-list">
             {listError && <p className="history-inline-error">{listError}</p>}
-            {!loadingList && !listError && !filtered.length && (
-              <p className="run-empty">{query ? 'No matching runs' : 'No runs yet'}</p>
+            {lookupId ? (
+              <button type="submit" form="search-runs" className="text-button history-more">
+                Open run by ID <ArrowRight size={14} />
+              </button>
+            ) : (
+              !loadingList &&
+              !listError &&
+              !filtered.length && (
+                <p className="run-empty">{query ? 'No matching runs' : 'No runs yet'}</p>
+              )
             )}
             {filtered.map((item) => (
               <RunListItem
@@ -228,19 +239,34 @@ function StandaloneRunsContent({ services, bootstrap, viewScope }: StandaloneRun
           </div>
         </nav>
         <RunHistoryView
-          key={`${selection?.example}:${selection?.id}`}
+          key={`${selection?.example}:${selection?.id}:${selection?.part ?? ''}`}
           runId={selection?.id}
           viewKey={
             selection &&
             storage.runView(
-              `${viewScope}:${selection.example ? 'example' : 'history'}`,
-              selection.id
+              `${viewScope}:${selection.example ? 'example' : selection.part ? 'part' : 'history'}`,
+              selection.part ?? selection.id
             )
           }
-          source={selection?.example ? exampleSource : history}
+          source={source}
+          onOpenRun={(run) => {
+            if (selection && run.runId !== selection.id && run.parts?.includes(selection.id)) {
+              window.history.replaceState(
+                null,
+                '',
+                runLink(run.runId, selection.example, selection.part)
+              );
+              setSelection(selectedRun());
+            }
+          }}
           workers={bootstrap.workers ?? []}
-          runHref={(id) => runLink(id, selection?.example)}
-          successorRunId={listed?.workspaceRecovery?.successorRunId}
+          partHref={
+            selection && !selection.example && history.forPart
+              ? (part) => runLink(selection.id, false, part)
+              : undefined
+          }
+          listedPartId={listed?.currentPartId}
+          listedPhase={listed?.phase}
           emptyAction={
             latest && (
               <button className="button" onClick={() => choose(latest)}>
@@ -264,34 +290,24 @@ function RunListItem({
   choose: (run: RunSummary) => void;
 }) {
   return (
-    <div>
-      <button
-        className={`run-list-item ${active ? 'active' : ''}`}
-        aria-current={active ? 'true' : undefined}
-        onClick={() => choose(run)}
-      >
-        <span className={`run-dot state-${run.terminal?.status ?? run.phase}`} />
-        <span>
-          <strong>{run.title}</strong>
-          <small>
-            {run.example ? 'Example' : dateLabel(run.createdAt) || run.runId.slice(0, 8)}
-            <span>{run.historyAvailable ? runState(run) : 'History unavailable'}</span>
-          </small>
-        </span>
-      </button>
-      {run.workspaceRecovery?.successorRunId && (
-        <a
-          className="run-successor"
-          href={runLink(run.workspaceRecovery.successorRunId, run.example)}
-        >
-          Continue to successor
-        </a>
-      )}
-    </div>
+    <button
+      className={`run-list-item ${active ? 'active' : ''}`}
+      aria-current={active ? 'true' : undefined}
+      onClick={() => choose(run)}
+    >
+      <span className={`run-dot state-${run.terminal?.status ?? run.phase}`} />
+      <span>
+        <strong>{run.title}</strong>
+        <small>
+          {run.example ? 'Example' : dateLabel(run.createdAt) || run.runId.slice(0, 8)}
+          <span>{runMenuStatus(run)}</span>
+        </small>
+      </span>
+    </button>
   );
 }
 
 /** Example runs link to examples; everything else to this workspace's own runs. */
-function runLink(id: string, example?: boolean): string {
-  return `#runs/${example ? 'example' : 'local'}/${encodeURIComponent(id)}`;
+function runLink(id: string, example?: boolean, part?: string): string {
+  return `#runs/${example ? 'example' : 'local'}/${encodeURIComponent(id)}${part ? '/parts/' + encodeURIComponent(part) : ''}`;
 }

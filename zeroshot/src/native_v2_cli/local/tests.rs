@@ -86,6 +86,8 @@ pub(super) fn contract_status(
         workspace: None,
         steering: Default::default(),
         context_sources: Vec::new(),
+        part_id: run_id.clone(),
+        current_part_id: run_id.clone(),
         run_id,
         title: RunTitle::new("Local storage contract").assert_value(),
         source: submission.source.clone(),
@@ -672,6 +674,7 @@ async fn local_bootstrap_and_resume_failures_leave_recoverable_state() {
                 commit_identity: None,
                 commit_co_author: None,
 
+                part_id: original.clone(),
                 run_id: original.clone(),
                 successor_run_id: successor.clone(),
                 from: None,
@@ -1004,9 +1007,7 @@ async fn local_status_observes_a_durable_run_without_a_controller_process() {
     let (_root, backend, run_id, _ledger) =
         observable_local_run("l9s", "0199f33f-3b44-7d21-9000-000000000091").await;
     let status = backend
-        .status_local(RunStatusParams {
-            run_id: run_id.clone(),
-        })
+        .status_local(RunStatusParams::new(run_id.clone()))
         .await;
     assert!(status.is_ok(), "observer status failed: {status:?}");
     let status = status.assert_value();
@@ -1493,3 +1494,6 @@ async fn local_controller_readiness_reports_exit_and_deadline() {
 
 #[path = "startup_tests.rs"]
 mod startup_tests;
+
+#[path = "stream_tests.rs"]
+mod stream_tests;

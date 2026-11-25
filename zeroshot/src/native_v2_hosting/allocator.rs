@@ -511,7 +511,10 @@ impl ProductionCapsuleAllocator {
             if let crate::v2_run_ledger::RunEvent::Vector { vector } =
                 crate::v2_run_ledger::vector_event(
                     run_id,
-                    openengine_cluster_protocol::RunVectorContent::Continuation { resumed_from },
+                    openengine_cluster_protocol::RunVectorContent::Continuation {
+                        resumed_from,
+                        checkpoint_id: None,
+                    },
                 )
                 .map_err(|_| CapsuleAllocationUnavailable::Runtime)?
             {
@@ -528,34 +531,6 @@ impl ProductionCapsuleAllocator {
             execution_seed: hosted_workspace.execution_seed,
             vector_seed,
         })
-    }
-
-    fn prepare_capsule_workspace(
-        &self,
-        pending: &PendingCapsule<'_>,
-        request: &CapsuleBuildRequest<'_>,
-        paths: &CapsuleBuildPaths,
-    ) -> Result<CapsuleFilesystem, CapsuleAllocationUnavailable> {
-        if request.install_source {
-            pending.state.create_run_directory()?;
-        } else {
-            pending.state.capture_run_directory()?;
-        }
-        if request.transfer_retained_workspace {
-            transfer_retained_workspace_to_writer(&paths.workspace, pending.process_pool)?;
-        }
-        let filesystem =
-            (self.prepare_filesystem)(&paths.workspace, &paths.runtime_home, pending.process_pool)?;
-        let identity = pending
-            .process_pool
-            .identity(HostedProcessScope::Environment)
-            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
-        #[cfg(test)]
-        let owner = (!self.portable_test_processes()).then_some(identity);
-        #[cfg(not(test))]
-        let owner = Some(identity);
-        environment::prepare_tools(&pending.state.run_root, owner)?;
-        Ok(filesystem)
     }
 
     async fn install_capsule_source(
@@ -965,6 +940,24 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
             },
             None => Default::default(),
         }
+    }
+
+    async fn committed_recovery(
+        &self,
+        id: &RunId,
+    ) -> openengine_cluster_protocol::WorkspaceRecovery {
+        let mut recovery = self.workspace_recovery(id).await;
+        // Both sidecars precede the atomic rename. Until the source root has
+        // moved the claim fences controls but has not transferred ownership.
+        if recovery.successor_run_id.is_some()
+            && !matches!(
+                run_directory(&self.config.storage_root, id).try_exists(),
+                Ok(false)
+            )
+        {
+            recovery.successor_run_id = None;
+        }
+        recovery
     }
 
     async fn discard_workspace(&self, run_id: &RunId) -> Result<bool, CapsuleCleanupUnavailable> {

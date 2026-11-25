@@ -107,9 +107,7 @@ async fn graph_defined_verifier_results_and_exact_loop_rounds_survive_retries_an
     );
     let service = NativeV2Observability::new(harness.ledger.clone());
     let status = service
-        .status(RunStatusParams {
-            run_id: stored.snapshot.run_id.clone(),
-        })
+        .status(RunStatusParams::new(stored.snapshot.run_id.clone()))
         .await
         .assert_value();
     assert!(
@@ -252,9 +250,7 @@ async fn terminal_parallel_reviews_retain_selected_loop_evidence_in_status_and_h
             matches!(&tail.events.last().assert_value().event, RunEvent::Terminal { result } if result == &terminal)
         );
         let status = NativeV2Observability::new(harness.ledger.clone())
-            .status(RunStatusParams {
-                run_id: harness.supervisor.run_id.clone(),
-            })
+            .status(RunStatusParams::new(harness.supervisor.run_id.clone()))
             .await
             .assert_value();
         assert!(
@@ -332,9 +328,7 @@ async fn loop_overflow_remains_incomplete_after_retained_visits_converge() {
             matches!(&tail.events.last().assert_value().event, RunEvent::Terminal { result } if result == &terminal)
         );
         let status = NativeV2Observability::new(harness.ledger.clone())
-            .status(RunStatusParams {
-                run_id: harness.supervisor.run_id.clone(),
-            })
+            .status(RunStatusParams::new(harness.supervisor.run_id.clone()))
             .await
             .assert_value();
         assert!(
@@ -418,6 +412,7 @@ async fn map_paths_match_active_watch_logs_and_failure_evidence_including_nested
         let mut observed = BTreeMap::new();
         let (_, mut watch) = service
             .watch(openengine_cluster_protocol::RunWatchParams {
+                part_id: None,
                 run_id: harness.supervisor.run_id.clone(),
                 from_cursor: None,
             })

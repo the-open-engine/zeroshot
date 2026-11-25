@@ -44,7 +44,7 @@ type RoundEntry = { kind: 'round'; id: string; round: number; loop: string };
 export type StoryEntry =
   | RoundEntry
   /** This run picked up where an earlier one paused. */
-  | { kind: 'continued'; id: string; from: string }
+  | { kind: 'continued'; id: string; from: string; label?: string }
   | {
       kind: 'work';
       id: string;
@@ -53,6 +53,7 @@ export type StoryEntry =
       group?: string;
       steps: StoryStep[];
     };
+export type PendingHandoff = 'Queued' | 'Continuing';
 export type StoryOutcome = { text: string; state: NodeState; facts: string[] };
 
 type Execution = StoryStep & {
@@ -147,6 +148,7 @@ function placeContinuation(entries: StoryEntry[], placed: Placed, handoff: RunHa
     kind: 'continued',
     id: `continued:${handoff.index}`,
     from: handoff.from,
+    ...(handoff.label ? { label: handoff.label } : {}),
   };
   const asked = entries.findIndex(
     (candidate) =>
@@ -214,7 +216,7 @@ function recordedRound(
   const fallback = {
     loop: loop.name,
     number: invocation.visit,
-    scope: JSON.stringify(mapPrefix(ancestors, loop, invocation)),
+    scope: JSON.stringify([invocation.partId, mapPrefix(ancestors, loop, invocation)]),
   };
   const nearest = ancestors.at(-1);
   if (!nearest || ancestors.indexOf(nearest) <= ancestors.indexOf(loop)) return fallback;
@@ -239,6 +241,7 @@ function latestVisit(
   return controls
     .filter(
       (control) =>
+        control.partId === invocation.partId &&
         control.node === group.name &&
         JSON.stringify(control.mapIndices) === prefix &&
         control.start <= invocation.start
@@ -279,7 +282,12 @@ function collectAttempts(
 ): Execution[] {
   const executions = new Map<string, Invocation[]>();
   for (const invocation of invocations) {
-    const key = JSON.stringify([invocation.node, invocation.visit, invocation.mapIndices]);
+    const key = JSON.stringify([
+      invocation.partId,
+      invocation.node,
+      invocation.visit,
+      invocation.mapIndices,
+    ]);
     executions.set(key, [...(executions.get(key) ?? []), invocation]);
   }
   return [...executions.values()]
@@ -308,6 +316,7 @@ function collectAttempts(
         together: concurrent && {
           // One pass over the group, as recorded; a member's own visit count stands in without one.
           key: JSON.stringify([
+            latest.partId,
             concurrent.name,
             mapPrefix(ancestors, concurrent, latest),
             recordedPass(ancestors, concurrent, latest, controls) ?? latest.visit,
@@ -387,7 +396,11 @@ export function projectOutcome(
   /** The run an answer or resume continued this one in, which took over its open question. */
   successor?: string,
   controls: readonly ControlVisit[] = [],
-  position: { suspension?: RunSummary['suspension']; now?: number } = {}
+  position: {
+    suspension?: RunSummary['suspension'];
+    now?: number;
+    pendingHandoff?: PendingHandoff;
+  } = {}
 ): StoryOutcome {
   const executions = foldAttempts(document, invocations, controls, clock.at);
   const rounds = new Map<string, number>();
@@ -419,7 +432,8 @@ export function projectOutcome(
     return terminal.status === 'succeeded'
       ? { text: 'Run completed', state: 'succeeded', facts }
       : { text: `Run failed · ${humanize(terminal.reason)}`, state: 'failed', facts };
-  if (handedOff) return { text: `Continued in run ${successor}`, state: 'suspended', facts };
+  if (position.pendingHandoff) return { text: position.pendingHandoff, state: 'idle', facts };
+  if (handedOff) return { text: `Continued in part ${successor}`, state: 'suspended', facts };
   if (asking?.request && position.now !== undefined && position.now >= asking.request.expiresAt)
     return { text: `Request deadline passed · ${asking.request.text}`, state: 'suspended', facts };
   if (asking?.request)

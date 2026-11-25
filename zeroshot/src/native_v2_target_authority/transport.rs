@@ -844,7 +844,9 @@ impl ClusterBackend for TargetOecpBackend {
         {
             return Err(workspace_checkpoints_unavailable());
         }
-        if !is_canonical_uuid_v7(&params.run_id) || !is_canonical_uuid_v7(&params.successor_run_id)
+        if ![&params.run_id, &params.part_id, &params.successor_run_id]
+            .into_iter()
+            .all(is_canonical_uuid_v7)
         {
             return Err(workspace_recovery_invalid_run_id());
         }

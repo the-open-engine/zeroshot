@@ -56,6 +56,8 @@ fn populated_workspace_status_requires_new_observation_gates() {
     assert_eq!(HOSTED_RUNS_KIND, "zeroshot.hosted-runs/v3");
     let current = RunStatusResult {
         run_id: RunId::new("workspace-status"),
+        part_id: RunId::new("workspace-status"),
+        current_part_id: RunId::new("workspace-status"),
         title: RunTitle::new("File workspace").unwrap(),
         source: None,
         context_sources: vec![],
@@ -74,13 +76,17 @@ fn populated_workspace_status_requires_new_observation_gates() {
     };
     let value = serde_json::to_value(&current).unwrap();
     assert!(serde_json::from_value::<RunStatusResult>(value.clone()).is_ok());
+    let mut previous = value.clone();
+    // Isolate the workspace incompatibility from the separately versioned part projection.
+    for field in ["partId", "currentPartId"] {
+        previous.as_object_mut().unwrap().remove(field);
+    }
     assert!(
-        serde_json::from_value::<BaseRunStatusResult>(value.clone())
+        serde_json::from_value::<BaseRunStatusResult>(previous.clone())
             .unwrap_err()
             .to_string()
             .contains("workspace")
     );
-    let mut previous = value.clone();
     previous.as_object_mut().unwrap().remove("workspace");
     assert!(serde_json::from_value::<BaseRunStatusResult>(previous).is_ok());
     let hosted = serde_json::to_value(HostedRunStatusResult::from(current)).unwrap();

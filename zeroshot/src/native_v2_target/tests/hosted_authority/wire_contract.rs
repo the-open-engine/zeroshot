@@ -50,9 +50,7 @@ async fn wire_contract_mismatch_stops_submission_and_observation_at_http_discove
         let error = backend
             .run_status(
                 Some(&target.name),
-                RunStatusParams {
-                    run_id: RunId::new("active"),
-                },
+                RunStatusParams::new(RunId::new("active")),
             )
             .await
             .err()
@@ -68,6 +66,7 @@ async fn wire_contract_mismatch_stops_submission_and_observation_at_http_discove
             .run_watch(
                 Some(&target.name),
                 RunWatchParams {
+                    part_id: None,
                     run_id: RunId::new("active"),
                     from_cursor: None,
                 },
@@ -156,14 +155,13 @@ async fn produced_observation() -> (serde_json::Value, serde_json::Value, String
         zeroshot_engine::native_v2_observability::NativeV2Observability::new(ledger.clone());
     let active = HostedRunStatusResult::from(
         service
-            .status(RunStatusParams {
-                run_id: run_id.clone(),
-            })
+            .status(RunStatusParams::new(run_id.clone()))
             .await
             .assert_value(),
     );
     let (_, mut watch) = service
         .watch(RunWatchParams {
+            part_id: None,
             run_id: run_id.clone(),
             from_cursor: None,
         })
@@ -220,9 +218,7 @@ async fn produced_observation() -> (serde_json::Value, serde_json::Value, String
         .assert_value();
     let finished = HostedRunStatusResult::from(
         service
-            .status(RunStatusParams {
-                run_id: finished_id,
-            })
+            .status(RunStatusParams::new(finished_id))
             .await
             .assert_value(),
     );
@@ -238,7 +234,7 @@ async fn produced_observation() -> (serde_json::Value, serde_json::Value, String
         .assert_value();
     let pending = HostedRunStatusResult::from(
         service
-            .status(RunStatusParams { run_id: pending_id })
+            .status(RunStatusParams::new(pending_id))
             .await
             .assert_value(),
     );
@@ -279,7 +275,15 @@ async fn matching_hosted_wire_contract_preserves_producer_status_mixed_list_and_
             }
             "/native-v2/runs/active" => status.to_string(),
             "/native-v2/runs" => list.to_string(),
-            "/native-v2/runs/active/watch" => return ("200 OK", stream.clone()),
+            "/native-v2/runs/active/watch?from_cursor=cloud%3A7" => {
+                return ("200 OK", stream.clone());
+            }
+            "/native-v2/runs/active?partId=active" => status.to_string(),
+            "/native-v2/runs/active/logs?partId=active" => return ("200 OK", String::new()),
+            "/native-v2/runs/active/force" => {
+                assert_eq!(request.body, r#"{"partId":"active"}"#);
+                status.to_string()
+            }
             path => panic!("unexpected hosted request: {path}"),
         };
         ("200 OK", body)
@@ -292,31 +296,60 @@ async fn matching_hosted_wire_contract_preserves_producer_status_mixed_list_and_
         .set(&target.id, "refresh-0")
         .await
         .assert_value();
-    let status = authority
-        .hosted_run_status(
-            &target,
-            RunStatusParams {
-                run_id: RunId::new("active"),
-            },
-        )
+    let registry = MemoryRegistry::default();
+    registry.insert(target).assert_value();
+    let dialer = FakeDialer::default();
+    let backend = zeroshot_engine::native_v2_cli::oecp::NamedTargetCliBackend::new(
+        NativeV2TargetConnector::new(registry, authority, dialer.clone()),
+    );
+    let status = backend
+        .run_status(Some("prod"), RunStatusParams::new(RunId::new("active")))
         .await
         .assert_value();
     assert_eq!(serde_json::to_value(status).assert_value(), expected_status);
-    let list = authority
-        .hosted_run_list(&target, RunListParams::default())
+    let list = backend
+        .run_list(Some("prod"), RunListParams::default())
         .await
         .assert_value();
     assert_eq!(serde_json::to_value(list).assert_value(), expected_list);
-    let mut watch = authority
-        .hosted_run_watch(
-            &target,
+    let mut watch = backend
+        .run_watch(
+            Some("prod"),
             RunWatchParams {
+                part_id: None,
                 run_id: RunId::new("active"),
-                from_cursor: None,
+                from_cursor: Some(openengine_cluster_protocol::Cursor::new("cloud:7")),
             },
         )
         .await
         .assert_value();
+    let selected = RunStatusParams {
+        run_id: RunId::new("active"),
+        part_id: Some(RunId::new("active")),
+    };
+    backend
+        .run_logs(
+            Some("prod"),
+            openengine_cluster_protocol::RunLogsParams {
+                run_id: selected.run_id.clone(),
+                part_id: selected.part_id.clone(),
+                from_cursor: None,
+                execution: None,
+            },
+        )
+        .await
+        .assert_value();
+    backend
+        .run_force(
+            Some("prod"),
+            openengine_cluster_protocol::RunForceParams {
+                run_id: selected.run_id,
+                part_id: selected.part_id,
+            },
+        )
+        .await
+        .assert_value();
+    assert!(dialer.sessions.lock().assert_value().is_empty());
     let mut active_seen = false;
     let mut finished_seen = false;
     let mut index = 0;

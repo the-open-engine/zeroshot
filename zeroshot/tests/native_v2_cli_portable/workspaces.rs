@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 fn receipt(output: &Output) -> String {
     success(output);
-    serde_json::from_slice::<Value>(&output.stdout).unwrap()["runId"]
+    serde_json::from_slice::<Value>(&output.stdout).unwrap()["currentPartId"]
         .as_str()
         .unwrap()
         .into()
@@ -52,18 +52,39 @@ fn workspace_artifacts_follow_placement_and_survive_managed_cleanup() {
         graph["root"]["children"][1]["otherwise"]["artifacts"] =
             json!({"result":{"kind":"literal","path":"mutation.txt"}});
         fixture.write("graph.json", &graph);
-        let mut command = fixture.run_command("finish", true);
+        let mut command = fixture.run_command("fail", true);
         command.arg("--workspace");
         if managed {
             command.arg("--copy-workspace");
         }
         let id = receipt(&command.output().unwrap());
+        let failed = settled(&fixture, &id, "finished");
+        assert_eq!(failed["status"]["terminalResult"]["status"], "failed");
+        let resumed = fixture
+            .command(&["resume", &id])
+            .env("FIXTURE_MODE", "finish")
+            .output()
+            .unwrap();
+        let part = receipt(&resumed);
+        let submitted: Value = serde_json::from_slice(&resumed.stdout).unwrap();
+        assert_eq!(submitted["runId"], id);
+        assert_ne!(part, id);
         let status = settled(&fixture, &id, "finished");
+        assert_eq!(status["runId"], id);
+        assert_eq!(status["partId"], part);
+        assert_eq!(status["currentPartId"], part);
         assert_eq!(
             status["status"]["terminalResult"]["status"], "succeeded",
             "{status}"
         );
+        let exact = fixture.json(&["status", &id, "--part", &part]);
+        assert_eq!(exact["runId"], id);
+        assert_eq!(exact["workspace"], status["workspace"]);
         let artifact = &status["status"]["metadata"]["artifacts"]["result"];
+        assert_eq!(
+            exact["status"]["metadata"]["artifacts"]["result"],
+            *artifact
+        );
         if managed {
             assert_eq!(artifact["kind"], "managed", "{status}");
             let copy = Path::new(status["workspace"]["localDirectory"].as_str().unwrap());
@@ -71,7 +92,7 @@ fn workspace_artifacts_follow_placement_and_survive_managed_cleanup() {
             assert!(!fixture.workspace.join("mutation.txt").exists());
             let downloaded = fixture.root.path("captured-result");
             let address = &artifact["address"];
-            assert_eq!(address["scope"]["runId"], id);
+            assert_eq!(address["scope"]["runId"], part);
             success(
                 &fixture
                     .command(&[
@@ -80,7 +101,7 @@ fn workspace_artifacts_follow_placement_and_survive_managed_cleanup() {
                         address["path"].as_str().unwrap(),
                         downloaded.to_str().unwrap(),
                         "--run",
-                        &id,
+                        &part,
                     ])
                     .output()
                     .unwrap(),

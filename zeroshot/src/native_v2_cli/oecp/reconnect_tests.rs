@@ -100,8 +100,7 @@ fn outage_backend(
         let request: Value = serde_json::from_str(&request).assert_value();
         let mut result = json!({"subscriptionId":"first","runId":"run-contract","atCursor":"v2:0"});
         if command == "attach" {
-            result =
-                json!({"subscriptionId":"first","runId":"run-contract","execution":"worker-1"});
+            result = json!({"subscriptionId":"first","partId":"run-contract","runId":"run-contract","execution":"worker-1"});
         }
         let response = json!({"jsonrpc":"2.0","id":request["id"],"result":result});
         write
@@ -111,16 +110,18 @@ fn outage_backend(
         let mut event = match command.as_str() {
             "watch" => serde_json::to_value(status("admitted")).assert_value(),
             "logs" => json!({
-                "runId":"run-contract", "timestamp":1725000000123_u64,
+                "partId":"run-contract","runId":"run-contract", "timestamp":1725000000123_u64,
                 "record":{"level":"info","target":"agent","message":"before disconnect"}
             }),
             "attach" => json!({
-                "runId":"run-contract","execution":"worker-1",
+                "partId":"run-contract","runId":"run-contract","execution":"worker-1",
                 "event":{"type":"output","text":"before disconnect"}
             }),
             _ => unreachable!(),
         };
-        event.as_object_mut().assert_value().remove("atCursor");
+        let fields = event.as_object_mut().assert_value();
+        fields.remove("atCursor");
+        fields.remove("currentPartId");
         event["subscriptionId"] = json!("first");
         if command != "attach" {
             event["cursor"] = json!("v2:1");
@@ -143,6 +144,7 @@ fn outage_backend(
         NamedTargetCliBackend::new(StubConnector {
             transport: transport.clone(),
             hosted_status: None,
+            status_reads: Mutex::default(),
         }),
         transport,
     )

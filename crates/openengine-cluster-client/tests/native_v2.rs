@@ -10,12 +10,12 @@ use support::{AssertValue, RecordingTransport};
 
 fn response(method: &str) -> Value {
     [
-        ("run/submit", json!({"runId":"run-1"})),
+        ("run/submit", json!({"runId":"run-1","currentPartId":"run-1"})),
         ("run/list", json!({"runs":[]})),
         (
             "run/status",
             json!({
-                "runId":"run-1","title":"Protocol client test",
+                "runId":"run-1","partId":"run-1","currentPartId":"run-1","title":"Protocol client test",
                 "source":{
                     "repository":"open-engine/zeroshot","branch":"main",
                     "revision":"0123456789abcdef0123456789abcdef01234567"
@@ -26,7 +26,7 @@ fn response(method: &str) -> Value {
         (
             "run/force",
             json!({
-                "runId":"run-1","title":"Protocol client test",
+                "runId":"run-1","partId":"run-1","currentPartId":"run-1","title":"Protocol client test",
                 "source":{
                     "repository":"open-engine/zeroshot","branch":"main",
                     "revision":"0123456789abcdef0123456789abcdef01234567"
@@ -85,15 +85,11 @@ async fn typed_run_calls_use_the_public_native_v2_method_names() {
             .is_empty()
     );
     client
-        .run_status(RunStatusParams {
-            run_id: RunId::new("run-1"),
-        })
+        .run_status(RunStatusParams::new(RunId::new("run-1")))
         .await
         .assert_value();
     client
-        .run_force(RunForceParams {
-            run_id: RunId::new("run-1"),
-        })
+        .run_force(RunForceParams::new(RunId::new("run-1")))
         .await
         .assert_value();
     assert_eq!(
@@ -119,7 +115,7 @@ async fn ndjson_inbox_show_reads_a_full_request_larger_than_one_mebibyte() {
         let request: Value = serde_json::from_str(&line).assert_value();
         assert_eq!(request["method"], "inbox/show");
         let response = json!({"jsonrpc":"2.0","id":request["id"],"result":{
-            "runId":"run-1","node":"approval","createdAt":1000,"state":"pending",
+            "runId":"run-1","partId":"run-1","node":"approval","createdAt":1000,"state":"pending",
             "request":{"id":"question","text":"x".repeat(1024 * 1024 - 1024),
                 "signals":{"decision":["approved","rejected"]},"expiresAt":2000,
                 "output":{"kind":"record","fields":{"selection":{"required":true,"type":{"kind":"enum","values":labels}}}}}
@@ -134,9 +130,7 @@ async fn ndjson_inbox_show_reads_a_full_request_larger_than_one_mebibyte() {
     });
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        client.inbox_show(RunStatusParams {
-            run_id: RunId::new("run-1"),
-        }),
+        client.inbox_show(RunStatusParams::new(RunId::new("run-1"))),
     )
     .await
     .assert_value();
@@ -171,7 +165,9 @@ async fn ndjson_run_inventory_above_one_frame_preserves_other_pending_calls() {
                 let runs: Vec<_> = (0..5)
                     .map(|index| {
                         let mut row = status.clone();
-                        row["runId"] = json!(format!("run-{index}"));
+                        for key in ["runId", "partId", "currentPartId"] {
+                            row[key] = json!(format!("run-{index}"));
+                        }
                         row
                     })
                     .collect();
@@ -196,9 +192,7 @@ async fn ndjson_run_inventory_above_one_frame_preserves_other_pending_calls() {
     let (listed, status) = tokio::time::timeout(std::time::Duration::from_secs(15), async {
         tokio::join!(
             client.run_list(RunListParams::default()),
-            client.run_status(RunStatusParams {
-                run_id: RunId::new("run-1")
-            })
+            client.run_status(RunStatusParams::new(RunId::new("run-1")))
         )
     })
     .await
@@ -233,7 +227,9 @@ async fn websocket_run_inventory_above_default_wire_limits_preserves_other_pendi
                 let runs: Vec<_> = (0..96)
                     .map(|index| {
                         let mut status = response("run/status");
-                        status["runId"] = json!(format!("run-{index}"));
+                        for key in ["runId", "partId", "currentPartId"] {
+                            status[key] = json!(format!("run-{index}"));
+                        }
                         status["status"] = json!({"phase":"suspended","reason":"request",
                             "node":"approval","createdAt":1000,"metadata":{},
                             "request":{"id":format!("question-{index}"),"text":"x".repeat(750_000),
@@ -264,9 +260,7 @@ async fn websocket_run_inventory_above_default_wire_limits_preserves_other_pendi
     let (listed, status) = tokio::time::timeout(std::time::Duration::from_secs(60), async {
         tokio::join!(
             client.run_list(RunListParams::default()),
-            client.run_status(RunStatusParams {
-                run_id: RunId::new("run-1")
-            })
+            client.run_status(RunStatusParams::new(RunId::new("run-1")))
         )
     })
     .await

@@ -1,4 +1,4 @@
-//! Immutable v16.0.0 initialization controls. No released Rust source is copied or modified.
+//! Immutable v17.1.1 initialization controls. No released Rust source is copied or modified.
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -10,24 +10,28 @@ mod tests {
 
     fn rejected(error: released_client::ClientError) {
         let released_client::ClientError::Rpc(error) = error else {
-            panic!("initialization must fail before timing payload decoding: {error}");
+            panic!("initialization must fail before run payload decoding: {error}");
         };
-        assert_eq!(error.message, "Unsupported protocol version");
+        assert!(
+            error
+                .message
+                .contains("upgrade the Zeroshot client and server together")
+        );
         assert_eq!(error.code, released_protocol::APPLICATION_ERROR);
         let data = error.data.expect("domain error");
         assert_eq!(data.code, "UNSUPPORTED_PROTOCOL_VERSION");
         assert_eq!(
             data.details,
             Some(json!({
-                "requestedProtocolVersion": "openengine.cluster/v1",
+                "requestedProtocolVersion": "openengine.cluster/v2",
                 "supportedProtocolVersion": PROTOCOL_VERSION,
             }))
         );
     }
 
     #[tokio::test]
-    async fn exact_v16_client_is_rejected_at_ndjson_and_websocket_initialization() {
-        assert_eq!(released_protocol::PROTOCOL_VERSION, "openengine.cluster/v1");
+    async fn released_client_is_rejected_at_ndjson_and_websocket_initialization() {
+        assert_eq!(released_protocol::PROTOCOL_VERSION, "openengine.cluster/v2");
         let backend = || {
             FixtureBackend::new(Arc::new(FixtureStore::new(
                 RunId::new("unused"),
@@ -38,31 +42,24 @@ mod tests {
         let (write, read, server) = current::spawn_ndjson(backend());
         let transport = released_client::NdjsonTransport::new(read, write);
         let client = released_client::ClusterClient::new(&transport);
-        // The released client propagates initialization failure before the first observe call.
-        let result = async {
-            client.initialize().await?;
+        rejected(
             client
-                .run_list(released_protocol::RunListParams::default())
-                .await?;
-            Ok::<_, released_client::ClientError>(())
-        }
-        .await;
-        rejected(result.expect_err("incompatible released client"));
+                .initialize()
+                .await
+                .expect_err("incompatible released client"),
+        );
         drop(transport);
         current::await_ndjson_shutdown(server).await;
 
         let (socket, server) = current::spawn_websocket(backend()).await;
         let transport = released_client::WebSocketTransport::new(socket);
         let client = released_client::ClusterClient::new(&transport);
-        let result = async {
-            client.initialize().await?;
+        rejected(
             client
-                .run_list(released_protocol::RunListParams::default())
-                .await?;
-            Ok::<_, released_client::ClientError>(())
-        }
-        .await;
-        rejected(result.expect_err("incompatible released client"));
+                .initialize()
+                .await
+                .expect_err("incompatible released client"),
+        );
         drop(transport);
         current::await_websocket_shutdown(server).await;
     }
@@ -82,7 +79,7 @@ mod tests {
             data.details,
             Some(json!({
                 "requestedProtocolVersion": PROTOCOL_VERSION,
-                "supportedProtocolVersion": "openengine.cluster/v1",
+                "supportedProtocolVersion": "openengine.cluster/v2",
             }))
         );
     }
@@ -117,7 +114,27 @@ mod tests {
         drop(transport);
         old::await_websocket_shutdown(server).await;
     }
-}
 
-#[cfg(test)]
-mod producer;
+    #[test]
+    fn released_continuation_record_reads_with_its_original_identity() {
+        let prior = released_protocol::RunVector {
+            id: released_protocol::VectorId::new("continuation-1").unwrap(),
+            run_id: released_protocol::RunId::new("successor"),
+            created_at: released_protocol::UnixTimestampMillis::new(42).unwrap(),
+            content: released_protocol::RunVectorContent::Continuation {
+                resumed_from: released_protocol::RunId::new("root"),
+            },
+        };
+        let stored = serde_json::to_value(prior).unwrap();
+        let current: openengine_cluster_protocol::RunVector =
+            serde_json::from_value(stored.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&current).unwrap(), stored);
+        assert!(matches!(
+            current.content,
+            openengine_cluster_protocol::RunVectorContent::Continuation {
+                checkpoint_id: None,
+                ..
+            }
+        ));
+    }
+}

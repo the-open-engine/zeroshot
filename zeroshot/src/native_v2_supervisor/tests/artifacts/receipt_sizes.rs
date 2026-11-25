@@ -230,9 +230,9 @@ async fn publication_size_boundary_replays_and_oversized_sets_cannot_poison_prod
                 assert_eq!(snapshot.phase, RunPhase::Suspended);
                 assert_eq!(
                     controller
-                        .inbox_show(openengine_cluster_protocol::InboxShowParams {
-                            run_id: id.clone()
-                        })
+                        .inbox_show(openengine_cluster_protocol::InboxShowParams::new(
+                            id.clone()
+                        ))
                         .await
                         .unwrap()
                         .request

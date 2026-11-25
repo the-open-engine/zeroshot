@@ -177,7 +177,7 @@ async fn restic_restores_redact_the_successor_bootstrap_credentials() {
     // Workspace restore now succeeds; the independent conversation extraction fails instead.
     fs::write(fixture.root.path("fail-operation"), "conversations").assert_value();
     let resumed = fixture.json(&resume, "fail").await;
-    let successor = resumed["runId"].as_str().assert_value();
+    let successor = resumed["currentPartId"].as_str().assert_value();
     fixture
         .wait_terminal(successor, "fail", "worker_failed")
         .await;

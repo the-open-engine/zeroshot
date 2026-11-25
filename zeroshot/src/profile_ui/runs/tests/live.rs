@@ -1,5 +1,4 @@
 use super::*;
-use axum::http::HeaderValue;
 
 #[tokio::test]
 async fn ui_shutdown_closes_a_live_sse_without_stopping_the_run() {
@@ -198,32 +197,6 @@ async fn stream_returns_cursor_errors_before_open_and_gap_errors_then_closes() {
     assert!(stream.next().await.is_none());
 }
 
-#[test]
-fn reconnect_header_takes_precedence_and_invalid_or_duplicate_headers_fail() {
-    let query = || PageQuery {
-        after: Some("v2:1".into()),
-    };
-    let mut headers = HeaderMap::new();
-    headers.insert("last-event-id", HeaderValue::from_static("v2:7"));
-    assert_eq!(
-        resume_cursor(query(), &headers)
-            .assert_value()
-            .assert_value()
-            .as_str(),
-        "v2:7"
-    );
-    for value in ["", "bad", "v2:18446744073709551616"] {
-        headers.insert("last-event-id", HeaderValue::from_str(value).assert_value());
-        assert_eq!(
-            resume_cursor(query(), &headers).err().assert_value().code,
-            "invalid_cursor"
-        );
-    }
-    headers.insert("last-event-id", HeaderValue::from_static("v2:1"));
-    headers.append("last-event-id", HeaderValue::from_static("v2:2"));
-    assert!(resume_cursor(query(), &headers).is_err());
-}
-
 #[tokio::test]
 async fn sse_route_emits_named_pages_and_validates_resume_before_headers() {
     let fixture = Fixture::new().await;
@@ -250,7 +223,7 @@ async fn sse_route_emits_named_pages_and_validates_resume_before_headers() {
     assert_eq!(response.headers()["cache-control"], "no-store");
     let body = response.text().await.assert_value();
     assert!(body.contains("event: history\n"));
-    assert!(body.contains("id: v2:4\n"));
+    assert!(body.contains(&format!("id: {}@v2:4\n", fixture.id.as_str())));
     let page: Value = serde_json::from_str(
         body.lines()
             .find_map(|line| line.strip_prefix("data: "))

@@ -13,11 +13,19 @@ Clients and targets must implement the same current wire contract. OECP initiali
 observation requires `zeroshot.hosted-runs/v3`. These are wire identifiers, independent of package
 versions. The discovery URL, HTTP routes and JSON-RPC method names are unchanged.
 
-An incompatible client or target stops at discovery or initialization, before submitting or
-observing a run. Upgrade the Zeroshot client and target together to releases implementing these
-identifiers. Hosted gateway operators must update the gateway's discovery and protocol dependencies
-as part of the same rollout. An incompatibility is final for that operation: submissions are not
-automatically retried. Existing runs keep executing and compatible clients can observe them.
+Upgrade Zeroshot clients (including Python wheels), targets and hosted gateways together to
+releases implementing these wire identifiers. Gateway operators must update discovery and protocol
+dependencies in the same rollout. Incompatibility stops the operation before submission or
+observation, without automatic submission retries; existing runs continue executing.
+
+Run status returns the original `runId`, the selected `partId` and `currentPartId`.
+Resume includes the observed `partId` and the proposed `successorPartId`. A stale source
+returns `RUN_CONFLICT` with the current part ID. Log and watch cursors include the
+originating part and can be passed back unchanged.
+
+Hosted run routes use `zeroshot.hosted-runs/v3` for status, watch, logs and force in every phase.
+For attach and steer, the CLI opens an OECP session scoped to the selected physical part.
+A guarded steer must still address the current part when the host accepts it.
 
 Active execution `startedAt` and watch notification `recordedAt` are Unix
 milliseconds when known. Python users upgrade the native client by upgrading the

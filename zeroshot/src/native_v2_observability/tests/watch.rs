@@ -36,6 +36,7 @@ async fn usage_is_hidden_during_execution_and_reported_only_at_terminal() {
     let service = NativeV2Observability::new(ledger.clone());
     let (_, mut watch) = service
         .watch(RunWatchParams {
+            part_id: None,
             run_id: run_id.clone(),
             from_cursor: Some(Cursor::new("v2:2")),
         })
@@ -65,6 +66,7 @@ async fn durable_watch_resumes_exclusively_without_gaps_or_duplicates() {
 
     let (_, mut watch) = service
         .watch(RunWatchParams {
+            part_id: None,
             run_id: run_id.clone(),
             from_cursor: Some(Cursor::new("v2:1")),
         })
@@ -77,6 +79,7 @@ async fn durable_watch_resumes_exclusively_without_gaps_or_duplicates() {
     drop(watch);
     let (_, mut resumed_watch) = service
         .watch(RunWatchParams {
+            part_id: None,
             run_id: run_id.clone(),
             from_cursor: Some(saved_watch_cursor),
         })

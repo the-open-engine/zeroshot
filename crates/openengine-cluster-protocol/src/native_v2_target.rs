@@ -376,6 +376,8 @@ fn redacted(secret: &Option<String>) -> Option<&'static str> {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct TargetRunReceipt {
     pub run_id: RunId,
+    /// Physical identity of the current part of the run.
+    pub current_part_id: RunId,
 }
 
 /// One bounded, sanitized platform diagnostic retained outside public run observation.

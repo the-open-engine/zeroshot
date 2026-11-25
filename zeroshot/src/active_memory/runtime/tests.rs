@@ -850,6 +850,7 @@ async fn steer_whole_text_precedes_memory_without_spending_either_injection_limi
         RunSteerParams {
             node: None,
             mode: Default::default(),
+            part_id: None,
             run_id: run,
             text: text.clone(),
         },

@@ -99,7 +99,7 @@ Local `teardown` runs once per attempt after environment preparation begins. It 
 success, setup or startup failure, graph failure, force-stop, and suspension. It gets a separate
 60-second deadline, and a failure is reported in the run logs while preserving the original result.
 A controller crash or machine loss can interrupt cleanup. On resume, the new attempt reuses the
-saved scripts with a new run ID and reruns setup and startup.
+saved scripts in a fresh part of the same run and reruns setup and startup.
 
 Docker Compose resources belong to the Docker daemon. To clean up a disposable stack, use the same
 per-run project name in both hooks:

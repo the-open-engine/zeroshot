@@ -1,6 +1,7 @@
 {
   "event": {
     "cursor": "v2:8",
+    "partId": "run-1",
     "recordedAt": 1725000000999,
     "runId": "run-1",
     "size": "medium",

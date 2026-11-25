@@ -274,12 +274,18 @@ the same preflight as the CLI.
 
 The [Python API reference](../reference/python.md) documents the public client surface.
 
-`await run.suspend()` returns the current status immediately; `await run.resume()` returns the
-successor's `Run` handle. `run.watch()` ends at suspension. `Run.wait()` and `Client.run()` raise
-`RunSuspendedError`, carrying `run` and `status`, when an attempt suspends. Status and summaries
-expose `suspend_requested`, `reason`, `node`, `created_at` and `due_at`. Read the ordered record
-with `await run.vectors(after=None, limit=50)` (`RunVectorsPage.vectors`, `next_after`) and read a
-complete entry with `await run.vector(id)`. These methods use the client's selected target.
+A logical run keeps its `Run.id` through every answer, resume, and checkpoint retry.
+`await run.status()` reports the current part. To inspect an earlier part, use
+`client.get_run(run.id, part_id=part_id)`. Its status reports the selected `part_id` and the
+latest `current_part_id`. Status events, logs, and vector entries identify their originating part.
+`run.watch()` returns at a suspension. Use `run.watch(follow=True)` to follow the run across handoffs. Reconnect with the last cursor from that
+stream. `Run.wait()` and `Client.run()` raise `RunSuspendedError` with the handle and status when
+the current part suspends. `await run.suspend()` returns the status immediately.
+`await run.resume(part_id=status.part_id)` requires that part to still be current. Its returned
+handle has the same `id` and a new `current_part_id`.
+
+Read the ordered vector record with `await run.vectors(after=None, limit=50)` and a complete
+entry with `await run.vector(id)`. Both use the client's selected target.
 
 `await run.discard_workspace()` returns whether retained data was deleted. For a finished local
 run it frees the recovery lineage's checkpoints, including those of failed runs, while keeping
@@ -290,10 +296,21 @@ workspace discard behavior.
 ## Answer a human request
 
 `await client.inbox(after=None, limit=50)` returns an `InboxPage` with requests and `next_after`.
-`await run.request()` returns the run's own `InboxRequest`, including text, declared signals/output,
-deadline, state and successor. `await run.answer({"signals": {"decision": "approved"}, "output":
-{"feedback": ""}})` returns the successor `Run`. `RunStatus.request` carries the human request.
-All methods use the client's local or named target arguments; named targets need
+`question = await run.request()` reads the question, its answer contract, deadline, state,
+and `successor_part_id`. Keep `question.part_id` when displaying a question to someone.
+Pass it back with the answer so that a delayed response cannot answer a later question.
+
+```python
+async def approve(run, question):
+    continued = await run.answer(
+        {"signals": {"decision": "approved"}, "output": {"feedback": ""}},
+        part_id=question.part_id,
+    )
+    assert continued.id == run.id
+    return continued
+```
+
+`RunStatus.request` also carries the human request when suspended. Named targets need
 `openengine.request-ask/v1`. Answers follow resume's credential and forwarding rules.
 Invalid, repeated and late answers raise the existing CLI command error with its message. A late
 answer still starts the `timeout` successor. Deadlines default to 7 days and have a 30-day maximum;

@@ -297,9 +297,7 @@ pub(super) async fn wait_for_terminal(
             let status = ClusterBackend::run_status(
                 controller,
                 &ConnectionContext::default(),
-                RunStatusParams {
-                    run_id: run_id.clone(),
-                },
+                RunStatusParams::new(run_id.clone()),
             )
             .await
             .assert_value_with("OECP status");

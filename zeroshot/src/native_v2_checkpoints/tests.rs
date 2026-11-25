@@ -81,6 +81,7 @@ impl Fixture {
         list(
             &self.directory,
             RunCheckpointsParams {
+                part_id: None,
                 run_id: RunId::new("checkpoint-store-tests"),
                 after: None,
                 limit: None,
@@ -184,6 +185,7 @@ async fn catalog_pages_exclusively_and_rejects_invalid_or_unknown_cursors() {
         catalog::list(
             &fixture.directory,
             RunCheckpointsParams {
+                part_id: None,
                 run_id: run_id.clone(),
                 after: None,
                 limit: Some(0),
@@ -198,6 +200,7 @@ async fn catalog_pages_exclusively_and_rejects_invalid_or_unknown_cursors() {
     let first_page = catalog::list(
         &fixture.directory,
         RunCheckpointsParams {
+            part_id: None,
             run_id: run_id.clone(),
             after: None,
             limit: Some(1),
@@ -210,6 +213,7 @@ async fn catalog_pages_exclusively_and_rejects_invalid_or_unknown_cursors() {
     let tail = catalog::list(
         &fixture.directory,
         RunCheckpointsParams {
+            part_id: None,
             run_id: run_id.clone(),
             after: first_page.next_after,
             limit: Some(100),
@@ -223,6 +227,7 @@ async fn catalog_pages_exclusively_and_rejects_invalid_or_unknown_cursors() {
     let error = catalog::list(
         &fixture.directory,
         RunCheckpointsParams {
+            part_id: None,
             run_id: RunId::new("checkpoint-pages"),
             after: Some(CheckpointId::new("unknown-checkpoint").assert_value()),
             limit: Some(1),
@@ -276,6 +281,7 @@ async fn catalog_rejects_tampered_point_identity_and_format_and_malformed_metada
         catalog::list(
             &fixture.directory,
             RunCheckpointsParams {
+                part_id: None,
                 run_id: RunId::new("malformed-catalog"),
                 after: None,
                 limit: None,
@@ -348,6 +354,7 @@ async fn restore_stages_beside_a_workspace_on_another_filesystem() {
     let point = list(
         &directory,
         RunCheckpointsParams {
+            part_id: None,
             run_id: RunId::new("cross-filesystem"),
             after: None,
             limit: None,
@@ -728,6 +735,7 @@ async fn real_restic_deduplicates_incremental_stages_and_restores_the_latest_byt
     let points = list(
         &directory,
         RunCheckpointsParams {
+            part_id: None,
             run_id: RunId::new("real-restic-test"),
             after: None,
             limit: None,

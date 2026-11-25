@@ -14,6 +14,7 @@ async fn attach_is_live_only_read_only_and_disconnect_does_not_cancel() {
     let (_, mut historical) = fixture
         .service
         .logs(RunLogsParams {
+            part_id: None,
             run_id: fixture.run_id.clone(),
             from_cursor: Some(Cursor::new("v2:2")),
             execution: Some(fixture.registration.public_execution().clone()),

@@ -207,7 +207,7 @@ pub(super) fn authority_response(
 fn hosted_run_response(request: &CapturedHttpRequest) -> Option<String> {
     let queued = || {
         json!({
-            "runId": "run-hosted",
+            "runId": "run-hosted", "partId": "run-hosted", "currentPartId": "run-hosted",
             "title": "Hosted queue test",
             "source": source(),
             "size": "medium",
@@ -223,7 +223,7 @@ fn hosted_run_response(request: &CapturedHttpRequest) -> Option<String> {
                 "type": "event",
                 "event": {
                     "subscriptionId": "watch-1",
-                    "runId": "run-hosted",
+                    "runId": "run-hosted", "partId": "run-hosted",
                     "title": "Hosted queue test",
                     "source": source(),
                     "size": "medium",
@@ -240,7 +240,7 @@ fn hosted_run_response(request: &CapturedHttpRequest) -> Option<String> {
                 "type": "event",
                 "event": {
                     "subscriptionId": "watch-2",
-                    "runId": "run-hosted",
+                    "runId": "run-hosted", "partId": "run-hosted",
                     "title": "Hosted queue test",
                     "source": source(),
                     "size": "medium",
@@ -253,7 +253,7 @@ fn hosted_run_response(request: &CapturedHttpRequest) -> Option<String> {
             }),
             json!({"type": "closed", "reason": "done"})
         )),
-        ("GET", "/native-v2/runs/run-hosted/logs") => {
+        ("GET", "/native-v2/runs/run-hosted/logs?partId=run-hosted") => {
             Some(format!("{}\n", json!({"type": "closed", "reason": "done"})))
         }
         ("GET", "/native-v2/runs/run-hosted/logs?from_cursor=v2%3A2&execution=worker%2F1") => {
@@ -263,7 +263,7 @@ fn hosted_run_response(request: &CapturedHttpRequest) -> Option<String> {
                     "type": "event",
                     "event": {
                         "subscriptionId": "logs-1",
-                        "runId": "run-hosted",
+                        "runId": "run-hosted", "partId": "run-hosted",
                         "cursor": "v2:4",
                         "timestamp": 1_725_000_000_123_u64,
                         "execution": "worker/1",
@@ -302,7 +302,7 @@ fn controller_response(
             if request.authorization.as_deref() == Some("Bearer user-machine-key") { "user" } else { "org" }
         }).to_string()),
         ("POST", "/native-v2/run") => {
-            Some(r#"{"runId":"018f5e78-7f95-7c22-8d98-3f15af20c991"}"#.to_owned())
+            Some(r#"{"runId":"018f5e78-7f95-7c22-8d98-3f15af20c991","currentPartId":"018f5e78-7f95-7c22-8d98-3f15af20c991"}"#.to_owned())
         }
         ("POST", "/native-v2/oecp-session") => Some(format!(
             r#"{{"endpoint":"ws://{address}/native-v2/oecp","bearerToken":"oecp-session-token"}}"#
