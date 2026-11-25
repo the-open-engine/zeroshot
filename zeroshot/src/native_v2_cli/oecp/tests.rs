@@ -18,6 +18,8 @@ use super::*;
 
 #[path = "reconnect_tests.rs"]
 mod reconnect_tests;
+#[path = "steering_command_tests.rs"]
+mod steering_command_tests;
 
 struct FailingTransport {
     requests: Arc<Mutex<Vec<Value>>>,
@@ -70,6 +72,7 @@ impl SubscriptionTransport for FailingTransport {
 struct StubConnector<T = FailingTransport> {
     transport: Arc<T>,
     hosted_status: Option<CliRunStatusResult>,
+    status_reads: Mutex<Vec<(String, RunStatusParams)>>,
 }
 
 impl StubConnector {
@@ -79,6 +82,7 @@ impl StubConnector {
                 requests: Arc::new(Mutex::new(Vec::new())),
             }),
             hosted_status,
+            status_reads: Mutex::default(),
         }
     }
 }
@@ -192,9 +196,13 @@ where
 
     async fn hosted_run_status(
         &self,
-        _name: &str,
-        _params: RunStatusParams,
+        name: &str,
+        params: RunStatusParams,
     ) -> Result<Option<CliRunStatusResult>, NativeV2CliError> {
+        self.status_reads
+            .lock()
+            .assert_value()
+            .push((name.into(), params));
         Ok(self.hosted_status.clone())
     }
 

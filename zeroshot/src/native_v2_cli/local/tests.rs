@@ -1491,3 +1491,6 @@ async fn local_controller_readiness_reports_exit_and_deadline() {
 
 #[path = "startup_tests.rs"]
 mod startup_tests;
+
+#[path = "stream_tests.rs"]
+mod stream_tests;

@@ -331,3 +331,78 @@ async fn assert_logical_run(
     assert_eq!(original.current_part_id, other_run_id());
     assert_eq!(original.part_id, *root);
 }
+
+#[tokio::test]
+async fn an_earlier_question_bookmark_finds_the_new_question_and_keeps_both_vector_addresses() {
+    use openengine_cluster_protocol::{RunVectorParams, RunVectorsParams};
+
+    let ledger = Arc::new(FakeRunLedger::new());
+    let root = seed(&ledger, 1, false).await;
+    let child = seed(&ledger, 2, false).await;
+    let unrelated = seed(&ledger, 3, false).await;
+    let allocator = Arc::new(RequestAllocator::default());
+    allocator
+        .claims
+        .lock()
+        .assert_value()
+        .insert(root.clone(), child.clone());
+    let factory = Arc::new(RequestFactory { ledger, allocator });
+    let (_, endpoint, server) = direct_test_server(factory).await;
+    let client = connect_client(&endpoint, None).await;
+
+    for alias in [&root, &child] {
+        let latest = client
+            .inbox_show(RunStatusParams::new(alias.clone()))
+            .await
+            .assert_value();
+        assert_eq!((&latest.run_id, &latest.part_id), (&root, &child));
+        assert_eq!(latest.request.id.as_str(), "question-2");
+
+        for part in [&root, &child] {
+            let exact = RunStatusParams {
+                run_id: alias.clone(),
+                part_id: Some(part.clone()),
+            };
+            let question = client.inbox_show(exact).await.assert_value();
+            assert_eq!((&question.run_id, &question.part_id), (&root, part));
+            let vectors = client
+                .run_vectors(RunVectorsParams {
+                    run_id: alias.clone(),
+                    part_id: Some(part.clone()),
+                    after: None,
+                    limit: None,
+                })
+                .await
+                .assert_value();
+            assert_eq!((&vectors.run_id, &vectors.part_id), (&root, part));
+            let recorded = vectors
+                .vectors
+                .iter()
+                .find(|item| item.id == question.request.id)
+                .assert_value();
+            assert_eq!((&recorded.run_id, &recorded.part_id), (&root, part));
+            let event = client
+                .run_vector(RunVectorParams {
+                    run_id: alias.clone(),
+                    part_id: Some(part.clone()),
+                    id: recorded.id.clone(),
+                })
+                .await
+                .assert_value();
+            assert_eq!((&event.run_id, &event.part_id), (&root, part));
+        }
+    }
+    let foreign = RunStatusParams {
+        run_id: root.clone(),
+        part_id: Some(unrelated.clone()),
+    };
+    assert!(client.inbox_show(foreign.clone()).await.is_err());
+    assert!(client.run_status(foreign).await.is_err());
+    let other = client
+        .inbox_show(RunStatusParams::new(unrelated.clone()))
+        .await
+        .assert_value();
+    assert_eq!(other.run_id, unrelated);
+    assert_eq!(other.request.id.as_str(), "question-3");
+    server.abort();
+}

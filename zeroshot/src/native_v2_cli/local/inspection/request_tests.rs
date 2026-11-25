@@ -287,25 +287,56 @@ struct RequestController {
     status: RunStatusResult,
     status_delay: Duration,
     acknowledge: bool,
+    close: Option<SubscriptionCloseReason>,
     entered: tokio::sync::Notify,
 }
 
-struct Quiet;
+struct ControllerStream(Option<SubscriptionCloseReason>);
 
 #[async_trait]
-impl<E: Send> RunSubscriptionSource<E> for Quiet {
+impl<E: Send> RunSubscriptionSource<E> for ControllerStream {
     async fn next(&mut self) -> Option<RunSubscriptionItem<E>> {
+        if let Some(reason) = self.0.take() {
+            return Some(RunSubscriptionItem::Closed { reason });
+        }
         std::future::pending().await
     }
 }
 
 impl RequestController {
-    async fn acknowledgement(&self) -> SubscriptionId {
+    async fn new(
+        fixture: &Fixture,
+        status_delay: Duration,
+        acknowledge: bool,
+        close: Option<SubscriptionCloseReason>,
+    ) -> Arc<Self> {
+        let status = fixture
+            .backend
+            .read_recorded_status(RunStatusParams::new(fixture.id.clone()))
+            .await
+            .unwrap();
+        Arc::new(Self {
+            status,
+            status_delay,
+            acknowledge,
+            close,
+            entered: tokio::sync::Notify::new(),
+        })
+    }
+
+    async fn subscribe<E: Send + 'static, R>(
+        &self,
+        receipt: impl FnOnce(SubscriptionId) -> R,
+    ) -> Result<(R, RunSubscriptionStream<E>), BackendError> {
         self.entered.notify_one();
         if !self.acknowledge {
             std::future::pending::<()>().await;
         }
-        SubscriptionId::new(uuid::Uuid::now_v7().to_string())
+        let id = SubscriptionId::new(uuid::Uuid::now_v7().to_string());
+        Ok((
+            receipt(id),
+            RunSubscriptionStream::new(ControllerStream(self.close)),
+        ))
     }
 }
 
@@ -344,14 +375,12 @@ impl ClusterBackend for RequestController {
         _context: &ConnectionContext,
         params: RunWatchParams,
     ) -> Result<(RunWatchResult, RunWatchEventStream), BackendError> {
-        Ok((
-            RunWatchResult {
-                subscription_id: self.acknowledgement().await,
-                run_id: params.run_id,
-                at_cursor: self.status.at_cursor.clone(),
-            },
-            RunSubscriptionStream::new(Quiet),
-        ))
+        self.subscribe(|subscription_id| RunWatchResult {
+            subscription_id,
+            run_id: params.run_id,
+            at_cursor: self.status.at_cursor.clone(),
+        })
+        .await
     }
 
     async fn run_logs(
@@ -359,14 +388,12 @@ impl ClusterBackend for RequestController {
         _context: &ConnectionContext,
         params: RunLogsParams,
     ) -> Result<(RunLogsResult, RunLogEventStream), BackendError> {
-        Ok((
-            RunLogsResult {
-                subscription_id: self.acknowledgement().await,
-                run_id: params.run_id,
-                at_cursor: self.status.at_cursor.clone(),
-            },
-            RunSubscriptionStream::new(Quiet),
-        ))
+        self.subscribe(|subscription_id| RunLogsResult {
+            subscription_id,
+            run_id: params.run_id,
+            at_cursor: self.status.at_cursor.clone(),
+        })
+        .await
     }
 
     async fn run_attach(
@@ -374,15 +401,13 @@ impl ClusterBackend for RequestController {
         _context: &ConnectionContext,
         params: RunAttachParams,
     ) -> Result<(RunAttachResult, RunAttachEventStream), BackendError> {
-        Ok((
-            RunAttachResult {
-                subscription_id: self.acknowledgement().await,
-                part_id: params.run_id.clone(),
-                run_id: params.run_id,
-                execution: params.execution,
-            },
-            RunSubscriptionStream::new(Quiet),
-        ))
+        self.subscribe(|subscription_id| RunAttachResult {
+            subscription_id,
+            part_id: params.run_id.clone(),
+            run_id: params.run_id,
+            execution: params.execution,
+        })
+        .await
     }
 
     async fn run_suspend(
@@ -398,17 +423,7 @@ impl ClusterBackend for RequestController {
 #[tokio::test]
 async fn subscription_acknowledgements_and_suspend_reply_have_a_deadline() {
     let fixture = Fixture::new(false, false).await;
-    let status = fixture
-        .backend
-        .read_recorded_status(RunStatusParams::new(fixture.id.clone()))
-        .await
-        .unwrap();
-    let controller = Arc::new(RequestController {
-        status,
-        status_delay: Duration::ZERO,
-        acknowledge: false,
-        entered: tokio::sync::Notify::new(),
-    });
+    let controller = RequestController::new(&fixture, Duration::ZERO, false, None).await;
     let _endpoint = ServedEndpoint::start(
         &fixture.backend.paths(&fixture.id).unwrap(),
         controller.clone(),
@@ -471,17 +486,8 @@ async fn subscription_acknowledgements_and_suspend_reply_have_a_deadline() {
 #[tokio::test]
 async fn delayed_status_is_current_and_established_streams_can_remain_quiet() {
     let fixture = Fixture::new(false, false).await;
-    let status = fixture
-        .backend
-        .read_recorded_status(RunStatusParams::new(fixture.id.clone()))
-        .await
-        .unwrap();
-    let controller = Arc::new(RequestController {
-        status: status.clone(),
-        status_delay: Duration::from_secs(2),
-        acknowledge: true,
-        entered: tokio::sync::Notify::new(),
-    });
+    let controller = RequestController::new(&fixture, Duration::from_secs(2), true, None).await;
+    let status = controller.status.clone();
     let _endpoint = ServedEndpoint::start(&fixture.backend.paths(&fixture.id).unwrap(), controller);
     let current = fixture
         .backend
@@ -532,4 +538,63 @@ async fn delayed_status_is_current_and_established_streams_can_remain_quiet() {
         .await
         .is_err()
     );
+}
+
+#[tokio::test]
+async fn live_local_subscriptions_preserve_native_close_reasons() {
+    for reason in [
+        SubscriptionCloseReason::SlowConsumer,
+        SubscriptionCloseReason::SourceUnavailable,
+    ] {
+        let fixture = Fixture::new(false, false).await;
+        let backend = &fixture.backend;
+        let controller = RequestController::new(&fixture, Duration::ZERO, true, Some(reason)).await;
+        let _endpoint = ServedEndpoint::start(&backend.paths(&fixture.id).unwrap(), controller);
+        let mut watch = backend
+            .run_watch(
+                None,
+                RunWatchParams {
+                    run_id: fixture.id.clone(),
+                    part_id: None,
+                    from_cursor: None,
+                },
+            )
+            .await
+            .unwrap();
+        let mut logs = backend
+            .run_logs(
+                None,
+                RunLogsParams {
+                    run_id: fixture.id.clone(),
+                    part_id: None,
+                    from_cursor: None,
+                    execution: None,
+                },
+            )
+            .await
+            .unwrap();
+        let mut attach = backend
+            .run_attach(
+                None,
+                RunAttachParams {
+                    run_id: fixture.id,
+                    part_id: None,
+                    execution: fixture.execution,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            watch.next().await.unwrap(),
+            Some(CliSubscriptionItem::Closed { reason })
+        );
+        assert_eq!(
+            logs.next().await.unwrap(),
+            Some(CliSubscriptionItem::Closed { reason })
+        );
+        assert_eq!(
+            attach.next().await.unwrap(),
+            Some(CliSubscriptionItem::Closed { reason })
+        );
+    }
 }

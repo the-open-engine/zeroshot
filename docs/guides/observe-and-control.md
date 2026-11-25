@@ -527,6 +527,9 @@ direction goes to every agent. Node targeting uses human steering authorization 
 combined with `--network`. Both scopes default to `standing`; `--mode once` delivers once per
 matching node instance.
 
+An agent publishing with `--network NAME` uses its execution's exact run part ID as `RUN_ID`.
+If it supplies `--part`, both IDs must match. The execution capability authorizes the publication.
+
 With the default standing mode, every eligible agent conversation, including reviewers, receives each steer
 at its next tool call or in its next prompt, whichever comes first. It cannot revise a tool call
 already issued. At a tool call the steer arrives as a user message of its own on Claude Code,

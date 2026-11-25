@@ -157,7 +157,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   state/credential tampering, external proxies and macOS session detachment plus orphaning require
   stronger isolation. Never treat labels as authority or silently relax an uncertain provenance check.
   Local `steer --network` uses that capability without controller discovery, stamps its origin at
-  the host and refuses foreign runs or human-broadcast escalation. Repeated destinations and
+  the host and refuses foreign runs or human-broadcast escalation. Its run ID addresses the
+  execution's physical part. A supplied `--part` must match before publication. Repeated destinations and
   overlapping memberships deduplicate delivery. Per-message once mode defaults for networks and
   consumes receipts per recipient node instance across fresh conversations and successors; standing
   tracks provider conversations. Human broadcast retains its standing default and precedence.

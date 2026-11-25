@@ -144,6 +144,7 @@ fn outage_backend(
         NamedTargetCliBackend::new(StubConnector {
             transport: transport.clone(),
             hosted_status: None,
+            status_reads: Mutex::default(),
         }),
         transport,
     )

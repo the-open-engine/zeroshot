@@ -19,6 +19,8 @@ struct RequestBackend {
     resolution: Mutex<Option<RequestResolution>>,
     refusal: Option<&'static str>,
     successor: Option<&'static str>,
+    head_parts: Vec<RunId>,
+    status_reads: Mutex<Vec<RunStatusParams>>,
 }
 
 impl RequestBackend {
@@ -43,6 +45,8 @@ impl RequestBackend {
             resolution: Mutex::default(),
             refusal: None,
             successor: None,
+            head_parts: Default::default(),
+            status_reads: Mutex::default(),
         }
     }
 }
@@ -105,12 +109,20 @@ impl NativeV2CliBackend for RequestBackend {
     async fn run_status(
         &self,
         target: Option<&str>,
-        _: RunStatusParams,
+        params: RunStatusParams,
     ) -> Result<CliRunStatusResult, NativeV2CliError> {
         assert_eq!(target, Some("remote"));
+        let mut reads = self.status_reads.lock().expect("status requests");
+        let current = self
+            .head_parts
+            .get(reads.len())
+            .cloned()
+            .unwrap_or_else(|| RunId::new("original"));
+        let selected = params.part_id.clone().unwrap_or_else(|| current.clone());
+        reads.push(params);
         let mut status = serde_json::to_value(&self.suspension).expect("suspension JSON");
         status["phase"] = json!("suspended");
-        let mut status: CliRunStatusResult = serde_json::from_value(json!({"partId":"original","currentPartId":"original","runId":"original", "title":"Request", "size":"host", "atCursor":"v2:1", "status":status})).expect("status");
+        let mut status: CliRunStatusResult = serde_json::from_value(json!({"partId":selected,"currentPartId":current,"runId":"original", "title":"Request", "size":"host", "atCursor":"v2:1", "status":status})).expect("status");
         status.workspace_recovery.successor_run_id = self.successor.map(RunId::new);
         Ok(status)
     }
@@ -341,5 +353,68 @@ async fn default_resume_of_a_request_names_the_successor_before_answer() {
         assert_eq!(message, expected);
         assert!(backend.resumes.lock().expect("resumes").is_empty());
         assert!(output.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn answer_keeps_the_observed_question_part_if_the_head_changes_before_resume() {
+    let file = tempfile::NamedTempFile::new().expect("answer file");
+    std::fs::write(
+        file.path(),
+        r#"{"signals":{"decision":"approved"},"output":{}}"#,
+    )
+    .expect("write answer");
+    for next_head in ["question-part", "new-part"] {
+        let mut backend = RequestBackend::new(false, false);
+        backend.head_parts = [RunId::new("question-part"), RunId::new(next_head)].into();
+        let command = crate::native_v2_cli::parse_native_v2_args(
+            ["answer", "original", "--target", "remote", "--input"]
+                .into_iter()
+                .map(std::ffi::OsString::from)
+                .chain([file.path().as_os_str().to_owned()]),
+        )
+        .expect("answer command");
+        let mut output = Vec::new();
+        let result = execute_native_v2_cli(
+            command,
+            &backend,
+            &mut crate::native_v2_cli::NeverDetach,
+            &mut output,
+        )
+        .await;
+        let reads = backend.status_reads.lock().expect("status reads");
+        assert_eq!(reads.len(), 2);
+        assert_eq!(reads[0], RunStatusParams::new(RunId::new("original")));
+        assert_eq!(reads[1].run_id.as_str(), "original");
+        assert_eq!(
+            reads[1].part_id.as_ref().map(RunId::as_str),
+            Some("question-part")
+        );
+        let resumes = backend.resumes.lock().expect("resume requests");
+        if next_head == "question-part" {
+            assert_eq!(
+                result.expect("single accepted answer"),
+                CliOutcome::Completed
+            );
+            assert_eq!(resumes.len(), 1);
+            assert_eq!(resumes[0].run_id.as_str(), "original");
+            assert_eq!(resumes[0].part_id.as_str(), "question-part");
+            let receipt: serde_json::Value =
+                serde_json::from_slice(&output).expect("answer receipt");
+            assert_eq!(receipt["runId"], "original");
+            assert_eq!(
+                receipt["currentPartId"],
+                resumes[0].successor_run_id.as_str()
+            );
+            assert_eq!(receipt["resumedFromPartId"], "question-part");
+        } else {
+            assert!(
+                matches!(result.expect_err("part changed"), NativeV2CliError::Remote {code,details,..}
+                if code == openengine_cluster_protocol::RUN_CONFLICT && details == Some(json!({"currentPartId":"new-part"})))
+            );
+            assert!(output.is_empty());
+            assert!(resumes.is_empty());
+            assert!(backend.resolution.lock().expect("resolution").is_none());
+        }
     }
 }
