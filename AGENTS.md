@@ -2005,8 +2005,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   starting execution seed; successors retaining completed work keep the corresponding live copy.
   Defer launcher executable preflight for reconstruction, as for checkpoint restore; the controller
   validates executables after restoring under its workspace lease, before admission.
-  Box resume input-state inspection before constructing the large prepared run, keeping native
-  startup and resume within the portable suite's 1 MiB stack budget.
+  Box resume input-state inspection before constructing the large prepared run, and heap-pin
+  successor startup to keep checkpoint resume within the portable suite's 1 MiB stack budget.
   Workspace mode has graph memory only and creates no repository-memory identity.
   Workspace folders, input ownership and artifact addresses remain physical-part state; logical
   status projects the selected part's workspace alongside the canonical run and current-part IDs.

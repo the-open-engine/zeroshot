@@ -76,6 +76,99 @@ fn predecessor(fixture: &Fixture) -> String {
 }
 
 #[test]
+fn resume_checkpoint_keeps_worktree_identity_with_recorded_runtime() {
+    let fixture = Fixture::new().outside_workspace();
+    let git = |workspace: &std::path::Path, args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .current_dir(workspace)
+            .args(args)
+            .output()
+            .unwrap();
+        success(&output);
+        String::from_utf8(output.stdout).unwrap().trim().to_owned()
+    };
+    let original_head = git(&fixture.workspace, &["rev-parse", "HEAD"]);
+    let output = fixture
+        .run_command("fail", true)
+        .arg("--worktree")
+        .output()
+        .unwrap();
+    success(&output);
+    let receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let id = receipt["currentPartId"].as_str().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let status = fixture.json(&["status", id]);
+        if status["status"]["phase"] == "finished" {
+            assert_eq!(status["status"]["terminalResult"]["status"], "failed");
+            break;
+        }
+        assert!(Instant::now() < deadline, "{status}");
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    let recovery: Value = serde_json::from_slice(
+        &fs::read(
+            fixture
+                .root
+                .path(&format!("state/runs/{id}/workspace-recovery.json")),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let workspace = std::path::Path::new(recovery["workspace"].as_str().unwrap());
+    let branch = recovery["localBranch"].as_str().unwrap();
+    let points = fixture.json(&["checkpoints", id]);
+    let point = points["checkpoints"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|point| point["node"] == "worker")
+        .unwrap()["checkpointId"]
+        .as_str()
+        .unwrap();
+    fs::write(workspace.join("seed"), "later committed recovery").unwrap();
+    git(workspace, &["commit", "-am", "later recovery"]);
+    let live_head = git(workspace, &["rev-parse", "HEAD"]);
+    git(workspace, &["checkout", "--detach", &live_head]);
+    let output = fixture
+        .command(&[
+            "resume",
+            id,
+            "--from-checkpoint",
+            point,
+            "--discard-workspace-changes",
+        ])
+        .env("FIXTURE_MODE", "finish")
+        .output()
+        .unwrap();
+    success(&output);
+    let resumed: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(resumed["runId"], receipt["runId"]);
+    let successor = resumed["currentPartId"].as_str().unwrap();
+    assert_ne!(successor, id);
+    await_success(&fixture, successor);
+    assert_eq!(
+        git(workspace, &["symbolic-ref", "HEAD"]),
+        format!("refs/heads/{branch}")
+    );
+    assert_eq!(git(workspace, &["rev-parse", "HEAD"]), live_head);
+    assert_eq!(fs::read_to_string(workspace.join("seed")).unwrap(), "seed");
+    assert_eq!(
+        fs::read_to_string(workspace.join("mutation.txt")).unwrap(),
+        "native worker ran"
+    );
+    assert_eq!(
+        git(&fixture.workspace, &["rev-parse", "HEAD"]),
+        original_head
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.workspace.join("seed")).unwrap(),
+        "seed"
+    );
+    assert!(git(&fixture.workspace, &["status", "--porcelain=v1"]).is_empty());
+}
+
+#[test]
 fn resume_runtime_replaces_both_file_forms_and_preserves_checkpoint_outputs() {
     for uniform in [false, true] {
         let fixture = fixture();

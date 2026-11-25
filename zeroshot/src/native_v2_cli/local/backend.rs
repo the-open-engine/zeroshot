@@ -383,8 +383,9 @@ impl LocalCliBackend {
             }
             (recovery, claim)
         };
-        self.start_local_successor(params, recovery, discard_workspace_changes)
-            .await
+        // Successor startup carries the prepared graph and checkpoint state; keep its large
+        // future out of the native CLI's bounded resume stack.
+        Box::pin(self.start_local_successor(params, recovery, discard_workspace_changes)).await
     }
 
     async fn retain_predecessor_delivery(
