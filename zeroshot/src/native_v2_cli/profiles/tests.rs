@@ -103,8 +103,9 @@ fn exercise_default_and_delete_lifecycle(store: &LocalRunProfileStore, edited: &
 #[test]
 fn workspace_identity_and_profile_saves_coexist_with_target_file_guards() {
     let root = openengine_cluster_testkit::TemporaryDirectory::for_test("profile-file-guards");
+    let root_path = root.as_path().canonicalize().assert_value();
     let _files = crate::native_v2_files::DiskFileStore::open(
-        root.path("files"),
+        root_path.join("files"),
         "direct-target".into(),
         std::sync::Arc::new(crate::native_v2_files::SingleAccountFiles {
             principal: "direct-target".into(),
@@ -112,7 +113,7 @@ fn workspace_identity_and_profile_saves_coexist_with_target_file_guards() {
         }),
     )
     .assert_value();
-    let store = LocalRunProfileStore::new(root.as_path().to_owned());
+    let store = LocalRunProfileStore::new(root_path);
     let identity = store.workspace_id().assert_value();
     store
         .set(profile_request("alpha", "worker", true))
