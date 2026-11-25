@@ -65,32 +65,7 @@ pub async fn execute(
                 identity: &identity,
             };
             if let FileRequest::Cleanup { all } = command.request {
-                let now = openengine_cluster_protocol::UnixTimestampMillis::new(
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map_err(std::io::Error::other)?
-                        .as_millis()
-                        .try_into()
-                        .map_err(std::io::Error::other)?,
-                )
-                .map_err(std::io::Error::other)?;
-                let backend = zeroshot_engine::native_v2_cli::local::LocalCliBackend::production()?;
-                let candidates = store.select_publications(&access, now, all)?;
-                let protected = backend.protected_file_runs().await?;
-                let checkpoint_lineages = backend.cleanup_checkpoints(all, now).await?;
-                let publications = store.cleanup_publications(
-                    &access,
-                    &zeroshot_engine::native_v2_files::FileRetention {
-                        candidates: &candidates,
-                        now,
-                        all,
-                        protected: &protected,
-                    },
-                )?;
-                FileReply::Json(FileResponse::Cleaned {
-                    publications: publications as u64,
-                    checkpoint_lineages: checkpoint_lineages as u64,
-                })
+                local_cleanup(&store, &access, all).await?
             } else {
                 local_file_request(&store, &access, command.request, staged)?
             }
@@ -102,6 +77,39 @@ pub async fn execute(
         }
     };
     write_reply(reply, command.transfer, download_receipt, output)
+}
+
+async fn local_cleanup(
+    store: &impl TargetFileHost,
+    access: &FileAccess<'_>,
+    all: bool,
+) -> Result<FileReply, NativeV2CliError> {
+    let now = openengine_cluster_protocol::UnixTimestampMillis::new(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(std::io::Error::other)?
+            .as_millis()
+            .try_into()
+            .map_err(std::io::Error::other)?,
+    )
+    .map_err(std::io::Error::other)?;
+    let backend = zeroshot_engine::native_v2_cli::local::LocalCliBackend::production()?;
+    let candidates = store.select_publications(access, now, all)?;
+    let protected = backend.protected_file_runs().await?;
+    let checkpoint_lineages = backend.cleanup_checkpoints(all, now).await?;
+    let publications = store.cleanup_publications(
+        access,
+        &zeroshot_engine::native_v2_files::FileRetention {
+            candidates: &candidates,
+            now,
+            all,
+            protected: &protected,
+        },
+    )?;
+    Ok(FileReply::Json(FileResponse::Cleaned {
+        publications: publications as u64,
+        checkpoint_lineages: checkpoint_lineages as u64,
+    }))
 }
 
 fn local_file_request(

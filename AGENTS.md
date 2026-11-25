@@ -2451,7 +2451,9 @@ python -m mkdocs build --strict
   receipt atomically before visibility/runner closure; request intent durably freezes its request ID
   before capture. Production controller startup reconciles committed request/final receipts before
   generic runtime-loss settlement, using existing checkpoint authority and no replacement agents
-  or credential resolution. Recovery reuses that receipt even after workspace loss. The catalog retains
+  or credential resolution. Allocator checkpoint preparation and committed-publication recovery
+  stay together in `native_v2_hosting/allocator/workspace.rs`. Recovery reuses the receipt even
+  after workspace loss. The catalog retains
   request-vs-final access context for reads and pins. Final references live in result metadata;
   request attachments are omitted from ordinary status/vector views and retained in the inbox.
   Generic history definitions, pages, SSE and run lists use the same suspension redaction;

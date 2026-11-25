@@ -139,54 +139,7 @@ impl NativeV2TargetServer {
             return Err(io::Error::other("unexpected file payload"));
         }
         if let FileRequest::Cleanup { all } = request {
-            // Retention is a direct single-account host operation, never a hosted file-client grant.
-            if !matches!(self.access, super::TargetServerAccess::Direct(_)) {
-                return Err(crate::native_v2_files::denied());
-            }
-            let now = crate::native_v2_runner::current_timestamp();
-            let controller = self.target.controller().await.map_err(io::Error::other)?;
-            let selection_mount = mount.clone();
-            let selection_identity = identity.clone();
-            let candidates = tokio::task::spawn_blocking(move || {
-                selection_mount.host.select_publications(
-                    &FileAccess {
-                        target: &selection_mount.target,
-                        identity: &selection_identity,
-                    },
-                    now,
-                    all,
-                )
-            })
-            .await
-            .map_err(io::Error::other)??;
-            let protected = controller
-                .protected_file_runs()
-                .await
-                .map_err(io::Error::other)?;
-            let checkpoint_lineages = controller
-                .cleanup_checkpoints(all, now)
-                .await
-                .map_err(io::Error::other)?;
-            let publications = tokio::task::spawn_blocking(move || {
-                mount.host.cleanup_publications(
-                    &FileAccess {
-                        target: &mount.target,
-                        identity: &identity,
-                    },
-                    &crate::native_v2_files::FileRetention {
-                        candidates: &candidates,
-                        now,
-                        all,
-                        protected: &protected,
-                    },
-                )
-            })
-            .await
-            .map_err(io::Error::other)??;
-            return Ok(FileReply::Json(FileResponse::Cleaned {
-                publications: publications as u64,
-                checkpoint_lineages: checkpoint_lineages as u64,
-            }));
+            return self.cleanup_files(mount, identity, all).await;
         }
         // The guard stays in this future while async I/O drains. Cancellation drops it; no partial
         // payload can reach the catalog, and restart cleanup reclaims abandoned transfer files.
@@ -252,6 +205,62 @@ impl NativeV2TargetServer {
         })
         .await
         .map_err(io::Error::other)?
+    }
+
+    async fn cleanup_files(
+        &self,
+        mount: TargetFilesMount,
+        identity: openengine_cluster_server::identity::ConnectionIdentity,
+        all: bool,
+    ) -> io::Result<FileReply> {
+        // Retention is a direct single-account host operation, never a hosted file-client grant.
+        if !matches!(self.access, super::TargetServerAccess::Direct(_)) {
+            return Err(crate::native_v2_files::denied());
+        }
+        let now = crate::native_v2_runner::current_timestamp();
+        let controller = self.target.controller().await.map_err(io::Error::other)?;
+        let selection_mount = mount.clone();
+        let selection_identity = identity.clone();
+        let candidates = tokio::task::spawn_blocking(move || {
+            selection_mount.host.select_publications(
+                &FileAccess {
+                    target: &selection_mount.target,
+                    identity: &selection_identity,
+                },
+                now,
+                all,
+            )
+        })
+        .await
+        .map_err(io::Error::other)??;
+        let protected = controller
+            .protected_file_runs()
+            .await
+            .map_err(io::Error::other)?;
+        let checkpoint_lineages = controller
+            .cleanup_checkpoints(all, now)
+            .await
+            .map_err(io::Error::other)?;
+        let publications = tokio::task::spawn_blocking(move || {
+            mount.host.cleanup_publications(
+                &FileAccess {
+                    target: &mount.target,
+                    identity: &identity,
+                },
+                &crate::native_v2_files::FileRetention {
+                    candidates: &candidates,
+                    now,
+                    all,
+                    protected: &protected,
+                },
+            )
+        })
+        .await
+        .map_err(io::Error::other)??;
+        Ok(FileReply::Json(FileResponse::Cleaned {
+            publications: publications as u64,
+            checkpoint_lineages: checkpoint_lineages as u64,
+        }))
     }
 }
 
