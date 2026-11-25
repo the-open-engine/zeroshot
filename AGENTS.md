@@ -1672,9 +1672,20 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   empty method intersections stop merge submission with policy diagnostics. Merge queues choose their
   own method. Queue admission uses explicit `enqueuePullRequest` with the validated PR node ID and
   exact `expectedHeadOid`; enabling auto-merge alone is not enqueue confirmation. Confirmed
-  admissions retain their added-event identity until confirmed withdrawal. Polling never resubmits a
-  removed entry: matching removal evidence binds the queued commit and complete required checks/job
-  logs, returning CI feedback through the existing repair loop before another admission is requested.
+  admissions retain their added-event identity until confirmed withdrawal. Removed entries normally
+  require repair before readmission: matching removal evidence binds the queued commit and complete
+  required checks/job logs. Without failed-check evidence, return the removal diagnostic as an error,
+  never empty CI feedback. Failed required checks on the removed queue commit retain CI feedback and job logs
+  even for `merge_conflict`. Revalidate their admission and removal identity after asynchronous job-log
+  retrieval so superseded failures stay pending. A confirmed `merge_conflict` removal without failed required checks is the narrow exception: complete,
+  stable queue evidence for the configured repository/base keeps predecessors pending, then fresh
+  exact-head policy permits readmission of a clean PR or authenticated materialization of a base
+  conflict. The queue view uses an aliased page-info field to keep `gh` pagination on required checks
+  and is independently bounded to 100 entries; incomplete or changing evidence
+  cannot authorize recovery. Missing, stale, superseded or already recovered removal evidence keeps an admission
+  pending, including when the PR reports a base conflict. Three readmissions per reviewed head exhaust this exception independently
+  of ordinary polling. Retain prior submission uncertainty, ignore already recovered removal events,
+  and never release an admission from a same-second ambiguous removal.
   Completed transient submissions retry after fresh exact-head policy checks; retries retain earlier uncertainty so an
   empty snapshot cannot authorize repair. A complete GraphQL `UNPROCESSABLE` rejection rooted exactly
   at a null enqueue mutation adds no uncertainty; partial, nested, truncated, or unconfirmed responses
@@ -2389,6 +2400,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 ## Validation
 
 Run the narrowest relevant checks first, then the complete affected lane.
+The GitHub queue pagination regression requires `gh` and exercises its native paginator against a
+fake-token loopback endpoint, independently of the shell-based forge fixtures.
 The local CLI integration root includes its shared fixture before adding request scenarios, so
 other integration suites can reuse the fixture without duplicating those scenarios.
 Suspension and terminal-failure polling share a bounded checkpoint and cleanup budget separate from
@@ -2512,3 +2525,33 @@ python -m mkdocs build --strict
   Publication verifies the live manifest matches the validated docs, product and source identity.
 - There is no automatic semantic release, release-promotion branch, `dev -> main` flow, or second
   runtime release train.
+
+## Target files
+
+- `target_files` in the protocol crate owns target-relative user/org and read-only run addresses,
+  independent `openengine.target-files/v1` discovery, and the framed binary transfer contract.
+  File bytes never travel through OECP or graph/status receipts. Generate its schema with the
+  existing Rust testkit; generate CLI references from Clap.
+- `native_v2_files::TargetFileHost` is additive to `ArtifactRef` and `HostedWorkspaceStorage`.
+  Hosts supply explicit target identity and scope/member authorization. The disk adapter keeps
+  private immutable tree objects and atomically publishes a bounded catalog under an OS file lock.
+  Pins retain whole selections across replacement/deletion. Stable operations distinguish reusable
+  replacements, staged run inputs, request publications and final publications; released pins cannot
+  be revived, and released publication names cannot be reused. Managed publications alone populate the host-written runs namespace. Live local
+  references stay host-only. Do not resolve missing target paths against a checkout or another target.
+- Local file commands use local state. Direct targets mount the same adapter under their persistent
+  storage root; custom/hosted servers explicitly opt in with `TargetFilesMount`. Older hosts omit
+  the extension. Streaming uses bounded buffers, complete framing/digests, private staging and
+  portable member validation; links, aliases and special files are refused. In-flight transfer
+  leases protect active stages from restart reclamation. Directory capabilities anchor staging,
+  publication and cleanup to opened parents: Unix uses descriptor-relative operations; Windows
+  guards deny ancestor write/delete sharing. Root stages are siblings of their final names;
+  Windows publishes with a simple native rename in the same parent, avoiding a Win32 parent reopen
+  that conflicts with those guards. Release only the stage's own guard before directory publication.
+  Transfer indexes retain original wire offsets even
+  when validated headers are canonicalized. Bound both incoming and normalized metadata/transfer
+  sizes before publication; valid JSON number encodings can expand during normalization. Response
+  bounds include separators and the envelope.
+  A complete mutation already handed to a
+  blocking worker drains to a durable result; retry its operation key after a lost response.
+- File commands add no MCP tool, run input, worker artifact field or shared skill change.

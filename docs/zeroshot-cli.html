@@ -22,6 +22,12 @@ section { margin-block: 2.5rem; }
 <p class="generated">Generated from the typed Clap command model and its Rust doc comments. Regenerate with <code>cargo run -p zeroshot --example generate_cli_docs -- --write</code>.</p>
 <nav aria-label="Command index"><h2>Commands</h2><ul>
 <li><a href="#zeroshot"><code>zeroshot</code></a></li>
+<li><a href="#zeroshot-file"><code>zeroshot file</code></a></li>
+<li><a href="#zeroshot-file-list"><code>zeroshot file list</code></a></li>
+<li><a href="#zeroshot-file-upload"><code>zeroshot file upload</code></a></li>
+<li><a href="#zeroshot-file-download"><code>zeroshot file download</code></a></li>
+<li><a href="#zeroshot-file-remove"><code>zeroshot file remove</code></a></li>
+<li><a href="#zeroshot-file-help"><code>zeroshot file help</code></a></li>
 <li><a href="#zeroshot-memory"><code>zeroshot memory</code></a></li>
 <li><a href="#zeroshot-memory-init"><code>zeroshot memory init</code></a></li>
 <li><a href="#zeroshot-memory-help"><code>zeroshot memory help</code></a></li>
@@ -102,6 +108,7 @@ Single-result commands write JSON. Foreground `run`, `watch`, `logs`, and `attac
 Usage: zeroshot [COMMAND]
 
 Commands:
+  file               Manage files and named directory trees on the selected target. Bytes stream outside graph JSON
   memory             Initialize local Active Memory through the canonical skill
   acp                Serve one local Zeroshot profile as an experimental ACP agent over stdio
   ui                 Serve the local profile editor and live or recorded run history
@@ -137,6 +144,141 @@ Options:
 
   -h, --help
           Print help (see a summary with &#39;-h&#39;)</code></pre></section>
+<section id="zeroshot-file"><h3><code>zeroshot file</code></h3>
+<pre><code>Manage files and named directory trees on the selected target. Bytes stream outside graph JSON
+
+Usage: zeroshot file &lt;COMMAND&gt;
+
+Commands:
+  list      List named paths, or list the members of one file/tree when PATH is supplied
+  upload    Upload a file or directory and atomically replace the complete named path
+  download  Download a file or complete directory to a new local destination
+  remove    Remove one whole reusable path. Run publications are read-only
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help</code></pre></section>
+<section id="zeroshot-file-list"><h4><code>zeroshot file list</code></h4>
+<pre><code>List named paths, or list the members of one file/tree when PATH is supplied
+
+Usage: zeroshot file list [OPTIONS] [PATH]
+
+Arguments:
+  [PATH]
+
+
+Options:
+      --target &lt;TARGET&gt;
+          Select this target&#39;s store. Omission selects local target state
+
+      --scope &lt;SCOPE&gt;
+          User or organization library scope
+
+          [possible values: user, org]
+
+      --run &lt;RUN_ID&gt;
+          Read host-managed publications for this run
+
+      --member &lt;MEMBER&gt;
+          Directory or file within the selected tree. Requires PATH
+
+  -h, --help
+          Print help</code></pre></section>
+<section id="zeroshot-file-upload"><h4><code>zeroshot file upload</code></h4>
+<pre><code>Upload a file or directory and atomically replace the complete named path
+
+Usage: zeroshot file upload [OPTIONS] &lt;SOURCE&gt; &lt;PATH&gt;
+
+Arguments:
+  &lt;SOURCE&gt;
+
+
+  &lt;PATH&gt;
+
+
+Options:
+      --target &lt;TARGET&gt;
+          Select this target&#39;s store. Omission selects local target state
+
+      --scope &lt;SCOPE&gt;
+          User or organization library scope
+
+          [possible values: user, org]
+
+      --run &lt;RUN_ID&gt;
+          Read host-managed publications for this run
+
+      --operation &lt;OPERATION&gt;
+          Stable retry identity. Reusing it with different bytes fails
+
+  -h, --help
+          Print help</code></pre></section>
+<section id="zeroshot-file-download"><h4><code>zeroshot file download</code></h4>
+<pre><code>Download a file or complete directory to a new local destination
+
+Usage: zeroshot file download [OPTIONS] &lt;PATH&gt; &lt;OUTPUT&gt;
+
+Arguments:
+  &lt;PATH&gt;
+
+
+  &lt;OUTPUT&gt;
+
+
+Options:
+      --target &lt;TARGET&gt;
+          Select this target&#39;s store. Omission selects local target state
+
+      --scope &lt;SCOPE&gt;
+          User or organization library scope
+
+          [possible values: user, org]
+
+      --run &lt;RUN_ID&gt;
+          Read host-managed publications for this run
+
+      --member &lt;MEMBER&gt;
+          Select one member or subtree; defaults to the complete named path
+
+          [default: &quot;&quot;]
+
+  -h, --help
+          Print help</code></pre></section>
+<section id="zeroshot-file-remove"><h4><code>zeroshot file remove</code></h4>
+<pre><code>Remove one whole reusable path. Run publications are read-only
+
+Usage: zeroshot file remove [OPTIONS] &lt;PATH&gt;
+
+Arguments:
+  &lt;PATH&gt;
+
+
+Options:
+      --target &lt;TARGET&gt;
+          Select this target&#39;s store. Omission selects local target state
+
+      --scope &lt;SCOPE&gt;
+          User or organization library scope
+
+          [possible values: user, org]
+
+      --run &lt;RUN_ID&gt;
+          Read host-managed publications for this run
+
+  -h, --help
+          Print help</code></pre></section>
+<section id="zeroshot-file-help"><h4><code>zeroshot file help</code></h4>
+<pre><code>Print this message or the help of the given subcommand(s)
+
+Usage: zeroshot file help [COMMAND]
+
+Commands:
+  list      List named paths, or list the members of one file/tree when PATH is supplied
+  upload    Upload a file or directory and atomically replace the complete named path
+  download  Download a file or complete directory to a new local destination
+  remove    Remove one whole reusable path. Run publications are read-only
+  help      Print this message or the help of the given subcommand(s)</code></pre></section>
 <section id="zeroshot-memory"><h3><code>zeroshot memory</code></h3>
 <pre><code>Initialize local Active Memory through the canonical skill
 
@@ -1690,6 +1832,7 @@ Options:
 Usage: zeroshot help [COMMAND]
 
 Commands:
+  file               Manage files and named directory trees on the selected target. Bytes stream outside graph JSON
   memory             Initialize local Active Memory through the canonical skill
   acp                Serve one local Zeroshot profile as an experimental ACP agent over stdio
   ui                 Serve the local profile editor and live or recorded run history

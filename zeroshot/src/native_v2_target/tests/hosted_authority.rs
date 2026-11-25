@@ -21,6 +21,8 @@ mod direct;
 pub(super) use direct::{spawn_direct_target_authority, spawn_rejecting_direct_target_authority};
 #[path = "hosted_authority/export.rs"]
 mod export;
+#[path = "hosted_authority/files.rs"]
+mod files;
 #[path = "hosted_authority/lost_submission_reply.rs"]
 mod lost_submission_reply;
 #[path = "hosted_authority/machine.rs"]

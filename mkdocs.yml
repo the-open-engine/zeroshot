@@ -73,6 +73,7 @@ nav:
       - Implementation details:
           - Installation and updates: reference/installation.md
           - Target runtime: reference/target-runtime.md
+          - Target files: reference/target-files.md
           - Execution and delivery: reference/execution.md
           - Memory lifecycle: reference/active-memory.md
       - Python API:

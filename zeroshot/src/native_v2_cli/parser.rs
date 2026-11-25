@@ -6,6 +6,9 @@ use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 #[path = "parser/delegations.rs"]
 mod delegations;
 use delegations::DelegationCliCommand;
+#[path = "parser/files.rs"]
+mod files;
+use files::FileCliCommand;
 
 /// Enforce your team's QA process on coding agents: run the graph you define locally or on named
 /// Zeroshot targets.
@@ -30,6 +33,11 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum CliCommand {
+    /// Manage files and named directory trees on the selected target. Bytes stream outside graph JSON.
+    File {
+        #[command(subcommand)]
+        command: FileCliCommand,
+    },
     /// Initialize local Active Memory through the canonical skill.
     Memory {
         #[command(subcommand)]

@@ -36,6 +36,7 @@ mod authority;
 mod authority_error;
 mod contract;
 mod controller_authority;
+pub mod files;
 mod oecp;
 mod registry;
 mod serve;

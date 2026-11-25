@@ -62,3 +62,6 @@ impl ClusterBackend for EmptyBackend {
 }
 
 mod request_artifacts;
+
+mod target_files_artifacts;
+pub use target_files_artifacts::TargetFilesSchema;
