@@ -128,6 +128,8 @@ impl Fixture {
             .env("OPENAI_API_KEY", "fixture-key")
             .env("UNDECLARED_SECRET", "must-not-inherit");
         for name in [
+            // Keep instrumented CLI profiles outside this disposable workspace.
+            "LLVM_PROFILE_FILE",
             "SystemRoot",
             "WINDIR",
             "COMSPEC",

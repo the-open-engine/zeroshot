@@ -55,7 +55,8 @@ impl Fixture {
     }
     async fn serve(&self, listen: std::net::SocketAddr) -> Child {
         let mut command = self.command();
-        let child = command
+        let diagnostic = self.root.path().join("target-stderr");
+        let mut child = command
             .args([
                 "target",
                 "serve",
@@ -67,12 +68,17 @@ impl Fixture {
             ])
             .arg(self.root.path().join("volume"))
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(std::fs::File::create(&diagnostic).unwrap())
             .spawn()
             .unwrap();
         let client = reqwest::Client::builder().no_proxy().build().unwrap();
         tokio::time::timeout(Duration::from_secs(30), async {
             loop {
+                assert!(
+                    child.try_wait().unwrap().is_none(),
+                    "direct target exited before discovery: {}",
+                    std::fs::read_to_string(&diagnostic).unwrap()
+                );
                 if client
                     .get(format!("http://{listen}/.well-known/zeroshot-native-v2"))
                     .send()
@@ -85,7 +91,12 @@ impl Fixture {
             }
         })
         .await
-        .unwrap();
+        .unwrap_or_else(|error| {
+            panic!(
+                "direct target did not become ready: {error}: {}",
+                std::fs::read_to_string(&diagnostic).unwrap()
+            )
+        });
         child
     }
 }

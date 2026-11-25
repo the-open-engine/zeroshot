@@ -101,6 +101,34 @@ fn exercise_default_and_delete_lifecycle(store: &LocalRunProfileStore, edited: &
 
 #[cfg(feature = "ui")]
 #[test]
+fn workspace_identity_and_profile_saves_coexist_with_target_file_guards() {
+    let root = openengine_cluster_testkit::TemporaryDirectory::for_test("profile-file-guards");
+    let _files = crate::native_v2_files::DiskFileStore::open(
+        root.path("files"),
+        "direct-target".into(),
+        std::sync::Arc::new(crate::native_v2_files::SingleAccountFiles {
+            principal: "direct-target".into(),
+            tenant: "direct-target".into(),
+        }),
+    )
+    .assert_value();
+    let store = LocalRunProfileStore::new(root.as_path().to_owned());
+    let identity = store.workspace_id().assert_value();
+    store
+        .set(profile_request("alpha", "worker", true))
+        .assert_value();
+    store
+        .set(profile_request("alpha", "changed", false))
+        .assert_value();
+    assert_eq!(store.workspace_id().assert_value(), identity);
+    assert_eq!(
+        store.show(selector("alpha")).assert_value().graph,
+        graph_fixture("changed", json!({"kind":"null"}))
+    );
+}
+
+#[cfg(feature = "ui")]
+#[test]
 fn workspace_identity_survives_restart_and_move_but_not_store_replacement() {
     let root = std::env::temp_dir().join(format!("zeroshot-workspace-{}", uuid::Uuid::now_v7()));
     let moved = root.with_extension("moved");

@@ -396,7 +396,8 @@ async fn fixture_with_lessons(
     seeds: Vec<LessonDraft>,
     manifest_known: bool,
 ) -> Fixture {
-    let directory = tempfile::tempdir().assert_value();
+    let directory =
+        tempfile::tempdir_in(std::env::temp_dir().canonicalize().assert_value()).assert_value();
     let workspace = directory.path().join("workspace");
     std::fs::create_dir_all(workspace.join("src")).assert_value();
     std::fs::write(

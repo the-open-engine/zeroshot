@@ -2532,6 +2532,8 @@ python -m mkdocs build --strict
   filenames keep both process (`%p`) and binary (`%m`) identities to avoid unrelated writers.
   Tests limiting a child's file size direct only that child's `LLVM_PROFILE_FILE` to `/dev/null`
   so the intentional write failure cannot corrupt collected profiles.
+  Environment-cleared portable CLI test fixtures preserve `LLVM_PROFILE_FILE` so submission coverage
+  survives disposal of their temporary workspaces.
   Local CLI fixture repositories exclude `*.profraw` through their shared Git exclude file,
   keeping profiles from environment-cleared instrumented processes out of delivery and status.
   Conversation and checkout-preservation fixtures launch outside their explicit `--cwd` workspace
@@ -2582,8 +2584,9 @@ python -m mkdocs build --strict
   leases protect active stages from restart reclamation. Directory capabilities anchor staging,
   publication and cleanup to opened parents: Unix uses descriptor-relative operations; Windows
   guards deny ancestor write/delete sharing. Root stages are siblings of their final names;
-  Windows publishes with a simple native rename in the same parent, avoiding a Win32 parent reopen
-  that conflicts with those guards. Release only the stage's own guard before directory publication.
+  Windows file publication and shared atomic state commits use the same simple native sibling
+  rename, avoiding a Win32 parent reopen that conflicts with those guards, including direct-target
+  UI state beside the guarded file store. Release only the stage's own guard before directory publication.
   Transfer indexes retain original wire offsets even
   when validated headers are canonicalized. Bound both incoming and normalized metadata/transfer
   sizes before publication; valid JSON number encodings can expand during normalization. Response

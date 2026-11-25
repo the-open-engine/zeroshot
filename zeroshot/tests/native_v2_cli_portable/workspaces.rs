@@ -142,23 +142,33 @@ fn managed_restart_restores_pinned_lane_before_executable_checks() {
             )
             .unwrap();
         }
-        // Resolve only the managed tools folder, even on hosts with a real Codex installation.
+        // Resolve only the selected tools folder, even on hosts with a real Codex installation.
+        // Windows resolves executable paths before applying the child's working directory.
         let inherited_path = std::env::var_os("PATH").unwrap();
-        let paths = std::iter::once(std::path::PathBuf::from("tools")).chain(
-            std::env::split_paths(&inherited_path).filter(|directory| {
-                ["codex", "codex.exe", "codex.cmd", "codex.com", "codex.bat"]
-                    .iter()
-                    .all(|name| !directory.join(name).is_file())
-            }),
-        );
-        let path = std::env::join_paths(paths).unwrap();
+        let path = |workspace: &Path| {
+            #[cfg(unix)]
+            let tools = {
+                let _ = workspace;
+                std::path::PathBuf::from("tools")
+            };
+            #[cfg(windows)]
+            let tools = workspace.join("tools");
+            let paths = std::iter::once(tools).chain(
+                std::env::split_paths(&inherited_path).filter(|directory| {
+                    ["codex", "codex.exe", "codex.cmd", "codex.com", "codex.bat"]
+                        .iter()
+                        .all(|name| !directory.join(name).is_file())
+                }),
+            );
+            std::env::join_paths(paths).unwrap()
+        };
         let receipts = fixture.root.path("executions.txt");
         let mut first = fixture.run_command("fail", true);
         first
             .args(["--workspace", "--copy-workspace"])
             .env("FIXTURE_RECEIPTS", &receipts);
         if pinned {
-            first.env("PATH", &path);
+            first.env("PATH", path(&fixture.workspace));
         }
         let id = receipt(&first.output().unwrap());
         let status = settled(&fixture, &id, "finished");
@@ -177,7 +187,7 @@ fn managed_restart_restores_pinned_lane_before_executable_checks() {
         .unwrap();
         let resumed = fixture
             .command(&["resume", &id])
-            .env("PATH", &path)
+            .env("PATH", path(copy))
             .env("FIXTURE_MODE", "finish")
             .env("FIXTURE_RECEIPTS", &receipts)
             .output()

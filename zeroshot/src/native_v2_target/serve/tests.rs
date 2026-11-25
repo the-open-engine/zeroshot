@@ -249,7 +249,10 @@ async fn direct_serve_surfaces_hosting_preparation_failures() {
     })
     .await
     .assert_error();
-    assert!(matches!(error, TargetServeError::Hosting(_)));
+    assert!(matches!(
+        error,
+        TargetServeError::Hosting(ProductionHostingError::Storage)
+    ));
 }
 
 #[tokio::test]
