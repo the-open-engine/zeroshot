@@ -70,7 +70,9 @@ impl WorkspaceFiles {
         lock.lock_exclusive()?;
         let manifest = reserve_manifest(&directory, request)?;
         match directory.read_file(std::ffi::OsStr::new(&released_name(&manifest.run_id))) {
-            Ok(_) => {
+            Ok(marker) => {
+                // Windows cannot replace the release marker while this reader is open.
+                drop(marker);
                 self.release_manifest(&directory, &manifest)?;
                 return Err(invalid(
                     "workspace inputs were released; submit with a new submission key",

@@ -111,7 +111,7 @@ fn workspace_artifacts_follow_placement_and_survive_managed_cleanup() {
             assert_eq!(artifact["kind"], "local", "{status}");
             assert_eq!(
                 Path::new(artifact["root"].as_str().unwrap()),
-                fixture.workspace
+                fixture.workspace.canonicalize().unwrap()
             );
             assert_eq!(artifact["path"], "mutation.txt");
             assert_eq!(
