@@ -158,6 +158,8 @@ impl fmt::Debug for ProductionHostingConfig {
 pub struct ProductionTargetControllerFactory {
     config: Arc<ProductionHostingConfig>,
     operator_diagnostics: Arc<OperatorDiagnosticStore>,
+    // Keep freezing and confirmed refusal cleanup atomic with respect to same-key retries.
+    workspace_admission: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl ProductionTargetControllerFactory {
@@ -169,6 +171,7 @@ impl ProductionTargetControllerFactory {
         Self {
             config: Arc::new(config),
             operator_diagnostics,
+            workspace_admission: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -304,6 +307,15 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
             commit_identity,
             commit_co_author,
         } = request;
+        let workspace_files = submission
+            .workspace
+            .as_ref()
+            .and(self.config.workspace_files.as_ref());
+        let _workspace_admission = if submission.workspace.is_some() {
+            Some(self.workspace_admission.lock().await)
+        } else {
+            None
+        };
         if submission.workspace.is_some()
             && (github_token.is_some()
                 || git_credentials.is_some()
@@ -361,17 +373,37 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
         } else {
             run_id
         };
-        let environment = match connection_resolver {
-            Some(wire) => {
-                let resolution = build_connection_resolver(run_id.clone(), wire)?;
-                RunEnvironment::with_resolver_for_submission(&submission, connections, resolution)
+        let environment = (|| {
+            match connection_resolver {
+                Some(wire) => {
+                    let resolution = build_connection_resolver(run_id.clone(), wire)?;
+                    RunEnvironment::with_resolver_for_submission(
+                        &submission,
+                        connections,
+                        resolution,
+                    )
+                }
+                None => RunEnvironment::exact_for_submission(&submission, connections),
             }
-            None => RunEnvironment::exact_for_submission(&submission, connections),
-        }
-        .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
+            .map_err(|error| TargetAuthorityError::invalid(error.to_string()))
+        })();
+        let environment = match environment {
+            Ok(environment) => environment,
+            Err(error) => {
+                if let Some(files) = workspace_files {
+                    files.release(&run_id).map_err(|_| {
+                        TargetAuthorityError::unavailable("workspace input release failed")
+                    })?;
+                }
+                return Err(error);
+            }
+        };
         let receipt = controller
             .submit_with_exact_environment_and_source_credentials(
-                RunSubmitParams { run_id, submission },
+                RunSubmitParams {
+                    run_id: run_id.clone(),
+                    submission,
+                },
                 environment,
                 crate::native_v2_platform::RunSourceCredentials {
                     github_token,
@@ -380,8 +412,27 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
                     commit_co_author,
                 },
             )
-            .await
-            .map_err(project_platform_error)?;
+            .await;
+        // These refusals precede durable acceptance. Ambiguous storage/runtime failures retain
+        // pins so that lost-ack replay and accepted-run recovery never depend on mutable inputs.
+        if let Err(
+            crate::native_v2_platform::NativeV2PlatformError::Admission(_)
+            | crate::native_v2_platform::NativeV2PlatformError::Environment(_)
+            | crate::native_v2_platform::NativeV2PlatformError::PreparationTimeout
+            | crate::native_v2_platform::NativeV2PlatformError::InvalidRequest(_)
+            | crate::native_v2_platform::NativeV2PlatformError::Ledger(
+                crate::v2_run_ledger::RunLedgerError::RunIdConflict
+                | crate::v2_run_ledger::RunLedgerError::SubmissionConflict { .. }
+                | crate::v2_run_ledger::RunLedgerError::AdmittedRunTooLarge { .. },
+            ),
+        ) = &receipt
+            && let Some(files) = workspace_files
+        {
+            files
+                .release(&run_id)
+                .map_err(|_| TargetAuthorityError::unavailable("workspace input release failed"))?;
+        }
+        let receipt = receipt.map_err(project_platform_error)?;
         Ok(TargetRunReceipt {
             run_id: receipt.run_id,
         })

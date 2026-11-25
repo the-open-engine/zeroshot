@@ -57,6 +57,161 @@ fn upload(files: &WorkspaceFiles, selection: &FileSelection, source: &Path, op: 
         .assert_value();
 }
 
+fn freeze_root(files: &WorkspaceFiles, source: &Path) -> RunId {
+    let mut spec = workspace(vec![]);
+    spec.copy_root = true;
+    files
+        .freeze(FreezeWorkspace {
+            run_id: &RunId::new("root-run"),
+            submission_key: &operation("root-copy"),
+            workspace: &spec,
+            local_root: Some(source),
+        })
+        .assert_value()
+}
+
+#[cfg(unix)]
+#[test]
+fn copied_root_executables_survive_source_deletion_and_pinned_restart() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempdir();
+    let files = files(temp.path());
+    let source = temp.path().join("source");
+    std::fs::create_dir_all(source.join("tools")).assert_value();
+    let script = source.join("tools/setup.sh");
+    std::fs::write(&script, b"#!/bin/sh\nprintf original > proof\n").assert_value();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o751)).assert_value();
+    std::fs::write(source.join("data"), b"not executable").assert_value();
+    let run = freeze_root(&files, &source);
+    std::fs::remove_dir_all(&source).assert_value();
+    let destination = temp.path().join("workspace");
+    std::fs::create_dir(&destination).assert_value();
+    files.materialize(&run, &destination).assert_value();
+    for restart in [false, true] {
+        if restart {
+            std::fs::remove_file(destination.join("tools/setup.sh")).assert_value();
+            files.restart(&run, &destination).assert_value();
+        }
+        assert_eq!(
+            std::fs::metadata(destination.join("tools/setup.sh"))
+                .assert_value()
+                .permissions()
+                .mode()
+                & 0o111,
+            0o111
+        );
+        assert_eq!(
+            std::fs::metadata(destination.join("data"))
+                .assert_value()
+                .permissions()
+                .mode()
+                & 0o111,
+            0
+        );
+        assert!(
+            std::process::Command::new("./tools/setup.sh")
+                .current_dir(&destination)
+                .status()
+                .assert_value()
+                .success()
+        );
+        assert_eq!(
+            std::fs::read(destination.join("proof")).assert_value(),
+            b"original"
+        );
+    }
+}
+
+#[test]
+fn releasing_workspace_inputs_reclaims_root_bytes_and_retains_replay_identity() {
+    use sha2::{Digest, Sha256};
+    let temp = tempdir();
+    let files = files(temp.path());
+    let source = temp.path().join("source");
+    std::fs::create_dir(&source).assert_value();
+    std::fs::write(source.join("seed"), b"source is preserved").assert_value();
+    let run = freeze_root(&files, &source);
+    let objects = temp.path().join("store/objects");
+    assert_eq!(std::fs::read_dir(&objects).assert_value().count(), 1);
+    // Simulate interruption after the release tombstone, before file-store reclamation.
+    let directory = paths::Directory::open(&files.directory).assert_value();
+    let name = format!("released-{:x}.json", Sha256::digest(run.as_str()));
+    let mut marker = directory
+        .writable_file(std::ffi::OsStr::new(&name))
+        .assert_value();
+    marker.write_all(b"true").assert_value();
+    marker.sync_all().assert_value();
+    drop(marker);
+    let mut spec = workspace(vec![]);
+    spec.copy_root = true;
+    files
+        .freeze(FreezeWorkspace {
+            run_id: &run,
+            submission_key: &operation("root-copy"),
+            workspace: &spec,
+            local_root: Some(&source),
+        })
+        .assert_error();
+    assert_eq!(std::fs::read_dir(&objects).assert_value().count(), 0);
+    files.release(&run).assert_value();
+    files.release(&run).assert_value();
+    assert_eq!(std::fs::read_dir(&objects).assert_value().count(), 0);
+    assert_eq!(
+        std::fs::read(source.join("seed")).assert_value(),
+        b"source is preserved"
+    );
+    let error = files
+        .freeze(FreezeWorkspace {
+            run_id: &RunId::new("replacement"),
+            submission_key: &operation("root-copy"),
+            workspace: &spec,
+            local_root: Some(&source),
+        })
+        .assert_error();
+    assert!(error.to_string().contains("inputs were released"));
+    assert_eq!(std::fs::read_dir(&objects).assert_value().count(), 0);
+}
+
+#[test]
+fn refused_workspace_inputs_release_partial_pins_without_removing_the_library() {
+    let temp = tempdir();
+    let files = files(temp.path());
+    let source = temp.path().join("seed");
+    std::fs::write(&source, b"library bytes").assert_value();
+    let selected = seed("seed");
+    upload(&files, &selected, &source, "upload");
+    let spec = workspace(vec![selected.clone(), seed("missing")]);
+    files
+        .freeze(FreezeWorkspace {
+            run_id: &RunId::new("refused"),
+            submission_key: &operation("refused"),
+            workspace: &spec,
+            local_root: None,
+        })
+        .assert_error();
+    let access = FileAccess {
+        target: &files.target,
+        identity: &files.identity,
+    };
+    let mut library = Vec::new();
+    files
+        .host
+        .download(&access, &selected, &mut library)
+        .assert_value();
+    assert!(
+        library
+            .windows(b"library bytes".len())
+            .any(|bytes| bytes == b"library bytes")
+    );
+    files.host.remove(&access, &selected.address).assert_value();
+    assert_eq!(
+        std::fs::read_dir(temp.path().join("store/objects"))
+            .assert_value()
+            .count(),
+        0
+    );
+}
+
 #[test]
 fn run_id_conflicts_preserve_frozen_manifests_and_leave_rejected_keys_unbound() {
     for seeded in [false, true] {
@@ -260,6 +415,45 @@ async fn queued_factory_run_keeps_pinned_inputs_after_conflicting_run_id_submiss
         .await
         .assert_value();
     // Admission is complete, but the original run has not materialized its inputs yet.
+    let mut rejected = submission.clone();
+    rejected.submission_key = operation("invalid-input");
+    rejected.initial_input = serde_json::json!("not the graph's null input");
+    let rejected_run = RunId::new("invalid-input");
+    factory
+        .submit(
+            &controller,
+            TargetRunRequest {
+                run_id: rejected_run.clone(),
+                ..request(rejected)
+            },
+        )
+        .await
+        .assert_error();
+    assert!(
+        files
+            .host
+            .pin_exists(
+                &FileAccess {
+                    target: &files.target,
+                    identity: &files.identity
+                },
+                &FilePin {
+                    run_id: rejected_run,
+                    operation: operation("workspace-seed-0")
+                }
+            )
+            .is_err()
+    );
+    // A refused Git submission with the same run ID owns none of this run's workspace pins.
+    let mut git_request = submission.clone();
+    git_request.submission_key = operation("git-request");
+    git_request.workspace = None;
+    git_request.source = Some(openengine_cluster_testkit::native_v2_source_fixture());
+    git_request.initial_input = serde_json::json!("invalid input");
+    factory
+        .submit(&controller, request(git_request))
+        .await
+        .assert_error();
     let mut conflicting = submission;
     conflicting.submission_key = operation("different-request");
     conflicting.workspace = Some(workspace(vec![]));
@@ -478,7 +672,7 @@ fn copied_root_rejects_captured_external_git_administration_at_any_depth() {
             "{error}"
         );
         assert!(
-            !files
+            files
                 .host
                 .pin_exists(
                     &FileAccess {
@@ -490,7 +684,7 @@ fn copied_root_rejects_captured_external_git_administration_at_any_depth() {
                         operation: operation("workspace-seed-0"),
                     }
                 )
-                .assert_value()
+                .is_err()
         );
         assert_eq!(std::fs::read(pointer).assert_value(), bytes.as_bytes());
     }
@@ -536,23 +730,29 @@ fn managed_selections_validate_pinned_git_metadata_under_the_destination_basenam
             identity: &files.identity,
         };
         let mut pinned = Vec::new();
-        files
-            .host
-            .read_pin(
-                &access,
-                &FilePin {
-                    run_id: RunId::new("invalid-seed"),
-                    operation: operation("workspace-seed-0"),
-                },
-                &mut pinned,
-            )
-            .assert_value();
+        assert!(
+            files
+                .host
+                .read_pin(
+                    &access,
+                    &FilePin {
+                        run_id: RunId::new("invalid-seed"),
+                        operation: operation("workspace-seed-0"),
+                    },
+                    &mut pinned,
+                )
+                .is_err()
+        );
         let mut original = Vec::new();
         files
             .host
             .download(&access, &selection, &mut original)
             .assert_value();
-        assert_eq!(pinned, original);
+        assert!(
+            original
+                .windows(bytes.len())
+                .any(|part| part == bytes.as_bytes())
+        );
         assert_eq!(
             std::fs::read(library.join(member)).assert_value(),
             bytes.as_bytes()
@@ -566,7 +766,7 @@ fn managed_selections_validate_pinned_git_metadata_under_the_destination_basenam
             accept()
                 .assert_error()
                 .to_string()
-                .contains("external Git administration")
+                .contains("inputs were released")
         );
     }
 }

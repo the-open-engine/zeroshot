@@ -1975,12 +1975,26 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   across lost acknowledgements, library replacement and restart. Its admission lock checks existing
   submission and run manifests before publishing either identity or any pins; a new submission key
   cannot claim a recorded run, and a replay never replaces its frozen run manifest.
+  Local root-copy pins retain executable bits in private workspace metadata and restore them on
+  materialization/restart without changing the file-transfer wire format. Success, explicit stop
+  and confirmed pre-admission refusal release seed pins with durable tombstones; failures and
+  suspensions retain them for recovery, while small submission/run identities remain for replay.
+  Every local preparation failure after pinning uses the same cleanup as controller-start refusal;
+  release pins and disposable folders only when neither a live controller nor admission owns them.
+  Unknown ownership retains recovery inputs.
+  The production factory serializes workspace pin preparation through admission/refusal cleanup
+  across its clones, so rejected retries cannot release inputs of an overlapping acceptance.
   Materialize before startup, keep
   managed roots disjoint from sources/state, and dispose only managed roots. Workspace identity
   travels with admitted definitions, status, history and recovery. In-place progress uses durable
   metadata without snapshotting, resetting or deleting the user's folder; file restore is refused.
-  Checkpoint-free fresh managed local restarts rebuild the original pins, while continuations keep
-  the live copy. Workspace mode has graph memory only and creates no repository-memory identity.
+  Checkpoint-free fresh managed local restarts rebuild the original pins only with an empty
+  starting execution seed; successors retaining completed work keep the corresponding live copy.
+  Defer launcher executable preflight for reconstruction, as for checkpoint restore; the controller
+  validates executables after restoring under its workspace lease, before admission.
+  Box resume input-state inspection before constructing the large prepared run, keeping native
+  startup and resume within the portable suite's 1 MiB stack budget.
+  Workspace mode has graph memory only and creates no repository-memory identity.
   Managed root copies and every pinned file selection validate captured bytes, including each
   destination basename, before admission. Recognize Git administrative layouts by HEAD plus
   objects/refs or commondir regardless of directory name, including layouts assembled from multiple

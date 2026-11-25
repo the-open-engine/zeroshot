@@ -2,6 +2,53 @@
 use super::*;
 
 impl LocalCliBackend {
+    pub(super) async fn start_prepared_controller(
+        &self,
+        prepared: PreparedLocalRun,
+    ) -> Result<RunId, NativeV2CliError> {
+        let managed = prepared
+            .submission
+            .workspace
+            .as_ref()
+            .filter(|workspace| !workspace.is_in_place())
+            .map(|_| (prepared.run_id.clone(), prepared.workspace.clone()));
+        let result = self
+            .start_prepared_controller_with_lineage(prepared, None, None)
+            .await
+            .map_err(|failure| failure.error);
+        if result.is_err()
+            && let Some((run_id, workspace)) = managed
+        {
+            self.discard_unadmitted_workspace(&run_id, Some(&workspace))
+                .await?;
+        }
+        result
+    }
+
+    async fn discard_unadmitted_workspace(
+        &self,
+        run_id: &RunId,
+        workspace: Option<&Path>,
+    ) -> Result<(), NativeV2CliError> {
+        let paths = self.paths(run_id)?;
+        if self
+            .successor_claim_is_live_or_admitted(run_id, paths.storage(), Duration::ZERO)
+            .await
+            .is_ok_and(|owned| !owned)
+        {
+            if let Some(workspace) = workspace {
+                let _ =
+                    crate::native_v2_supervisor::checkpoints::filesystem::remove_disposable_tree(
+                        workspace,
+                    );
+            }
+            crate::native_v2_cli::files::workspace_files(&self.state_root)?
+                .release(run_id)
+                .map_err(local_error)?;
+        }
+        Ok(())
+    }
+
     /// The request precedes remote default/base resolution. Replays use its frozen recovery
     /// fingerprint so a moved remote or dirty retained worktree cannot start another run.
     pub(super) async fn existing_local_request(
@@ -218,52 +265,59 @@ impl LocalCliBackend {
         };
         prepared.run_id = frozen.clone();
         prepared.delivery_run_id = frozen.clone();
-        crate::execution::platform::private_directory(&root).map_err(local_error)?;
         let destination = root.join(frozen.as_str());
-        if destination.parent() != Some(root.as_path())
-            || Path::new(frozen.as_str()).components().count() != 1
-        {
-            return Err(local_message("invalid workspace run identity"));
-        }
-        if destination.exists() {
-            let paths = self.paths(&frozen)?;
-            if self
-                .successor_claim_is_live_or_admitted(&frozen, paths.storage(), Duration::ZERO)
-                .await?
-            {
-                return Err(local_message(
-                    "managed workspace still belongs to an admitted or running controller",
-                ));
+        let valid_destination = destination.parent() == Some(root.as_path())
+            && Path::new(frozen.as_str()).components().count() == 1;
+        let result = async {
+            if !valid_destination {
+                return Err(local_message("invalid workspace run identity"));
             }
-            crate::native_v2_supervisor::checkpoints::filesystem::remove_disposable_tree(
-                &destination,
+            crate::execution::platform::private_directory(&root).map_err(local_error)?;
+            if destination.exists() {
+                let paths = self.paths(&frozen)?;
+                if self
+                    .successor_claim_is_live_or_admitted(&frozen, paths.storage(), Duration::ZERO)
+                    .await?
+                {
+                    return Err(local_message(
+                        "managed workspace still belongs to an admitted or running controller",
+                    ));
+                }
+                crate::native_v2_supervisor::checkpoints::filesystem::remove_disposable_tree(
+                    &destination,
+                )
+                .map_err(local_error)?;
+            }
+            std::fs::create_dir(&destination).map_err(local_error)?;
+            // Complete publication in this poll, so cancellation cannot leave a detached writer
+            // racing a retry or controller cleanup.
+            files
+                .materialize(&frozen, &destination)
+                .map_err(local_error)?;
+            crate::native_v2_local::validate_workspace_state(&destination, &self.state_root)
+                .map_err(local_error)?;
+            prepared.invoking_workspace = Some(source);
+            prepared.workspace = destination.clone();
+            if let Some(workspace) = &mut prepared.submission.workspace {
+                workspace.local_directory = Some(
+                    prepared
+                        .workspace
+                        .to_str()
+                        .ok_or_else(|| local_message("workspace path is not representable"))?
+                        .into(),
+                );
+            }
+            Ok(())
+        }
+        .await;
+        if result.is_err() {
+            self.discard_unadmitted_workspace(
+                &frozen,
+                valid_destination.then_some(destination.as_path()),
             )
-            .map_err(local_error)?;
+            .await?;
         }
-        std::fs::create_dir(&destination).map_err(local_error)?;
-        // Complete publication in this poll, so cancellation cannot leave a detached writer
-        // racing a retry or controller cleanup.
-        let copied = files.materialize(&frozen, &destination);
-        if let Err(error) = copied {
-            let _ = crate::native_v2_supervisor::checkpoints::filesystem::remove_disposable_tree(
-                &destination,
-            );
-            return Err(local_error(error));
-        }
-        crate::native_v2_local::validate_workspace_state(&destination, &self.state_root)
-            .map_err(local_error)?;
-        prepared.invoking_workspace = Some(source);
-        prepared.workspace = destination;
-        if let Some(workspace) = &mut prepared.submission.workspace {
-            workspace.local_directory = Some(
-                prepared
-                    .workspace
-                    .to_str()
-                    .ok_or_else(|| local_message("workspace path is not representable"))?
-                    .into(),
-            );
-        }
-        Ok(())
+        result
     }
 }
 
@@ -278,3 +332,34 @@ fn local_request_digest(
         .map_err(local_error)?;
     Sha256Digest::new(format!("{:x}", Sha256::digest(bytes))).map_err(local_error)
 }
+
+/// Called only after runtime cleanup, when success or explicit stop ends workspace recovery.
+pub(crate) fn release_workspace_inputs(storage: &Path) -> Result<(), NativeV2CliError> {
+    let recovery = match LocalRecoveryDocument::read(&storage.join(RECOVERY_FILE)) {
+        Ok(recovery) => recovery,
+        Err(_) if !storage.join(RECOVERY_FILE).exists() => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if !recovery
+        .submission
+        .workspace
+        .as_ref()
+        .is_some_and(|spec| !spec.is_in_place())
+    {
+        return Ok(());
+    }
+    let origin = recovery
+        .delivery_run_id
+        .ok_or_else(|| local_message("workspace input identity is missing"))?;
+    let state = storage
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| local_message("run storage has no state root"))?;
+    crate::native_v2_cli::files::workspace_files(state)?
+        .release(&origin)
+        .map_err(local_error)
+}
+
+#[cfg(test)]
+#[path = "submission/tests.rs"]
+mod tests;

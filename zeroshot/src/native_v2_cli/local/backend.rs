@@ -600,15 +600,19 @@ impl LocalCliBackend {
         {
             return Ok(false);
         }
-        let status = self
-            .status_local(RunStatusParams {
-                run_id: params.run_id.clone(),
-            })
-            .await?;
-        Ok(!matches!(
-            status.status,
-            openengine_cluster_protocol::RunStatus::Suspended { .. }
-        ))
+        let ledger = SqliteRunLedger::open_read_only(self.paths(&params.run_id)?.ledger())
+            .map_err(local_error)?;
+        let stored = ledger
+            .get(&params.run_id)
+            .await
+            .map_err(local_error)?
+            .ok_or_else(|| local_message("predecessor ledger is unavailable"))?;
+        // A successor restarts at its original execution seed. Keep the corresponding live
+        // files when completed work is retained; original inputs only match an empty seed.
+        Ok(
+            stored.snapshot.phase != crate::v2_run_ledger::RunPhase::Suspended
+                && stored.snapshot.execution_seed.is_empty(),
+        )
     }
 
     async fn prepare_successor(
@@ -666,6 +670,9 @@ impl LocalCliBackend {
             &recovery.workspace,
         )
         .map_err(local_error)?;
+        // Keep recovery inspection off the native CLI's bounded stack, before constructing
+        // the large prepared run (including its graph, environment and native configuration).
+        let managed_restart = Box::pin(self.managed_restart_required(params, recovery)).await?;
         Ok(PreparedLocalRun {
             local_branch: recovery.local_branch.clone(),
             invoking_workspace: recovery.invoking_workspace.clone(),
@@ -681,7 +688,7 @@ impl LocalCliBackend {
             git_credentials,
             workspace: recovery.workspace.clone(),
             native_environment,
-            managed_restart: self.managed_restart_required(params, recovery).await?,
+            managed_restart,
         })
     }
 }

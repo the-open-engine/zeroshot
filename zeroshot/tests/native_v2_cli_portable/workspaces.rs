@@ -36,6 +36,341 @@ fn runtime(fixture: &Fixture, checkpoints: bool) {
     fixture.write("runtime.json", &runtime);
 }
 
+fn input_objects(fixture: &Fixture) -> usize {
+    fs::read_dir(fixture.root.path("state/files/objects"))
+        .unwrap()
+        .count()
+}
+
+#[test]
+fn refused_managed_directory_preparation_releases_pins_before_controller_start() {
+    let fixture = Fixture::new().outside_workspace();
+    runtime(&fixture, false);
+    let obstruction = fixture.root.path("state-workspaces");
+    fs::write(&obstruction, b"keep this file").unwrap();
+    for index in 0..2 {
+        let output = fixture
+            .run_command("finish", true)
+            .args([
+                "--workspace",
+                "--copy-workspace",
+                "--submission-key",
+                &format!("refused-{index}"),
+            ])
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{output:?}");
+        // Each attempt captured inputs before failing, and cleanup retained its replay marker.
+        assert_eq!(
+            fs::read_dir(fixture.root.path("state/workspace-inputs"))
+                .unwrap()
+                .filter_map(Result::ok)
+                .filter(|entry| entry.file_name().to_string_lossy().starts_with("released-"))
+                .count(),
+            index + 1
+        );
+        assert_eq!(input_objects(&fixture), 0);
+        assert!(
+            fixture.json(&["list"])["runs"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(fs::read(&obstruction).unwrap(), b"keep this file");
+        assert_eq!(fs::read(fixture.workspace.join("seed")).unwrap(), b"seed");
+        assert!(!fixture.workspace.join("mutation.txt").exists());
+    }
+    fs::remove_file(&obstruction).unwrap();
+    let id = receipt(
+        &fixture
+            .run_command("finish", true)
+            .args(["--workspace", "--copy-workspace"])
+            .output()
+            .unwrap(),
+    );
+    let status = settled(&fixture, &id, "finished");
+    assert_eq!(status["status"]["terminalResult"]["status"], "succeeded");
+    assert_eq!(input_objects(&fixture), 0);
+    assert_eq!(fs::read(fixture.workspace.join("seed")).unwrap(), b"seed");
+    assert!(!fixture.workspace.join("mutation.txt").exists());
+}
+
+#[test]
+fn managed_restart_restores_pinned_lane_before_executable_checks() {
+    for pinned in [true, false] {
+        let fixture = Fixture::new().outside_workspace();
+        runtime(&fixture, false);
+        let mut plan: Value =
+            serde_json::from_slice(&fs::read(fixture.root.path("runtime.json")).unwrap()).unwrap();
+        plan["globalAgents"] = json!({"postmortem":{"enabled":false}});
+        plan["nodes"]["worker"]["connections"]["openai"]
+            .as_array_mut()
+            .unwrap()
+            .push("FIXTURE_RECEIPTS".into());
+        fixture.write("runtime.json", &plan);
+        let tools = fixture.workspace.join("tools");
+        if pinned {
+            fs::create_dir(&tools).unwrap();
+            fs::copy(
+                fixture.root.path("bin space-é/harness.cjs"),
+                tools.join("harness.cjs"),
+            )
+            .unwrap();
+            let node = std::process::Command::new("node")
+                .args(["-p", "process.execPath"])
+                .output()
+                .unwrap();
+            success(&node);
+            let node = String::from_utf8(node.stdout).unwrap();
+            #[cfg(unix)]
+            openengine_cluster_testkit::fixture::write_executable(
+                &tools.join("codex"),
+                format!(
+                    "#!/bin/sh\nexec '{}' \"$(dirname \"$0\")/harness.cjs\" \"$@\"\n",
+                    node.trim().replace('\'', "'\\''")
+                ),
+                0o700,
+            )
+            .unwrap();
+            #[cfg(windows)]
+            fs::write(
+                tools.join("codex.cmd"),
+                format!(
+                    "@echo off\r\n\"{}\" \"%~dp0harness.cjs\" %*\r\n",
+                    node.trim()
+                ),
+            )
+            .unwrap();
+        }
+        // Resolve only the managed tools folder, even on hosts with a real Codex installation.
+        let inherited_path = std::env::var_os("PATH").unwrap();
+        let paths = std::iter::once(std::path::PathBuf::from("tools")).chain(
+            std::env::split_paths(&inherited_path).filter(|directory| {
+                ["codex", "codex.exe", "codex.cmd", "codex.com", "codex.bat"]
+                    .iter()
+                    .all(|name| !directory.join(name).is_file())
+            }),
+        );
+        let path = std::env::join_paths(paths).unwrap();
+        let receipts = fixture.root.path("executions.txt");
+        let mut first = fixture.run_command("fail", true);
+        first
+            .args(["--workspace", "--copy-workspace"])
+            .env("FIXTURE_RECEIPTS", &receipts);
+        if pinned {
+            first.env("PATH", &path);
+        }
+        let id = receipt(&first.output().unwrap());
+        let status = settled(&fixture, &id, "finished");
+        assert_eq!(status["status"]["terminalResult"]["status"], "failed");
+        let before = fs::read(&receipts).unwrap();
+        assert!(!before.is_empty(), "the initial worker must have executed");
+        let copy = Path::new(status["workspace"]["localDirectory"].as_str().unwrap());
+        if pinned {
+            fs::remove_dir_all(&tools).unwrap();
+            fs::remove_dir_all(copy.join("tools")).unwrap();
+        }
+        fs::write(
+            copy.join("uncheckpointed"),
+            b"replace during reconstruction",
+        )
+        .unwrap();
+        let resumed = fixture
+            .command(&["resume", &id])
+            .env("PATH", &path)
+            .env("FIXTURE_MODE", "finish")
+            .env("FIXTURE_RECEIPTS", &receipts)
+            .output()
+            .unwrap();
+        if pinned {
+            let successor = receipt(&resumed);
+            let completed = settled(&fixture, &successor, "finished");
+            assert_eq!(completed["status"]["terminalResult"]["status"], "succeeded");
+            assert_eq!(completed["workspace"], status["workspace"]);
+            assert!(fs::read(&receipts).unwrap().len() > before.len());
+            assert!(!copy.exists());
+        } else {
+            assert!(!resumed.status.success(), "{resumed:?}");
+            assert!(
+                String::from_utf8_lossy(&resumed.stderr)
+                    .contains("lane codex/openai needs the `codex` executable on PATH"),
+                "{resumed:?}"
+            );
+            assert!(!copy.join("uncheckpointed").exists());
+            assert_eq!(fs::read(&receipts).unwrap(), before);
+        }
+        assert_eq!(fs::read(fixture.workspace.join("seed")).unwrap(), b"seed");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn managed_copy_startup_executes_pinned_scripts_after_source_deletion_and_restart() {
+    for checkpoints in [false, true] {
+        let fixture = Fixture::new().outside_workspace();
+        runtime(&fixture, checkpoints);
+        fs::create_dir(fixture.workspace.join("tools")).unwrap();
+        let script = fixture.workspace.join("tools/setup.sh");
+        openengine_cluster_testkit::fixture::write_executable(
+            &script,
+            b"#!/bin/sh\nprintf pinned-script > startup-proof\n",
+            0o700,
+        )
+        .unwrap();
+        fixture.write("environment.json", &json!({"startup":"./tools/setup.sh"}));
+        let id = receipt(
+            &fixture
+                .run_command("fail", true)
+                .args(["--workspace", "--copy-workspace", "--environment"])
+                .arg(fixture.root.path("environment.json"))
+                .output()
+                .unwrap(),
+        );
+        let status = settled(&fixture, &id, "finished");
+        assert_eq!(
+            status["status"]["terminalResult"]["status"], "failed",
+            "{status}"
+        );
+        let copy = Path::new(status["workspace"]["localDirectory"].as_str().unwrap());
+        assert_eq!(
+            fs::read(copy.join("startup-proof")).unwrap(),
+            b"pinned-script"
+        );
+        fs::remove_file(&script).unwrap();
+        fs::remove_file(copy.join("startup-proof")).unwrap();
+        let successor = receipt(
+            &fixture
+                .command(&["resume", &id])
+                .env("FIXTURE_MODE", "fail")
+                .output()
+                .unwrap(),
+        );
+        settled(&fixture, &successor, "finished");
+        assert_eq!(
+            fs::read(copy.join("startup-proof")).unwrap(),
+            b"pinned-script"
+        );
+        assert!(input_objects(&fixture) > 0);
+        let finished = receipt(
+            &fixture
+                .command(&["resume", &successor])
+                .env("FIXTURE_MODE", "finish")
+                .output()
+                .unwrap(),
+        );
+        let status = settled(&fixture, &finished, "finished");
+        assert_eq!(
+            status["status"]["terminalResult"]["status"], "succeeded",
+            "{status}"
+        );
+        assert_eq!(input_objects(&fixture), 0);
+    }
+}
+
+#[test]
+fn failed_managed_request_successor_keeps_files_matching_its_starting_history() {
+    let fixture = Fixture::new().outside_workspace();
+    runtime(&fixture, true);
+    let mut graph: Value =
+        serde_json::from_slice(&fs::read(fixture.root.path("graph.json")).unwrap()).unwrap();
+    let worker = graph["root"]["children"][0].clone();
+    let mut completed = worker.clone();
+    completed["name"] = "completed".into();
+    completed["worker"] = "agent.completed@1".into();
+    let state =
+        json!({"kind":"record","fields":{"text":{"type":{"kind":"string"},"required":true}}});
+    graph["initialInput"] = state.clone();
+    graph["root"]["state"] = state.clone();
+    graph["root"]["children"] = json!([completed,
+        {"kind":"verifier","name":"approval","worker":"builtin.request.ask@1", "input":state,
+        "output":{"kind":"record","fields":{}},"signals":{},
+        "diagnostic":{"kind":"record","fields":{"message":{"type":{"kind":"string"},"required":true}}},
+        "attempts":1,"inputBindings":[{"target":["text"],"value":{"source":"state","path":["text"]}}],"writeBindings":[]},
+        worker, {"kind":"succeed","name":"done","output":{"kind":"null"},"bindings":[]}]);
+    fixture.write("graph.json", &graph);
+    fixture.write("input.json", &json!({"text":"Continue?"}));
+    let mut plan: Value =
+        serde_json::from_slice(&fs::read(fixture.root.path("runtime.json")).unwrap()).unwrap();
+    plan["nodes"]["worker"]["connections"]["openai"]
+        .as_array_mut()
+        .unwrap()
+        .push("FIXTURE_RECEIPTS".into());
+    plan["nodes"]["completed"] = plan["nodes"]["worker"].clone();
+    plan["nodes"]["completed"]["model"] = "completed-step".into();
+    plan["nodes"]["worker"]["model"] = "requires-completed-work".into();
+    plan["nodes"]["approval"] = json!({"kind":"request"});
+    fixture.write("runtime.json", &plan);
+    let receipts = fixture.root.path("executions.txt");
+    let id = receipt(
+        &fixture
+            .run_command("finish", true)
+            .args(["--workspace", "--copy-workspace"])
+            .env("FIXTURE_RECEIPTS", &receipts)
+            .output()
+            .unwrap(),
+    );
+    let status = settled(&fixture, &id, "suspended");
+    let copy = Path::new(status["workspace"]["localDirectory"].as_str().unwrap());
+    assert_eq!(
+        fs::read(copy.join("completed.txt")).unwrap(),
+        b"retained work"
+    );
+    fixture.write("answer.json", &json!({"signals":{},"output":{}}));
+    let mut failed = receipt(
+        &fixture
+            .command(&["answer", &id, "--input"])
+            .arg(fixture.root.path("answer.json"))
+            .env("FIXTURE_MODE", "fail")
+            .env("FIXTURE_RECEIPTS", &receipts)
+            .output()
+            .unwrap(),
+    );
+    settled(&fixture, &failed, "finished");
+    assert_eq!(
+        fixture.json(&["discard-workspace", &failed])["discarded"],
+        true
+    );
+    fs::write(fixture.workspace.join("seed"), b"upstream replacement").unwrap();
+    for mode in ["fail", "finish"] {
+        let resumed = receipt(
+            &fixture
+                .command(&["resume", &failed])
+                .env("FIXTURE_MODE", mode)
+                .env("FIXTURE_RECEIPTS", &receipts)
+                .output()
+                .unwrap(),
+        );
+        let status = settled(&fixture, &resumed, "finished");
+        if mode == "fail" {
+            assert_eq!(
+                fs::read(copy.join("completed.txt")).unwrap(),
+                b"retained work"
+            );
+        } else {
+            assert_eq!(
+                status["status"]["terminalResult"]["status"], "succeeded",
+                "{status}"
+            );
+            assert!(!copy.exists());
+        }
+        assert_eq!(
+            fs::read_to_string(&receipts)
+                .unwrap()
+                .lines()
+                .filter(|line| *line == "completed")
+                .count(),
+            1
+        );
+        failed = resumed;
+    }
+    assert!(!fixture.workspace.join("completed.txt").exists());
+    assert_eq!(
+        fs::read(fixture.workspace.join("seed")).unwrap(),
+        b"upstream replacement"
+    );
+    assert_eq!(input_objects(&fixture), 0);
+}
+
 fn assert_in_place(fixture: &Fixture, folder: &Path, id: &str) {
     let status = settled(fixture, id, "finished");
     assert_eq!(
@@ -170,6 +505,7 @@ fn managed_local_restart_reuses_pinned_root_and_only_disposes_the_copy() {
         "{status}"
     );
     assert!(!copy.exists());
+    assert_eq!(input_objects(&fixture), 0);
     assert!(fixture.workspace.is_dir());
     assert!(!fixture.workspace.join("mutation.txt").exists());
 }
@@ -881,6 +1217,9 @@ fn explicit_stop_of_reconstructed_suspended_run_disposes_only_managed_folder() {
         }
         success(&fixture.command(&["force-stop", &id]).output().unwrap());
         assert_eq!(root.exists(), !managed);
+        if managed {
+            assert_eq!(input_objects(&fixture), 0);
+        }
         assert_eq!(fs::read(fixture.workspace.join("seed")).unwrap(), b"seed");
     }
 }

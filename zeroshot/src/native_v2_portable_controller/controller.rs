@@ -834,6 +834,10 @@ impl CapsuleCleanup for PortableCheckpointCleanup {
         if matches!(exit, RunRuntimeExit::Completed) || explicit_stop {
             if let Some(workspace) = &self.managed_workspace {
                 remove_directory_if_present(workspace).map_err(|_| CapsuleCleanupUnavailable)?;
+                crate::native_v2_cli::local::release_workspace_inputs(
+                    self.directory.parent().ok_or(CapsuleCleanupUnavailable)?,
+                )
+                .map_err(|_| CapsuleCleanupUnavailable)?;
             }
         }
         // Provider cleanup is authoritative; checkpoint scratch collection is best effort.
@@ -1010,6 +1014,12 @@ impl CapsuleAllocator for SingleRunAllocator {
                     None
                 };
                 remove_directory_if_present(workspace).map_err(|_| CapsuleCleanupUnavailable)?;
+                crate::native_v2_cli::local::release_workspace_inputs(
+                    self.checkpoint_directory
+                        .parent()
+                        .ok_or(CapsuleCleanupUnavailable)?,
+                )
+                .map_err(|_| CapsuleCleanupUnavailable)?;
             }
             crate::native_v2_supervisor::checkpoints::discard_recorded_lineage(
                 &self.checkpoint_directory,

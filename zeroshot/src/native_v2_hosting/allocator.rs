@@ -500,6 +500,7 @@ impl ProductionCapsuleAllocator {
             state._loss_sender.clone(),
         );
         let cleanup = Arc::new(ProductionCapsuleCleanup {
+            workspace_files: self.config.workspace_files.clone(),
             run_id: run_id.clone(),
             state,
             active: Arc::downgrade(&self.active),
@@ -754,6 +755,9 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
         exit: RunRuntimeExit,
     ) -> Result<CapsuleDestroyed, CapsuleCleanupUnavailable> {
         let _turn = self.allocation_turns.lock(run_id).await;
+        let origin = read_recovery(&recovery_path(&self.config.storage_root, run_id))
+            .and_then(|document| document.delivery_run_id)
+            .unwrap_or_else(|| run_id.clone());
         let state = self.active.lock().await.get(run_id).cloned();
         if let Some(state) = state {
             cleanup_state(run_id, &state, &self.active, exit).await?;
@@ -799,6 +803,15 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
                     exit,
                 })?;
             }
+        }
+        if matches!(
+            exit,
+            RunRuntimeExit::Completed | RunRuntimeExit::ForceStopped
+        ) && let Some(files) = &self.config.workspace_files
+        {
+            files
+                .release(&origin)
+                .map_err(|_| CapsuleCleanupUnavailable)?;
         }
         Ok(CapsuleDestroyed::confirmed())
     }
@@ -957,6 +970,11 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
         )
         .map_err(|_| CapsuleCleanupUnavailable)?;
         remove_run_directory(&root)?;
+        if let Some(files) = &self.config.workspace_files {
+            files
+                .release(delivery_run_id)
+                .map_err(|_| CapsuleCleanupUnavailable)?;
+        }
         document.recoverable = false;
         write_recovery(&metadata_path, &document)?;
         Ok(true)
@@ -1077,6 +1095,7 @@ pub(super) fn monitor_workspace_identity(
 }
 
 struct ProductionCapsuleCleanup {
+    workspace_files: Option<crate::native_v2_files::WorkspaceFiles>,
     run_id: RunId,
     state: Arc<ProductionCapsuleState>,
     active: Weak<Mutex<BTreeMap<RunId, Arc<ProductionCapsuleState>>>>,
@@ -1092,6 +1111,15 @@ impl CapsuleCleanup for ProductionCapsuleCleanup {
             return Err(CapsuleCleanupUnavailable);
         };
         cleanup_state(&self.run_id, &self.state, &active, exit).await?;
+        if matches!(
+            exit,
+            RunRuntimeExit::Completed | RunRuntimeExit::ForceStopped
+        ) && let Some(files) = &self.workspace_files
+        {
+            files
+                .release(&self.state.delivery_run_id)
+                .map_err(|_| CapsuleCleanupUnavailable)?;
+        }
         Ok(CapsuleDestroyed::confirmed())
     }
 }

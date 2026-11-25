@@ -36,8 +36,8 @@ including a subfolder inside a Git checkout. Your edits remain there after the r
 retain graph progress separately: resume uses the same folder's current contents and cannot
 restore an earlier version of your files.
 
-Use `--workspace --copy-workspace` to freeze that folder's contents into a disposable managed
-copy. Linked worktrees and other external Git administrative pointers are refused; use in-place
+Use `--workspace --copy-workspace` to freeze that folder's contents and executable bits into a
+disposable managed copy. Linked worktrees and other external Git administrative pointers are refused; use in-place
 placement or select files without Git metadata. To start empty, use
 `--workspace --workspace-placement managed`. Add repeated
 `--workspace-seed user:PATH` or `--workspace-seed org:PATH` options to seed it from target files;
@@ -47,8 +47,10 @@ available when the library changes or disappears.
 
 Named Docker and hosted targets use managed placement and require workspace capability support.
 Startup runs after inputs are installed. Managed checkpoints restore the selected run copy;
-checkpoint-free local restarts rebuild the original pinned inputs. Successful or explicitly
-stopped managed runs dispose their copy. Workspace mode uses graph memory and rejects delivery,
+checkpoint-free local restarts rebuild the original pinned inputs when starting at the graph root.
+Successors that retain completed work keep their live files. Successful or explicitly
+stopped managed runs dispose their copy and release input pins; failed and suspended runs retain
+the inputs needed for recovery. Workspace mode uses graph memory and rejects delivery,
 Git source flags and environment context repositories.
 
 ## Graph nodes

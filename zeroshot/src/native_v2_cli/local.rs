@@ -74,6 +74,7 @@ pub(super) mod native_forge;
 mod recovery_claim;
 #[path = "local/submission.rs"]
 mod submission;
+pub(crate) use submission::release_workspace_inputs;
 use recovery_claim::{RECOVERY_CLAIM_HANDOFF, RECOVERY_CLAIM_WAIT};
 
 /// Private process mode intercepted by the shipped binary before public CLI parsing.
@@ -457,38 +458,6 @@ impl LocalCliBackend {
         Ok(())
     }
 
-    async fn start_prepared_controller(
-        &self,
-        prepared: PreparedLocalRun,
-    ) -> Result<RunId, NativeV2CliError> {
-        let managed = prepared
-            .submission
-            .workspace
-            .as_ref()
-            .filter(|workspace| !workspace.is_in_place())
-            .map(|_| (prepared.run_id.clone(), prepared.workspace.clone()));
-        let result = self
-            .start_prepared_controller_with_lineage(prepared, None, None)
-            .await
-            .map_err(|failure| failure.error);
-        if result.is_err()
-            && let Some((run_id, workspace)) = managed
-        {
-            let paths = self.paths(&run_id)?;
-            if self
-                .successor_claim_is_live_or_admitted(&run_id, paths.storage(), Duration::ZERO)
-                .await
-                .is_ok_and(|owned| !owned)
-            {
-                let _ =
-                    crate::native_v2_supervisor::checkpoints::filesystem::remove_disposable_tree(
-                        &workspace,
-                    );
-            }
-        }
-        result
-    }
-
     async fn start_prepared_controller_with_lineage(
         &self,
         prepared: PreparedLocalRun,
@@ -501,10 +470,10 @@ impl LocalCliBackend {
         let (resumed_from, request_resolution) = continuation
             .map(|(run, resolution)| (Some(run), resolution))
             .unwrap_or_default();
-        // Checkpoint restoration replaces this workspace under the controller's lease. A relative
-        // executable may exist only in that snapshot, so the controller checks lanes and delivery
-        // when it composes the restored run, before admission, and its startup report names them.
-        if checkpoint.is_none() {
+        // Checkpoint restoration and managed reconstruction replace this workspace under the
+        // controller's lease. Relative executables may exist only in the restored inputs, so the
+        // controller checks lanes and delivery when composing the restored run, before admission.
+        if checkpoint.is_none() && !prepared.managed_restart {
             crate::native_v2_local::check_lane_executables(
                 &prepared.submission.runtime,
                 &prepared.native_environment,

@@ -50,17 +50,19 @@ fn upload(files: &WorkspaceFiles, selection: &FileSelection, source: &Path, oper
 #[tokio::test]
 async fn direct_workspace_seeds_precede_startup_and_selected_checkpoint_survives_allocator_restart()
 {
-    exercise_workspace_recovery(false).await;
+    for exit in [RunRuntimeExit::Completed, RunRuntimeExit::ForceStopped] {
+        exercise_workspace_recovery(false, exit).await;
+    }
 }
 
 #[tokio::test]
 async fn root_direct_workspace_startup_observes_seeds_before_selected_checkpoint_recovery() {
     if unsafe { libc::geteuid() } == 0 {
-        exercise_workspace_recovery(true).await;
+        exercise_workspace_recovery(true, RunRuntimeExit::Completed).await;
     }
 }
 
-async fn exercise_workspace_recovery(startup: bool) {
+async fn exercise_workspace_recovery(startup: bool, exit: RunRuntimeExit) {
     let mut fixture = fixture(None).await;
     let files = crate::native_v2_cli::files::workspace_files(&fixture.root.child("library-state"))
         .assert_value();
@@ -173,9 +175,28 @@ async fn exercise_workspace_recovery(startup: bool) {
     );
     restored
         .cleanup
-        .destroy_or_confirm_absent(RunRuntimeExit::Completed)
+        .destroy_or_confirm_absent(exit)
         .await
         .assert_value();
+    let destination = fixture.root.child("released-input-probe");
+    fs::create_dir(&destination).assert_value();
+    assert!(files.materialize(&fixture.run_id, &destination).is_err());
+    files
+        .host
+        .remove(
+            &FileAccess {
+                target: &files.target,
+                identity: &files.identity,
+            },
+            &selection.address,
+        )
+        .assert_value();
+    assert_eq!(
+        fs::read_dir(fixture.root.child("library-state/files/objects"))
+            .assert_value()
+            .count(),
+        0
+    );
 }
 
 struct SourceFreeStorage;

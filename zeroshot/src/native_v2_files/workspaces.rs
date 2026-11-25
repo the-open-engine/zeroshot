@@ -69,20 +69,76 @@ impl WorkspaceFiles {
         let lock = directory.writable_file(std::ffi::OsStr::new("admission.lock"))?;
         lock.lock_exclusive()?;
         let manifest = reserve_manifest(&directory, request)?;
+        match directory.read_file(std::ffi::OsStr::new(&released_name(&manifest.run_id))) {
+            Ok(_) => {
+                self.release_manifest(&directory, &manifest)?;
+                return Err(invalid(
+                    "workspace inputs were released; submit with a new submission key",
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        let result = self.freeze_inputs(&directory, &manifest);
+        if result.is_err() {
+            self.release_manifest(&directory, &manifest)?;
+        }
+        result?;
+        Ok(manifest.run_id)
+    }
+
+    fn freeze_inputs(&self, directory: &paths::Directory, manifest: &Manifest) -> Result<()> {
         if let Some(root) = &manifest.local_root {
             let pin = pin(&manifest.run_id, 0)?;
             if !self.host.pin_exists(&self.access(), &pin)? {
                 let mut transfer = self.transfer()?;
-                super::pack(root, &mut transfer)?;
+                let executable = super::transfer::pack_with_permissions(root, &mut transfer)?;
                 let mut administration = GitAdministration::default();
                 administration.collect(transfer.as_file_mut(), "")?;
                 validate_managed_input(transfer.as_file_mut(), "", &administration.roots())?;
+                write_manifest(directory, &executable_name(&manifest.run_id), &executable)?;
                 transfer.rewind()?;
                 self.host.stage(&self.access(), &pin, &mut transfer)?;
             }
         }
-        self.freeze_selections(&manifest.run_id, &manifest.workspace.seeds)?;
-        Ok(manifest.run_id)
+        self.freeze_selections(&manifest.run_id, &manifest.workspace.seeds)
+    }
+
+    /// Permanently release this lineage's seed bytes, retaining admission identities for replay.
+    /// Retry under the same lock after partial release; file-store tombstones prevent repinning.
+    pub fn release(&self, run_id: &RunId) -> Result<()> {
+        let directory = self.directory()?;
+        let lock = directory.writable_file(std::ffi::OsStr::new("admission.lock"))?;
+        lock.lock_exclusive()?;
+        let manifest: Manifest = match directory.read_file(std::ffi::OsStr::new(&run_name(run_id)))
+        {
+            Ok(file) => serde_json::from_reader(file)
+                .map_err(|_| invalid("invalid workspace input manifest"))?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        if manifest.run_id != *run_id {
+            return Err(invalid("workspace input identity mismatch"));
+        }
+        self.release_manifest(&directory, &manifest)
+    }
+
+    fn release_manifest(&self, directory: &paths::Directory, manifest: &Manifest) -> Result<()> {
+        write_manifest(directory, &released_name(&manifest.run_id), &true)?;
+        let count = if manifest.workspace.copy_root {
+            1
+        } else {
+            manifest.workspace.seeds.len()
+        };
+        for index in 0..count {
+            self.host
+                .release(&self.access(), &pin(&manifest.run_id, index)?)?;
+        }
+        match directory.remove_file(std::ffi::OsStr::new(&executable_name(&manifest.run_id))) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        }
     }
 
     fn freeze_selections(
@@ -236,7 +292,17 @@ fn pin(run_id: &RunId, index: usize) -> Result<FilePin> {
 fn run_name(run_id: &RunId) -> String {
     format!("run-{}.json", digest(run_id.as_str()))
 }
-fn write_manifest(directory: &paths::Directory, name: &str, manifest: &Manifest) -> Result<()> {
+fn released_name(run_id: &RunId) -> String {
+    format!("released-{}.json", digest(run_id.as_str()))
+}
+fn executable_name(run_id: &RunId) -> String {
+    format!("executable-{}.json", digest(run_id.as_str()))
+}
+fn write_manifest(
+    directory: &paths::Directory,
+    name: &str,
+    manifest: &impl Serialize,
+) -> Result<()> {
     let mut temporary = paths::TemporaryFile::new(directory)?;
     serde_json::to_writer(&mut temporary.file, manifest)?;
     temporary.file.flush()?;
@@ -250,8 +316,43 @@ fn materialize_root(files: &WorkspaceFiles, pin: &FilePin, destination: &Path) -
     let stage = filesystem::private_stage(parent, ".workspace-seed-")?;
     let tree = stage.path().join("tree");
     files.host.materialize(&files.access(), pin, &tree)?;
+    restore_executable(files, &pin.run_id, &tree)?;
     paths::reject_links(destination)?;
     filesystem::replace_children(&tree, destination, false)
+}
+
+fn restore_executable(files: &WorkspaceFiles, run_id: &RunId, tree: &Path) -> Result<()> {
+    let directory = files.directory()?;
+    let executable: Vec<(openengine_cluster_protocol::FilePath, u32)> =
+        match directory.read_file(std::ffi::OsStr::new(&executable_name(run_id))) {
+            Ok(file) => serde_json::from_reader(file)
+                .map_err(|_| invalid("invalid workspace executable metadata"))?,
+            // Root pins admitted by older builds did not retain executable metadata.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        };
+    for (path, mode) in executable {
+        if mode & !0o111 != 0 || path.as_str().is_empty() {
+            return Err(invalid("invalid workspace executable metadata"));
+        }
+        let (parents, leaf) = path
+            .as_str()
+            .rsplit_once('/')
+            .unwrap_or(("", path.as_str()));
+        let mut directory = paths::Directory::open(tree)?;
+        for component in parents.split('/').filter(|part| !part.is_empty()) {
+            directory = directory.child(std::ffi::OsStr::new(component))?;
+        }
+        let file = directory.read_file(std::ffi::OsStr::new(leaf))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(std::fs::Permissions::from_mode(0o600 | mode))?;
+        }
+        #[cfg(windows)]
+        let _ = file;
+    }
+    Ok(())
 }
 
 // Git can discover an administrative directory under any name, including the workspace root.
