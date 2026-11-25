@@ -168,7 +168,10 @@ impl ClusterBackend for NativeV2PlatformController {
             .current_target(&params.run_id, params.part_id.as_ref())
             .await?;
         let mut result = self
-            .force(RunForceParams { run_id, ..params })
+            .force(RunForceParams {
+                part_id: Some(run_id.clone()),
+                run_id,
+            })
             .await
             .map_err(platform_backend_error)?;
         result.run_id = family.root().clone();

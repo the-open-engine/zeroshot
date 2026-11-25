@@ -936,7 +936,12 @@ impl NativeV2CliBackend for LocalCliBackend {
         let (lineage, part) = self
             .select_part(&params.run_id, params.part_id.as_ref(), true)
             .await?;
-        let result = self.force_local(RunForceParams::new(part)).await?;
+        let result = self
+            .force_local(RunForceParams {
+                part_id: Some(part.clone()),
+                run_id: part,
+            })
+            .await?;
         let mut result = result.into();
         self.project_control(&lineage, &mut result).await?;
         Ok(result)

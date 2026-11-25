@@ -218,6 +218,14 @@ async fn accepted_continuation_fences_a_previously_captured_suspended_engine() {
             .force(RunForceParams::new(harness.source.clone()));
         tokio::pin!(force);
         assert!(futures_util::poll!(&mut force).is_pending());
+        let context = openengine_cluster_server::ConnectionContext::default();
+        let public_force = openengine_cluster_server::ClusterBackend::run_force(
+            &harness.controller,
+            &context,
+            RunForceParams::new(harness.source.clone()),
+        );
+        tokio::pin!(public_force);
+        assert!(futures_util::poll!(&mut public_force).is_pending());
         harness.ledger.suspension_release.send_replace(true);
         let successor = resume.await.assert_value();
         let before = harness
@@ -227,6 +235,12 @@ async fn accepted_continuation_fences_a_previously_captured_suspended_engine() {
             .assert_value();
         harness.ledger.force_release.send_replace(true);
         let forced = force.await.assert_value();
+        let stale = public_force.await.assert_error();
+        assert_eq!(stale.code, openengine_cluster_protocol::RUN_CONFLICT);
+        assert_eq!(
+            stale.details.assert_value()["currentPartId"],
+            successor.run_id.as_str()
+        );
         assert_eq!(forced.status, before.status);
         assert_eq!(forced.at_cursor, before.at_cursor);
         let after = harness

@@ -24,21 +24,27 @@ fn recovery(fixture: &Fixture) -> LocalRecoveryDocument {
     document
 }
 
-async fn linked_parts() -> (Fixture, Fixture) {
-    let parent = Fixture::new(true, false).await;
+async fn prepare_child(parent: &Fixture) -> Fixture {
     let backend = &parent.backend;
     let child = Fixture::in_state(false, false, Some(backend.state_root.clone())).await;
-    let mut parent_doc = recovery(&parent);
-    parent_doc.successor_run_id = Some(child.id.clone());
-    backend
-        .write_recovery_document(&parent.id, &parent_doc)
-        .unwrap();
     let mut child_doc = recovery(&child);
     child_doc.resumed_from = Some(parent.id.clone());
     backend
         .write_recovery_document(&child.id, &child_doc)
         .unwrap();
 
+    child
+}
+
+async fn linked_parts() -> (Fixture, Fixture) {
+    let parent = Fixture::new(true, false).await;
+    let child = prepare_child(&parent).await;
+    let mut document = recovery(&parent);
+    document.successor_run_id = Some(child.id.clone());
+    parent
+        .backend
+        .write_recovery_document(&parent.id, &document)
+        .unwrap();
     (parent, child)
 }
 
@@ -299,7 +305,45 @@ async fn continuation_claim_fences_force_even_while_recorded_status_is_running()
 }
 
 #[tokio::test]
-async fn accepted_continuation_preserves_suspended_source_and_bypasses_live_controller() {
+async fn public_force_rechecks_its_selected_part_after_waiting_for_a_handoff() {
+    let parent = Fixture::new(false, false).await;
+    let backend = &parent.backend;
+    let child = prepare_child(&parent).await;
+    let mut parent_doc = recovery(&parent);
+    // Verify the child through its durable admission rather than its readiness marker.
+    std::fs::remove_file(backend.paths(&child.id).unwrap().ready()).unwrap();
+    suspend(&parent).await;
+
+    let claim = backend.claim_recovery_workspace(&parent.id).unwrap();
+    let mut observed = RunForceParams::new(parent.id.clone());
+    observed.part_id = Some(parent.id.clone());
+    let explicit = backend.run_force(None, observed);
+    let implicit = backend.run_force(None, RunForceParams::new(parent.id.clone()));
+    tokio::pin!(explicit, implicit);
+    // The unlinked root is selected synchronously. Both callers must then wait for the claim.
+    assert!(futures_util::poll!(&mut explicit).is_pending());
+    assert!(futures_util::poll!(&mut implicit).is_pending());
+    parent_doc.successor_run_id = Some(child.id.clone());
+    backend
+        .write_recovery_document(&parent.id, &parent_doc)
+        .unwrap();
+    drop(claim);
+
+    let (explicit, implicit) = tokio::join!(explicit, implicit);
+    for result in [explicit, implicit] {
+        assert!(matches!(result,
+            Err(NativeV2CliError::Remote { code, details: Some(details), .. })
+                if code == openengine_cluster_protocol::RUN_CONFLICT && details["currentPartId"] == child.id.as_str()));
+    }
+    let child_status = backend
+        .read_recorded_status(RunStatusParams::new(child.id))
+        .await
+        .unwrap();
+    assert!(matches!(child_status.status, RunStatus::Running { .. }));
+}
+
+#[tokio::test]
+async fn unconfirmed_successor_preserves_the_source_and_refuses_logical_force() {
     let fixture = Fixture::new(false, false).await;
     let mut document = recovery(&fixture);
     let suspended = suspend(&fixture).await;
@@ -320,6 +364,15 @@ async fn accepted_continuation_preserves_suspended_source_and_bypasses_live_cont
         .unwrap();
     drop(claim);
     let before = tree(fixture.root.path());
+    let error = fixture
+        .backend
+        .run_force(None, RunForceParams::new(fixture.id.clone()))
+        .await
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("unconfirmed successor"),
+        "{error}"
+    );
     let forced = fixture
         .backend
         .force_once(RunForceParams::new(fixture.id.clone()))

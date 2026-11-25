@@ -718,8 +718,9 @@ impl ClusterBackend for LiveController {
     async fn run_force(
         &self,
         _context: &ConnectionContext,
-        _params: RunForceParams,
+        params: RunForceParams,
     ) -> Result<RunForceResult, BackendError> {
+        assert_eq!(params, RunForceParams::new(self.stopped.run_id.clone()));
         self.forced.store(true, Ordering::SeqCst);
         if let Some(gate) = &self.force_gate {
             gate.entered.notify_one();
