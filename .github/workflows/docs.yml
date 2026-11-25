@@ -60,6 +60,7 @@ jobs:
       UPDATE_STABLE: ${{ inputs.stable || false }}
       GH_TOKEN: ${{ github.token }}
       ZEROSHOT_DOCS_PUBLISHER_COMMIT: ${{ github.workflow_sha }}
+      PAGES_ARTIFACT_NAME: github-pages-${{ github.run_attempt }}
     steps:
       - name: Validate documentation identity
         shell: bash
@@ -334,13 +335,35 @@ jobs:
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
 
       - name: Upload the complete versioned site
+        id: pages-artifact
         uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4.0.0
         with:
+          name: ${{ env.PAGES_ARTIFACT_NAME }}
           path: ${{ runner.temp }}/zeroshot-pages
+
+      - name: Wait for the uploaded Pages artifact
+        shell: bash
+        env:
+          ARTIFACT_ID: ${{ steps.pages-artifact.outputs.artifact_id }}
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_ID" =~ ^[0-9]+$ ]]
+          for ((attempt = 0; attempt < 12; attempt++)); do
+            sleep 5
+            if curl --fail --silent --show-error --max-time 10 \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?name=$PAGES_ARTIFACT_NAME" \
+              | jq -e --argjson id "$ARTIFACT_ID" 'any(.artifacts[]; .id == $id and (.expired | not))' >/dev/null; then
+              exit 0
+            fi
+          done
+          echo "::error::The uploaded Pages artifact did not appear in the workflow run."
+          exit 1
 
       - name: Deploy GitHub Pages
         id: deployment
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
+        with:
+          artifact_name: ${{ env.PAGES_ARTIFACT_NAME }}
 
       - name: Verify live documentation manifest
         shell: bash

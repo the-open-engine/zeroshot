@@ -435,6 +435,71 @@ const docsPublicationManifest = {
 const docsPublicationOptions = { skip: process.platform === 'win32' };
 const docsPublicationStep = 'Verify live documentation manifest';
 
+const pagesArtifactWaitStep = 'Wait for the uploaded Pages artifact';
+
+function runPagesArtifactWait(t, artifactsByAttempt) {
+  return runWorkflowStep(t, {
+    workflow: '.github/workflows/docs.yml',
+    job: 'publish',
+    step: pagesArtifactWaitStep,
+    prefix: 'export http_proxy="$HTTP_PROXY"\nsleep() { :; }\n',
+    environment: {
+      GITHUB_API_URL: 'http://github.localhost',
+      GITHUB_RUN_ID: '123',
+      PAGES_ARTIFACT_NAME: 'github-pages-2',
+      ARTIFACT_ID: '456',
+    },
+    respond(_request, response, index) {
+      const artifacts = artifactsByAttempt[Math.min(index, artifactsByAttempt.length - 1)];
+      response.end(JSON.stringify({ artifacts }));
+    },
+  });
+}
+
+it(
+  'waits for the upload from the current Pages deployment attempt',
+  docsPublicationOptions,
+  async (t) => {
+    const { publish } = jsYaml.load(read('.github/workflows/docs.yml')).jobs;
+    const upload = publish.steps.find(({ id }) => id === 'pages-artifact');
+    const wait = publish.steps.find(({ name }) => name === pagesArtifactWaitStep);
+    const deployment = publish.steps.find(({ id }) => id === 'deployment');
+    assert.equal(publish.env.PAGES_ARTIFACT_NAME, 'github-pages-${{ github.run_attempt }}');
+    assert.equal(upload.with.name, '${{ env.PAGES_ARTIFACT_NAME }}');
+    assert.equal(deployment.with.artifact_name, upload.with.name);
+    assert.equal(wait.env.ARTIFACT_ID, '${{ steps.pages-artifact.outputs.artifact_id }}');
+    assert.ok(publish.steps.indexOf(upload) < publish.steps.indexOf(wait));
+    assert.ok(publish.steps.indexOf(wait) < publish.steps.indexOf(deployment));
+
+    const result = await runPagesArtifactWait(t, [[], [{ id: 456, expired: false }]]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(
+      result.requests,
+      Array(2).fill({
+        method: 'GET',
+        url: 'http://github.localhost/repos/fixture/repo/actions/runs/123/artifacts?name=github-pages-2',
+        body: '',
+      })
+    );
+  }
+);
+
+it(
+  'bounds the Pages artifact wait when only wrong or expired uploads are visible',
+  docsPublicationOptions,
+  async (t) => {
+    const result = await runPagesArtifactWait(t, [
+      [
+        { id: 123, expired: false },
+        { id: 456, expired: true },
+      ],
+    ]);
+    assert.notEqual(result.code, 0);
+    assert.equal(result.requests.length, 12);
+    assert.match(result.stdout, /did not appear/);
+  }
+);
+
 function runDocsPublicationVerification(t, replies, current = false) {
   return runWorkflowStep(t, {
     workflow: '.github/workflows/docs.yml',
