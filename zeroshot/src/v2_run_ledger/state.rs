@@ -62,6 +62,7 @@ pub(crate) fn validate_event(event: &RunEvent) -> Result<(), RunLedgerError> {
                     ..
                 },
         }
+        | RunEvent::RequestPrepared { .. }
         | RunEvent::Suspended {
             suspension: openengine_cluster_protocol::RunSuspension::Request { .. },
         } => openengine_cluster_protocol::MAX_REQUEST_RESPONSE_BYTES - 1024,
@@ -127,6 +128,9 @@ pub(crate) fn apply_stored_event(
     stored: &super::StoredRunEvent,
 ) -> Result<(), RunLedgerError> {
     apply_event(snapshot, &stored.event, cursor_sequence(&stored.cursor)?)?;
+    if matches!(stored.event, RunEvent::Terminal { .. }) {
+        snapshot.terminal_recorded_at = stored.recorded_at;
+    }
     if let RunEvent::NodeStarted { reference, .. } = &stored.event {
         snapshot
             .executions
@@ -172,6 +176,9 @@ fn apply_event_kind(
     sequence: u64,
 ) -> Result<(), RunLedgerError> {
     match event {
+        RunEvent::RequestPrepared { .. } | RunEvent::FinalArtifactsPublished { .. } => {
+            apply_publication_event(snapshot, event)
+        }
         RunEvent::NodeInstancesReserved { through } => {
             apply_node_instances_reserved(snapshot, *through)
         }
@@ -242,6 +249,7 @@ fn apply_event_kind(
             Ok(())
         }
         RunEvent::Suspended { suspension } => {
+            snapshot.pending_request = None;
             require_running(snapshot)?;
             if snapshot.active_executions().next().is_some() {
                 return Err(RunLedgerError::InvalidEvent(
@@ -272,6 +280,39 @@ fn apply_event_kind(
         }
         RunEvent::ForceStopRequested => apply_force_stop(snapshot),
         RunEvent::Terminal { result } => apply_terminal(snapshot, result),
+    }
+}
+
+fn apply_publication_event(
+    snapshot: &mut RunSnapshot,
+    event: &RunEvent,
+) -> Result<(), RunLedgerError> {
+    require_running(snapshot)?;
+    match event {
+        RunEvent::RequestPrepared { pending } => {
+            if snapshot.pending_request.is_some()
+                || !matches!(
+                    pending.suspension,
+                    openengine_cluster_protocol::RunSuspension::Request { .. }
+                )
+            {
+                return Err(RunLedgerError::InvalidEvent(
+                    "request already prepared or invalid",
+                ));
+            }
+            snapshot.pending_request = Some(pending.clone());
+            Ok(())
+        }
+        RunEvent::FinalArtifactsPublished { artifacts } => {
+            if snapshot.primary_graph.is_some() || !snapshot.artifacts.is_empty() {
+                return Err(RunLedgerError::InvalidEvent(
+                    "final artifacts already published",
+                ));
+            }
+            snapshot.artifacts = artifacts.clone();
+            Ok(())
+        }
+        _ => Err(RunLedgerError::InvalidEvent("invalid publication event")),
     }
 }
 

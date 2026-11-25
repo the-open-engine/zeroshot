@@ -9,12 +9,13 @@ use windows_sys::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CREATE_NEW, CreateDirectoryW, CreateFileW,
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
     FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    GetFileInformationByHandle, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
-    OPEN_ALWAYS, OPEN_EXISTING, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
+    GetFileInformationByHandle, OPEN_ALWAYS, OPEN_EXISTING, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
 };
 
 use super::FileAccess;
 mod controller;
+mod rename;
+pub(crate) use rename::rename_in_parent;
 pub(crate) mod security;
 pub(crate) use controller::{
     ControllerChild, controller_termination, guard_controller_console, spawn_controller,
@@ -162,14 +163,17 @@ fn open(
     Ok(file)
 }
 
-pub(crate) fn commit_file(temporary: &Path, destination: &Path, _parent: &Path) -> io::Result<()> {
-    check(unsafe {
-        MoveFileExW(
-            wide(temporary)?.as_ptr(),
-            wide(destination)?.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    })
+pub(crate) fn commit_file(temporary: &Path, destination: &Path, parent: &Path) -> io::Result<()> {
+    if temporary.parent() != Some(parent) || destination.parent() != Some(parent) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "state commit requires one directory",
+        ));
+    }
+    let name = destination.file_name().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "missing destination file name")
+    })?;
+    rename_in_parent(temporary, name, true)
 }
 
 fn wide(path: &Path) -> io::Result<Vec<u16>> {

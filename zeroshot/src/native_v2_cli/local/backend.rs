@@ -155,8 +155,70 @@ async fn admit_resume_runtime(
 }
 
 impl LocalCliBackend {
+    pub async fn protected_file_runs(
+        &self,
+    ) -> Result<std::collections::BTreeSet<RunId>, NativeV2CliError> {
+        let mut protected = std::collections::BTreeSet::new();
+        for run in self.list_local().await?.runs {
+            if matches!(
+                run.status,
+                openengine_cluster_protocol::RunStatus::Finished { .. }
+            ) {
+                continue;
+            }
+            if matches!(
+                run.status,
+                openengine_cluster_protocol::RunStatus::Suspended { .. }
+            ) && self
+                .read_recovery_document(&run.run_id)?
+                .successor_run_id
+                .is_some()
+            {
+                continue;
+            }
+            protected.insert(run.run_id);
+        }
+        Ok(protected)
+    }
+
+    pub async fn cleanup_checkpoints(
+        &self,
+        all: bool,
+        now: openengine_cluster_protocol::UnixTimestampMillis,
+    ) -> Result<usize, NativeV2CliError> {
+        let runs = self.list_local().await?.runs;
+        let cutoff = (!all).then(|| now.get().saturating_sub(60 * 24 * 60 * 60 * 1000));
+        let mut removed = 0;
+        for run in runs {
+            if !matches!(
+                run.status,
+                openengine_cluster_protocol::RunStatus::Finished { .. }
+            ) {
+                continue;
+            }
+            match self
+                .discard_local_checkpoints_before(&run.run_id, cutoff, true)
+                .await
+            {
+                Ok(true) => removed += 1,
+                Ok(false) | Err(NativeV2CliError::Usage(_)) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(removed)
+    }
+
     async fn discard_local_checkpoints(&self, run_id: &RunId) -> Result<bool, NativeV2CliError> {
-        use openengine_cluster_protocol::RunStatus;
+        self.discard_local_checkpoints_before(run_id, None, false)
+            .await
+    }
+
+    async fn discard_local_checkpoints_before(
+        &self,
+        run_id: &RunId,
+        cutoff: Option<u64>,
+        cleanup: bool,
+    ) -> Result<bool, NativeV2CliError> {
         // Resume publishes under this lock but prepares outside it under a per-run claim.
         // Hold every lineage member's claim and stopped-controller lease through deletion.
         let _submission_lock = self.acquire_submission_lock().await?;
@@ -177,12 +239,7 @@ impl LocalCliBackend {
                 continue;
             }
             let (paths, directory) = self.recorded_storage(&id)?;
-            let refusal = || {
-                NativeV2CliError::Usage(format!(
-                    "run {} is still running or being resumed; use force-stop before discarding checkpoints",
-                    id.as_str()
-                ))
-            };
+            let refusal = || checkpoint_discard_refusal(&id);
             let claim = self
                 .claim_recovery_workspace_within(&id, false, RECOVERY_CLAIM_HANDOFF)
                 .await
@@ -198,23 +255,15 @@ impl LocalCliBackend {
                     "checkpoint catalog disagrees with recovery lineage",
                 ));
             }
-            match status.status {
-                RunStatus::Finished { .. } => {}
-                RunStatus::Suspended { .. } if recovery.successor_run_id.is_some() => {}
-                RunStatus::Suspended { .. } => {
-                    return Err(NativeV2CliError::Usage(
-                        "run is suspended; force-stop it before discarding its workspace"
-                            .to_owned(),
-                    ));
-                }
-                _ => return Err(refusal()),
-            }
-            if let Some(pending) = &recovery.pending_restore {
-                return Err(NativeV2CliError::Usage(format!(
-                    "run {} has an interrupted checkpoint restore; repeat `{}` before discarding checkpoints",
-                    id.as_str(),
-                    restore_command(&id, &pending.selection)
-                )));
+            if !checkpoint_discard_eligible(
+                &status,
+                &recovery,
+                &paths.ledger(),
+                CheckpointDiscardPolicy { cutoff, cleanup },
+            )
+            .await?
+            {
+                return Ok(false);
             }
             self.confirm_loss_for_resume(&id).await?;
             let lease = ControllerLease::acquire(paths.lease()).map_err(|_| refusal())?;
@@ -1254,4 +1303,65 @@ fn reject_suspended_selection(
         }
     }
     Ok(())
+}
+
+struct CheckpointDiscardPolicy {
+    cutoff: Option<u64>,
+    cleanup: bool,
+}
+
+fn checkpoint_discard_refusal(id: &RunId) -> NativeV2CliError {
+    NativeV2CliError::Usage(format!(
+        "run {} is still running or being resumed; use force-stop before discarding checkpoints",
+        id.as_str()
+    ))
+}
+
+async fn checkpoint_discard_eligible(
+    status: &RunStatusResult,
+    recovery: &LocalRecoveryDocument,
+    ledger_path: &Path,
+    policy: CheckpointDiscardPolicy,
+) -> Result<bool, NativeV2CliError> {
+    use openengine_cluster_protocol::RunStatus;
+    let CheckpointDiscardPolicy { cutoff, cleanup } = policy;
+    let id = &status.run_id;
+    let terminal = matches!(&status.status, RunStatus::Finished { .. });
+    match &status.status {
+        RunStatus::Finished { .. } => {}
+        RunStatus::Suspended { .. } if recovery.successor_run_id.is_some() => {}
+        RunStatus::Suspended { .. } if cleanup => return Ok(false),
+        RunStatus::Suspended { .. } => {
+            return Err(NativeV2CliError::Usage(
+                "run is suspended; force-stop it before discarding its workspace".to_owned(),
+            ));
+        }
+        _ if cleanup => return Ok(false),
+        _ => return Err(checkpoint_discard_refusal(id)),
+    }
+    if let Some(cutoff) = cutoff.filter(|_| terminal) {
+        let ledger = SqliteRunLedger::open_read_only(ledger_path)?;
+        let stored = ledger
+            .get(id)
+            .await?
+            .ok_or_else(|| local_message("run not found"))?;
+        if stored
+            .snapshot
+            .terminal_recorded_at
+            .is_none_or(|time| time.get() > cutoff)
+        {
+            return Ok(false);
+        }
+    }
+    if cleanup && recovery.pending_restore.is_some() {
+        return Ok(false);
+    }
+    if let Some(pending) = &recovery.pending_restore {
+        return Err(NativeV2CliError::Usage(format!(
+            "run {} has an interrupted checkpoint restore; repeat `{}` before discarding checkpoints",
+            id.as_str(),
+            restore_command(id, &pending.selection)
+        )));
+    }
+    Ok(true)
 }

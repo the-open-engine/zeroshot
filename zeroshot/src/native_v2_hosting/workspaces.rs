@@ -64,6 +64,9 @@ pub trait HostedWorkspaceStorage: Send + Sync {
         state: &crate::native_v2_contract::DeliveryCheckpoint,
     ) -> Result<(), CheckpointError>;
 
+    /// The same run may be prepared again during controller-startup replay of a committed
+    /// file publication. Return its existing checkpoint authority without scheduling agents;
+    /// the controller supplies the frozen ledger history and vectors to `suspend`.
     async fn prepare(
         &self,
         request: HostedWorkspaceRequest<'_>,

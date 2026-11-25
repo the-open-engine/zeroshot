@@ -68,18 +68,33 @@ impl<'history> Engine<'history> {
                 context,
                 traversal,
             ),
-            GraphNode::Verifier(verifier) => self.eval_executable(
-                ExecutableSpec {
-                    name: &verifier.name,
-                    worker: &verifier.worker,
-                    input_bindings: &verifier.input_bindings,
-                    write_bindings: &verifier.write_bindings,
-                    attempt_ceiling: verifier.attempts,
-                    verifier: true,
-                },
-                context,
-                traversal,
-            ),
+            GraphNode::Verifier(verifier) => {
+                let status = self.eval_executable(
+                    ExecutableSpec {
+                        name: &verifier.name,
+                        worker: &verifier.worker,
+                        input_bindings: &verifier.input_bindings,
+                        write_bindings: &verifier.write_bindings,
+                        attempt_ceiling: verifier.attempts,
+                        verifier: true,
+                    },
+                    context,
+                    traversal,
+                )?;
+                if verifier.worker.as_str() == crate::native_v2_request::ASK_WORKER_REF
+                    && !verifier.artifacts.is_empty()
+                    && self.decisions.iter().any(|decision| {
+                        matches!(decision,
+                        Decision::Dispatch { occurrence, .. } if occurrence.node == verifier.name)
+                    })
+                {
+                    self.decisions.push(Decision::RequestArtifacts {
+                        node: verifier.name.clone(),
+                        paths: artifact_paths(&verifier.artifacts, context, traversal.item)?,
+                    });
+                }
+                Ok(status)
+            }
             _ => Err(ReducerError::InconsistentHistory),
         }
     }
@@ -135,6 +150,7 @@ impl<'history> Engine<'history> {
             Status::Terminal {
                 position,
                 projection: TerminalProjection::Succeeded { .. },
+                ..
             } => {
                 self.continue_decision(&profile.name, traversal.mode);
                 Ok(Status::Continue { position })
@@ -156,9 +172,11 @@ impl<'history> Engine<'history> {
                 Ok(Status::Terminal {
                     position: HistoryPosition::ZERO,
                     projection: TerminalProjection::Succeeded { output },
+                    artifacts: artifact_paths(&terminal.artifacts, context, traversal.item)?,
                 })
             }
             GraphNode::Fail(terminal) => Ok(Status::Terminal {
+                artifacts: BTreeMap::new(),
                 position: HistoryPosition::ZERO,
                 projection: TerminalProjection::Failed {
                     context: None,
@@ -447,6 +465,7 @@ impl<'history> Engine<'history> {
             && !self.error_reads.contains(spec.name)
         {
             return Ok(Status::Terminal {
+                artifacts: BTreeMap::new(),
                 position: *position,
                 projection: TerminalProjection::Failed {
                     reason: EnumLabel::new("unhandled")
@@ -827,4 +846,24 @@ fn group_boundary(node: &GraphNode, traversal: Traversal<'_>) -> Option<Executio
     } else {
         None
     }
+}
+
+fn artifact_paths(
+    declarations: &BTreeMap<FieldName, ArtifactPath>,
+    context: &Context,
+    item: Option<&Value>,
+) -> Result<BTreeMap<FieldName, String>, ReducerError> {
+    declarations
+        .iter()
+        .map(|(name, declaration)| {
+            let path = match declaration {
+                ArtifactPath::Literal { path } => path.clone(),
+                ArtifactPath::Binding { value } => select_data(value, &context.state, item)?
+                    .as_str()
+                    .ok_or(ReducerError::InvalidDurableValue)?
+                    .to_owned(),
+            };
+            Ok((name.clone(), path))
+        })
+        .collect()
 }

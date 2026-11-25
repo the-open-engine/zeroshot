@@ -50,6 +50,60 @@ pub(crate) mod publication_test_store;
 
 #[path = "native_v2_checkpoints.rs"]
 pub mod checkpoints;
+mod publication;
+
+pub(crate) fn pending_file_publication(
+    stored: &StoredRun,
+) -> Result<Option<crate::native_v2_files::publication::FilePublication>, NativeV2SupervisorError> {
+    use crate::native_v2_files::{FilePublicationOwner, publication::FilePublication};
+    let snapshot = &stored.snapshot;
+    if snapshot.force_stop_requested
+        || snapshot.phase != RunPhase::Running
+        || snapshot.primary_graph.is_some()
+    {
+        return Ok(None);
+    }
+    let (owner, paths) = if let Some(pending) = &snapshot.pending_request {
+        let openengine_cluster_protocol::RunSuspension::Request { request, .. } =
+            &pending.suspension
+        else {
+            return Err(NativeV2SupervisorError::InvalidState);
+        };
+        (
+            FilePublicationOwner::Request {
+                run_id: snapshot.run_id.clone(),
+                request: openengine_cluster_protocol::IdempotencyKey::new(request.id.as_str())
+                    .map_err(|_| NativeV2SupervisorError::InvalidState)?,
+            },
+            pending.paths.clone(),
+        )
+    } else {
+        if snapshot.active_executions().next().is_some() {
+            return Ok(None);
+        }
+        let reduced = reduce(&stored.admitted, snapshot)?;
+        if !matches!(reduced.terminal, Some(TerminalResult::Succeeded { .. })) {
+            return Ok(None);
+        }
+        (
+            FilePublicationOwner::Final {
+                run_id: snapshot.run_id.clone(),
+            },
+            reduced.artifacts,
+        )
+    };
+    if paths.is_empty() {
+        return Ok(None);
+    }
+    let (_, cancellation) = watch::channel(false);
+    Ok(Some(FilePublication {
+        owner,
+        paths,
+        now: crate::native_v2_runner::current_timestamp(),
+        cancellation: crate::execution::driver::DriverCancellation::new(cancellation),
+        preflight: Arc::new(|_| Ok(())), // Receipt lookup only; replay installs the actual envelopes.
+    }))
+}
 
 const FIRST_IDENTITY: u64 = 1;
 pub(crate) const SUSPENSION_STEER_RETRY: &str =
@@ -100,6 +154,10 @@ pub struct RuntimeCleanupUnavailable;
 
 #[derive(Debug, Error)]
 pub enum NativeV2SupervisorError {
+    #[error("file publication is unavailable on this host")]
+    FilePublicationUnavailable,
+    #[error("file publication failed: {0}")]
+    FilePublication(std::io::Error),
     #[error("run is suspended")]
     Suspended,
     #[error("run was not found")]
@@ -133,6 +191,7 @@ pub struct NativeV2Supervisor {
     delivery_policy: DeliveryPolicy,
     live_output: Option<Arc<dyn LiveOutputRegistrar>>,
     runtime_cleanup: Option<Arc<dyn RunRuntimeCleanup>>,
+    file_publisher: Option<Arc<dyn crate::native_v2_files::publication::RunFilePublisher>>,
     checkpoints: Option<Arc<dyn checkpoints::RunCheckpointStore>>,
     postmortem: Option<Arc<dyn crate::active_memory::postmortem::RunPostmortem>>,
     runtime_lost: Arc<AtomicBool>,
@@ -166,6 +225,7 @@ impl NativeV2Supervisor {
             delivery_policy: DeliveryPolicy::Optional,
             live_output: None,
             runtime_cleanup: None,
+            file_publisher: None,
             checkpoints: None,
             postmortem: None,
             runtime_lost: Arc::new(AtomicBool::new(false)),
@@ -197,6 +257,48 @@ impl NativeV2Supervisor {
     }
 
     #[must_use]
+    pub fn with_file_publisher(
+        mut self,
+        publisher: Option<Arc<dyn crate::native_v2_files::publication::RunFilePublisher>>,
+    ) -> Self {
+        self.file_publisher = publisher;
+        self
+    }
+
+    async fn publish_files(
+        &self,
+        owner: crate::native_v2_files::FilePublicationOwner,
+        paths: BTreeMap<openengine_cluster_protocol::FieldName, String>,
+        preflight: crate::native_v2_files::publication::PublicationPreflight,
+    ) -> Result<openengine_cluster_protocol::PublishedFiles, NativeV2SupervisorError> {
+        if paths.is_empty() {
+            preflight(&Default::default()).map_err(NativeV2SupervisorError::FilePublication)?;
+            return Ok(Default::default());
+        }
+        if self.force_requested.load(Ordering::Acquire) {
+            return Err(NativeV2SupervisorError::FilePublication(
+                std::io::Error::from(std::io::ErrorKind::Interrupted),
+            ));
+        }
+        let files = self
+            .file_publisher
+            .as_ref()
+            .ok_or(NativeV2SupervisorError::FilePublicationUnavailable)?
+            .publish(crate::native_v2_files::publication::FilePublication {
+                owner,
+                paths,
+                now: (self.wall_clock)(),
+                cancellation: crate::execution::driver::DriverCancellation::new(
+                    self.resolution_stop.subscribe(),
+                ),
+                preflight: preflight.clone(),
+            })
+            .await
+            .map_err(NativeV2SupervisorError::FilePublication)?;
+        preflight(&files).map_err(NativeV2SupervisorError::FilePublication)?;
+        Ok(files)
+    }
+
     pub fn with_runtime_cleanup(mut self, cleanup: Arc<dyn RunRuntimeCleanup>) -> Self {
         self.runtime_cleanup = Some(cleanup);
         self
@@ -350,6 +452,10 @@ impl NativeV2Supervisor {
         {
             return self.terminalize_force(&mut JoinSet::new()).await.map(Some);
         }
+        if let Some(pending) = stored.snapshot.pending_request.clone() {
+            self.publish_pending_request(pending).await?;
+            return Err(NativeV2SupervisorError::Suspended);
+        }
         if stored.snapshot.active_executions().next().is_some() {
             return self.terminalize_lost(&mut JoinSet::new()).await.map(Some);
         }
@@ -410,6 +516,9 @@ impl NativeV2Supervisor {
                         .terminalize_input_failure(&mut active.tasks, &error.to_string())
                         .await;
                 }
+                Err(NativeV2SupervisorError::FilePublication(error))
+                    if error.kind() == std::io::ErrorKind::Interrupted
+                        && self.force_requested.load(Ordering::Acquire) => {}
                 Err(error) => return Err(error),
             }
         }
@@ -454,11 +563,20 @@ impl NativeV2Supervisor {
             }
             active.boundary = Some(boundary.clone());
         }
+        let request_paths = reduction
+            .decisions
+            .iter()
+            .find_map(|decision| match decision {
+                Decision::RequestArtifacts { paths, .. } => Some(paths.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
         let dispatches = dispatch_decisions(&self.run_id, reduction.decisions);
         if dispatches.len() == 1
             && dispatches[0].worker.as_str() == crate::native_v2_request::ASK_WORKER_REF
         {
-            self.execute_request(program, &dispatches[0]).await?;
+            self.execute_request(program, &dispatches[0], request_paths)
+                .await?;
             return Ok(None);
         }
         if dispatches.len() == 1
@@ -575,10 +693,29 @@ impl NativeV2Supervisor {
             let mut terminal =
                 enforce_delivery_terminal(self.delivery_policy, admitted, snapshot, terminal)?;
             terminal.auxiliary_pending = self.enabled_postmortem(admitted, snapshot).is_some();
-            let latched = self
-                .ledger
-                .append(&self.run_id, logging::primary_graph_events(terminal)?)
-                .await?;
+            let mut events = Vec::new();
+            if matches!(terminal.result, TerminalResult::Succeeded { .. }) {
+                let reduced = reduce(admitted, snapshot)?;
+                let artifacts = self
+                    .publish_files(
+                        crate::native_v2_files::FilePublicationOwner::Final {
+                            run_id: self.run_id.clone(),
+                        },
+                        reduced.artifacts,
+                        publication::final_preflight(snapshot, &terminal)?,
+                    )
+                    .await?;
+                if self.force_requested.load(Ordering::Acquire) {
+                    return Err(NativeV2SupervisorError::FilePublication(
+                        std::io::Error::from(std::io::ErrorKind::Interrupted),
+                    ));
+                }
+                if !artifacts.is_empty() {
+                    events.push(RunEvent::FinalArtifactsPublished { artifacts });
+                }
+            }
+            events.extend(logging::primary_graph_events(terminal)?);
+            let latched = self.ledger.append(&self.run_id, events).await?;
             let terminal = latched
                 .snapshot
                 .primary_graph

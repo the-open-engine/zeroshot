@@ -60,6 +60,7 @@ pub(super) fn bindings(
 
 fn classifier() -> Result<GraphNode, BuiltinTemplateError> {
     Ok(GraphNode::Verifier(VerifierNode {
+        artifacts: Default::default(),
         name: node_name(CLASSIFIER)?,
         worker: worker_ref("builtin.agent.pr-classifier@1")?,
         instructions: Some(instructions(include_str!("pr_review/classifier.md"))?),
@@ -103,6 +104,7 @@ fn reproducer() -> Result<GraphNode, BuiltinTemplateError> {
 
 fn checker() -> Result<GraphNode, BuiltinTemplateError> {
     Ok(GraphNode::Verifier(VerifierNode {
+        artifacts: Default::default(),
         name: node_name(CHECKER)?,
         worker: worker_ref("builtin.agent.pr-code-checker@1")?,
         instructions: Some(instructions(include_str!("pr_review/code_checker.md"))?),

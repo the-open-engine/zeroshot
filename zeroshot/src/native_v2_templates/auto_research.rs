@@ -111,6 +111,7 @@ fn scouts(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
 fn scout(role: &str, prompt: &str) -> Result<GraphNode, BuiltinTemplateError> {
     let output = format!("{role}Proposal");
     Ok(GraphNode::Verifier(VerifierNode {
+        artifacts: Default::default(),
         name: node_name(role)?,
         worker: worker_ref(&format!("builtin.agent.research-{role}@1"))?,
         instructions: Some(instructions(&format!("{SCOUT_PROMPT}\n\n{prompt}"))?),
@@ -230,6 +231,7 @@ fn reviewer(delivery: TemplateDelivery) -> Result<GraphNode, BuiltinTemplateErro
     ]))?;
     writes.push(decision);
     Ok(GraphNode::Verifier(VerifierNode {
+        artifacts: Default::default(),
         name: node_name(REVIEWER)?,
         worker: worker_ref("builtin.agent.research-reviewer@1")?,
         instructions: Some(instructions(&prompt)?),

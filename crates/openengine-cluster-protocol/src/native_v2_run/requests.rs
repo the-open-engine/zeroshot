@@ -11,6 +11,8 @@ use crate::{
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunRequest {
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub artifacts: crate::PublishedFiles,
     pub id: VectorId,
     pub text: String,
     pub signals: BTreeMap<FieldName, NonEmptyEnumSet>,

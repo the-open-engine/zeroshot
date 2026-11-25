@@ -441,3 +441,6 @@ mod suspension_tests;
 
 #[path = "tests/wire_contract.rs"]
 mod wire_contract;
+
+#[path = "tests/cleanup.rs"]
+mod cleanup;

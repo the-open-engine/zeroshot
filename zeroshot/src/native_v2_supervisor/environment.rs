@@ -61,6 +61,19 @@ pub struct RunEnvironment {
 }
 
 impl RunEnvironment {
+    /// Startup receipt replay cannot invoke providers or resolve any credentials.
+    pub(crate) fn without_credentials() -> Self {
+        Self {
+            values: Arc::default(),
+            variables: Arc::default(),
+            dynamic_keys: Arc::default(),
+            source_connection: None,
+            source_authorization: Arc::new(SourceAuthorization::Legacy),
+            requirements: Arc::default(),
+            resolver: None,
+        }
+    }
+
     pub fn exact(
         runtime: &RuntimePlan,
         definition: Option<&RuntimeEnvironment>,

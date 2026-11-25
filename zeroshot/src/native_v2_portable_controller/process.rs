@@ -256,7 +256,15 @@ async fn start_controller_process(
                         native_environment: &native_environment,
                     },
                 )
-                .map(PortableRuntime::new)
+                .map(|runner| {
+                    let mut runtime = PortableRuntime::new(runner);
+                    runtime.file_publisher = Some(Arc::new(
+                        crate::native_v2_files::publication::LocalFilePublisher {
+                            workspace: workspace.clone(),
+                        },
+                    ));
+                    runtime
+                })
             },
             Some(stopping),
         )

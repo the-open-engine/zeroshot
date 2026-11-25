@@ -325,6 +325,7 @@ fn review_verifier(spec: ReviewVerifierSpec<'_>) -> Result<GraphNode, BuiltinTem
     let mut write_bindings = spec.write_bindings;
     write_bindings.push(diagnostic_write(spec.name, spec.feedback_target)?);
     Ok(GraphNode::Verifier(VerifierNode {
+        artifacts: Default::default(),
         name: node_name(spec.name)?,
         worker: worker_ref(spec.worker)?,
         input: review_input_type()?,
@@ -482,6 +483,7 @@ fn named_delivery_node(name: &str, mode: DeliveryMode) -> Result<GraphNode, Buil
     let write_bindings = delivery_write_bindings(name, &output)?;
     let signals = delivery_signals(mode)?;
     Ok(GraphNode::Verifier(VerifierNode {
+        artifacts: Default::default(),
         name: node_name(name)?,
         worker: worker_ref(delivery_worker(mode))?,
         input: delivery_input_type()?,
@@ -531,6 +533,7 @@ fn delivery_success(name: &str, mode: DeliveryMode) -> Result<GraphNode, Builtin
         .map(|field| state_input(&field, &field))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(GraphNode::Succeed(SucceedNode {
+        artifacts: Default::default(),
         name: node_name(name)?,
         output,
         bindings,

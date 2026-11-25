@@ -159,3 +159,6 @@ async fn assert_file_rejection_consumes_only_headers(
     .unwrap();
     assert!(response.starts_with(status));
 }
+
+#[path = "files/cleanup.rs"]
+mod cleanup;
