@@ -349,6 +349,8 @@ pub struct RunResumeCommand {
     pub runtime: Option<RunRuntime>,
     pub run: RunSelector,
     pub from: Option<RunResumeFrom>,
+    /// Preserve API omission semantics for SDK callers instead of the CLI checkpoint default.
+    pub api_default: bool,
     /// Allow a local resume to replace the user-owned checkout with a checkpoint snapshot.
     pub discard_workspace_changes: bool,
     /// Send the caller's `GH_TOKEN` with a named-target resume.

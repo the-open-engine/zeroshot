@@ -512,7 +512,7 @@ fn folder_resume_uses_stored_workspace_from_a_different_launcher() {
     let other_launcher = fixture.root.path("another-launcher");
     fs::create_dir(&other_launcher).unwrap();
     let resumed = fixture
-        .command(&["resume", &original_id])
+        .command(&["resume", &original_id, "--restart"])
         .current_dir(&other_launcher)
         .env("FIXTURE_MODE", "finish")
         .output()

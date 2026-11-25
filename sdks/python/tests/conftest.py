@@ -96,7 +96,7 @@ failed_status = {
     "terminalResult": {"status": "failed", "reason": "worker_failed"},
 }
 
-entry = {"args": args, "cwd": os.getcwd()}
+entry = {"args": args, "cwd": os.getcwd(), "stateDir": os.environ.get("ZEROSHOT_STATE_DIR")}
 for name in ("--input", "--graph", "--runtime-config", "--uniform-runtime-config"):
     path = option(name)
     if path:

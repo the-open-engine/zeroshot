@@ -76,6 +76,8 @@ fn resume_rediscovers_restic_after_the_install_moves() {
                 checkpoint,
                 "--discard-workspace-changes",
             ]);
+        } else {
+            command.arg("--restart");
         }
         // An unavailable explicit selector makes discovery fail even if the developer has
         // a bundled or system Restic. Resume must still use its valid stored program.

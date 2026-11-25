@@ -1051,6 +1051,7 @@ def test_suspension_continuation_and_vector_target_arguments(
             "original",
             *route,
             *(["--forward-gh-token"] if forward else []),
+            "--api-default",
         ] in args
         assert [
             "vectors",

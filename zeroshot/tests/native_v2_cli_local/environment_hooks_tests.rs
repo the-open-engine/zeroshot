@@ -261,7 +261,7 @@ async fn local_resume_reuses_saved_hooks_with_the_new_part_identity() {
     wait_for_exit(fixture.ready_pid(&original)).await;
     fs::remove_file(fixture.root.path("environment.json")).assert_value();
 
-    let output = fixture.output(&["resume", &original], "finish").await;
+    let output = fixture.output(&["resume", &original, "--restart"], "finish").await;
     assert_success(&output, "resume local environment run");
     let receipt: Value = serde_json::from_slice(&output.stdout).assert_value();
     assert_eq!(receipt["runId"], original);

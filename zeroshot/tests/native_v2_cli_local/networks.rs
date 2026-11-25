@@ -789,6 +789,8 @@ async fn networks_failed_restart_and_earlier_checkpoint_deliver_to_distinct_new_
                 checkpoint_id,
                 "--discard-workspace-changes",
             ]);
+        } else {
+            args.push("--restart");
         }
         let next = fixture.json(&args, "networks").await;
         assert_eq!(next["runId"], logical);

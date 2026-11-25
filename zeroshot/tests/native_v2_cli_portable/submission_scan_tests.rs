@@ -117,7 +117,7 @@ fn unreadable_history_allows_new_runs_and_resume_without_changing_inspection() {
     assert_eq!(receipt_id(&repeated), admitted_id);
 
     let resumed = fixture
-        .command(&["resume", &failed_id])
+        .command(&["resume", &failed_id, "--restart"])
         .env("FIXTURE_MODE", "finish")
         .output()
         .unwrap();

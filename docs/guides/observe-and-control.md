@@ -308,11 +308,25 @@ output and fail the command. The archive is never extracted and its contents are
 
 ## Restart or resume a failed run
 
-Failed local runs and direct targets retain their workspace. Restart a failed run where it started
-with:
+Failed local runs and direct targets retain their workspace. By default, the CLI selects the newest
+entry checkpoint and shows its ID:
 
 ```console
 zeroshot resume RUN_ID
+# For a local run, consent to replacing the checkout:
+zeroshot resume RUN_ID --discard-workspace-changes
+```
+
+The checkpoint restores its completed prerequisites. Its selected node can run again, even if that
+node completed before the failure. For example, a three-round review loop that reaches a terminal
+directly after round 3 can still have its last entry checkpoint before review 3. Resuming from that
+entry repeats review 3 while retaining rounds 1 and 2. If there is no entry checkpoint, the CLI
+explains that and shows the explicit restart command.
+
+To restart where the failed run began, use:
+
+```console
+zeroshot resume RUN_ID --restart
 ```
 
 Pass `--runtime-config FILE` or `--uniform-runtime-config FILE` to replace the successor's runtime
@@ -323,7 +337,7 @@ delivery lineage and selected checkpoint's completed prerequisites stay the same
 resolved freshly. Native conversation restoration continues an existing conversation when supported,
 including after a model change, with the existing fresh-session fallback when restoration fails.
 
-A run you submitted restarts at the root of its graph. A successor restarts at the point it began
+With `--restart`, a run you submitted restarts at the root of its graph. A successor restarts at the point it began
 at: after the answer for the successor of an answered request, after the held node for the
 successor of a suspended run, and at the selected node for a checkpoint successor. An answered
 request therefore stays answered, also when several successors fail in a row. To run the whole
@@ -336,12 +350,12 @@ automatically. A clock hint without a date or timezone stays as supplied. Codex'
 usage-limit errors retain their existing crash retries; see the
 [native failure signals](../reference/cluster/graph.md#graph-contract).
 
-A local restart uses your checkout as it is now. You can fix files after a failure and resume:
+A local `--restart` uses your checkout as it is now. You can fix files after a failure and restart:
 commits, staged and unstaged edits, untracked and ignored files, the current branch, and the index
 are kept. Agents then change the checkout as in any run. Named targets restart on the latest
 snapshot of their own retained workspace.
 
-To resume at an earlier node, list its available input checkpoints and select one:
+To select a specific entry instead of the newest one, list the available input checkpoints:
 
 ```console
 zeroshot checkpoints RUN_ID
@@ -355,7 +369,8 @@ attached to its branch at the current tip while files and the index return to th
 Branches, tags, commits, Git configuration, and other worktrees are kept.
 
 For a named target, add `--target NAME` to both commands and omit `--discard-workspace-changes`:
-the target restores its own retained copy, never your checkout. Checkpoint listings are paginated;
+the target restores its own retained copy, never your checkout. Plain resume on a named target
+also selects its newest entry checkpoint. Checkpoint listings are paginated;
 use `--after CHECKPOINT_ID` with the returned `nextAfter` value to fetch the next page.
 
 A selected checkpoint restores the files from immediately before its node and the completed
@@ -372,6 +387,9 @@ delivery lineage. A selected checkpoint or the continuation of a suspended run r
 or without restoring workspace files. Restarting such a successor restores the same conversations
 again, without the turns it added before it failed. A restarted run you submitted and every
 `execution`-scoped agent start new conversations. Each part records its own token usage. Run totals include every part that performed work.
+
+The Python SDK’s `Run.resume()` keeps its existing behavior: failed runs restart where they began;
+suspended runs continue at their held boundary.
 
 Checkpoints hold raw provider transcripts and conversation files, up to 1 GiB per conversation.
 They are kept and deleted with their checkpoint, deduplicated across its lineage, and never included
@@ -394,13 +412,14 @@ after the deadline, the resume is stopped with an error that names the deadline.
 stays recoverable.
 
 A restore never changes the checkout before the complete snapshot is extracted. If a crash
-interrupts it while it replaces files, the checkout can stay partially restored. A plain
-`zeroshot resume` is then refused until a restore completes, so no agent runs on a partial
+interrupts it while it replaces files, the checkout can stay partially restored. A local
+resume without restore consent is then refused until a restore completes, so no agent runs on a partial
 checkout. Repeat the interrupted command, or select another checkpoint with
 `--discard-workspace-changes`. That resume removes the interrupted staging copy beside the
 workspace and finishes the restore before any agent runs. Earlier releases also restored the latest
 snapshot on a plain resume; complete such an interrupted restore with
-`zeroshot resume RUN_ID --discard-workspace-changes`, which installs the same snapshot again.
+`zeroshot resume RUN_ID --restart --discard-workspace-changes`, which installs the same pinned
+snapshot again.
 
 Local and Docker targets deduplicate checkpoints in a private Restic repository beside their run
 storage and advertise `openengine.workspace-checkpoints/v1`. Run logs mark the start and completion
@@ -418,7 +437,7 @@ so neither the original run nor its successors list checkpoints that can no long
 Local checkpoints never expire automatically. To free the space kept by a finished failed local
 run, use `zeroshot discard-workspace RUN_ID`. It deletes checkpoint data and lists for the whole
 recovery lineage while keeping the checkout, run directory, ledger, logs and delivery recovery
-state. A second call reports `discarded: false`. Plain resume still uses the current checkout,
+state. A second call reports `discarded: false`. `zeroshot resume RUN_ID --restart` uses the current checkout,
 with workspace checkpoints disabled; checkpoint selection and `--discard-workspace-changes`
 are refused. A running or resuming lineage must be force-stopped first. An uncontinued suspension
 must also be force-stopped, and an interrupted restore must be completed by repeating its resume.

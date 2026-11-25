@@ -327,7 +327,8 @@ impl RunResumeArgs {
             .map(CheckpointId::new)
             .transpose()
             .map_err(|error| usage(format!("invalid --from-checkpoint: {error}")))?
-            .map(|checkpoint_id| RunResumeFrom::Checkpoint { checkpoint_id });
+            .map(|checkpoint_id| RunResumeFrom::Checkpoint { checkpoint_id })
+            .or_else(|| self.restart.then_some(RunResumeFrom::Restart {}));
         let runtime = if self.runtime_config.is_some() || self.uniform_runtime_config.is_some() {
             Some(run_runtime(
                 self.runtime_config,
@@ -340,6 +341,7 @@ impl RunResumeArgs {
             runtime,
             run: self.run.into_selector()?,
             from,
+            api_default: self.api_default,
             discard_workspace_changes: self.discard_workspace_changes,
             forward_github_token: self.forward_gh_token,
         }))

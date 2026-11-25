@@ -1,4 +1,4 @@
-//! A plain local resume restarts the graph on the checkout as it is now, so work done after a
+//! An explicit local restart uses the checkout as it is now, so work done after a
 //! failure survives even though a latest snapshot exists. Restoring a selected checkpoint is an
 //! explicit rollback: without `--discard-workspace-changes` it is refused before anything changes.
 
@@ -7,7 +7,7 @@ use super::*;
 const IGNORED: &str = "build.log";
 
 #[tokio::test(flavor = "multi_thread")]
-async fn plain_resume_keeps_the_work_done_after_a_failure() {
+async fn explicit_restart_keeps_the_work_done_after_a_failure() {
     let fixture = LocalFixture::new();
     ignore_build_logs(&fixture);
     let failed = fixture.failed_run("Plain resume keeps later work").await;
@@ -21,7 +21,9 @@ async fn plain_resume_keeps_the_work_done_after_a_failure() {
     );
     let work = LaterWork::record(&fixture);
 
-    let resumed = fixture.json(&["resume", &failed], "finish").await;
+    let resumed = fixture
+        .json(&["resume", &failed, "--restart"], "finish")
+        .await;
     let successor = resumed
         .assert_key("currentPartId")
         .as_str()
