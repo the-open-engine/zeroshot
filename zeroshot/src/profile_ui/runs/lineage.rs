@@ -175,6 +175,7 @@ impl NativeRunHistory {
                     cursor: Some(detail.cursor),
                     terminal: detail.terminal.as_ref().map(Into::into),
                     source: detail.source,
+                    workspace: detail.workspace,
                     context_sources: detail.context_sources,
                     created_at: detail.created_at,
                     history_available: detail.history_available,
