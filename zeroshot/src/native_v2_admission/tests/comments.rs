@@ -82,6 +82,7 @@ async fn imported_comment_delivery_preserves_required_caller_inputs() {
                 initial_input: Some(submission.graph.initial_input.clone()),
             }),
             GraphNode::Succeed(openengine_cluster_protocol::SucceedNode {
+                artifacts: Default::default(),
                 name: named("caller_done"),
                 output: PayloadType::Null,
                 bindings: Vec::new(),

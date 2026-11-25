@@ -49,7 +49,7 @@ impl NativeV2TargetServer {
         // with unread headers cannot reset the peer. Authentication still precedes all body reads.
         let mut headers = vec![0_u8; head.encoded_len];
         tokio::time::timeout(Duration::from_secs(10), stream.read_exact(&mut headers)).await??;
-        let Some(mount) = &self.files else {
+        let Some(_mount) = &self.files else {
             return write_http_response(&mut stream, not_found_response()).await;
         };
         if head.method != "POST" {
@@ -61,7 +61,7 @@ impl NativeV2TargetServer {
                 return write_http_response(&mut stream, authority_error_response(error)).await;
             }
         };
-        let result = Self::files_body(&mut stream, &head, mount.clone(), identity).await;
+        let result = self.files_body(&mut stream, &head, identity).await;
         match result {
             Ok(FileReply::Json(response)) => {
                 write_http_response(&mut stream, HttpResponse::private_json(200, &response)).await
@@ -103,11 +103,15 @@ impl NativeV2TargetServer {
     }
 
     async fn files_body(
+        &self,
         stream: &mut TcpStream,
         head: &RequestHead,
-        mount: TargetFilesMount,
         identity: openengine_cluster_server::identity::ConnectionIdentity,
     ) -> io::Result<FileReply> {
+        let mount = self
+            .files
+            .clone()
+            .ok_or_else(|| io::Error::other("file host is unavailable"))?;
         if head.has_header("transfer-encoding")
             || head.header_exact("content-type") != Some(TARGET_FILES_MEDIA_TYPE)
         {
@@ -133,6 +137,9 @@ impl NativeV2TargetServer {
         let payload_len = length - 4 - metadata_len as u64;
         if !matches!(request, FileRequest::Replace { .. }) && payload_len != 0 {
             return Err(io::Error::other("unexpected file payload"));
+        }
+        if let FileRequest::Cleanup { all } = request {
+            return self.cleanup_files(mount, identity, all).await;
         }
         // The guard stays in this future while async I/O drains. Cancellation drops it; no partial
         // payload can reach the catalog, and restart cleanup reclaims abandoned transfer files.
@@ -162,6 +169,7 @@ impl NativeV2TargetServer {
                 identity: &identity,
             };
             match request {
+                FileRequest::Cleanup { .. } => Err(io::Error::other("cleanup was already handled")),
                 FileRequest::List { scope, path } => Ok(FileReply::Json(FileResponse::List {
                     paths: mount.host.list(&access, scope, &path)?,
                 })),
@@ -197,6 +205,62 @@ impl NativeV2TargetServer {
         })
         .await
         .map_err(io::Error::other)?
+    }
+
+    async fn cleanup_files(
+        &self,
+        mount: TargetFilesMount,
+        identity: openengine_cluster_server::identity::ConnectionIdentity,
+        all: bool,
+    ) -> io::Result<FileReply> {
+        // Retention is a direct single-account host operation, never a hosted file-client grant.
+        if !matches!(self.access, super::TargetServerAccess::Direct(_)) {
+            return Err(crate::native_v2_files::denied());
+        }
+        let now = crate::native_v2_runner::current_timestamp();
+        let controller = self.target.controller().await.map_err(io::Error::other)?;
+        let selection_mount = mount.clone();
+        let selection_identity = identity.clone();
+        let candidates = tokio::task::spawn_blocking(move || {
+            selection_mount.host.select_publications(
+                &FileAccess {
+                    target: &selection_mount.target,
+                    identity: &selection_identity,
+                },
+                now,
+                all,
+            )
+        })
+        .await
+        .map_err(io::Error::other)??;
+        let protected = controller
+            .protected_file_runs()
+            .await
+            .map_err(io::Error::other)?;
+        let checkpoint_lineages = controller
+            .cleanup_checkpoints(all, now)
+            .await
+            .map_err(io::Error::other)?;
+        let publications = tokio::task::spawn_blocking(move || {
+            mount.host.cleanup_publications(
+                &FileAccess {
+                    target: &mount.target,
+                    identity: &identity,
+                },
+                &crate::native_v2_files::FileRetention {
+                    candidates: &candidates,
+                    now,
+                    all,
+                    protected: &protected,
+                },
+            )
+        })
+        .await
+        .map_err(io::Error::other)??;
+        Ok(FileReply::Json(FileResponse::Cleaned {
+            publications: publications as u64,
+            checkpoint_lineages: checkpoint_lineages as u64,
+        }))
     }
 }
 

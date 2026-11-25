@@ -33,6 +33,14 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum CliCommand {
+    /// Explicitly remove managed publications and discardable checkpoint lineages retained for at least 60 days. Logs, ledgers, library files and live local outputs are kept.
+    Cleanup {
+        #[arg(long)]
+        target: Option<String>,
+        /// Remove every eligible publication and checkpoint lineage regardless of age.
+        #[arg(long)]
+        all: bool,
+    },
     /// Manage files and named directory trees on the selected target. Bytes stream outside graph JSON.
     File {
         #[command(subcommand)]

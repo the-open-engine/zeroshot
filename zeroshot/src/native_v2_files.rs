@@ -15,9 +15,12 @@ use serde::{Deserialize, Serialize};
 
 mod disk;
 mod paths;
+pub mod publication;
 mod transfer;
 mod workspaces;
 pub use workspaces::{WorkspaceFiles, FreezeWorkspace};
+mod workspace;
+pub use workspace::workspace_path;
 pub use disk::DiskFileStore;
 pub use transfer::{pack, unpack, validate_transfer};
 
@@ -56,6 +59,15 @@ pub struct FileAuthorization<'a> {
 /// Organization membership, per-run access and write policy remain the embedding host's authority.
 pub trait FileAuthorizer: Send + Sync {
     fn authorize(&self, request: FileAuthorization<'_>) -> Result<String>;
+    /// Hosts apply request-read authority to request outputs and run-read authority to final
+    /// outputs. The catalog retains this context even after a source name is removed.
+    fn authorize_publication(
+        &self,
+        request: FileAuthorization<'_>,
+        _owner: &FilePublicationOwner,
+    ) -> Result<()> {
+        self.authorize(request).map(|_| ())
+    }
 }
 
 /// Explicit single-account trust for local and unauthenticated direct targets only.
@@ -125,6 +137,15 @@ pub enum HostFilePublication {
     LiveLocal { root: PathBuf, member: FilePath },
 }
 
+/// Host-selected retention boundary and work whose publications must remain available.
+pub struct FileRetention<'a> {
+    /// Frozen catalog identities selected before reading run liveness.
+    pub candidates: &'a std::collections::BTreeSet<String>,
+    pub now: openengine_cluster_protocol::UnixTimestampMillis,
+    pub all: bool,
+    pub protected: &'a std::collections::BTreeSet<RunId>,
+}
+
 /// Additive host port. Existing ArtifactRef and HostedWorkspaceStorage keep their original roles.
 /// Operations are scoped to the authenticated target/identity. Stable operation keys make recovery
 /// retries select the same bytes, or fail on conflicting reuse. Release is persistent and idempotent.
@@ -177,6 +198,28 @@ pub trait TargetFileHost: Send + Sync {
     ) -> Result<HostFilePublication>;
     fn release_publication(&self, access: &FileAccess<'_>, address: &FileAddress) -> Result<bool>;
     fn release(&self, access: &FileAccess<'_>, pin: &FilePin) -> Result<()>;
+    /// Freeze eligible immutable identities before consulting the host's changing run state.
+    fn select_publications(
+        &self,
+        _access: &FileAccess<'_>,
+        _now: openengine_cluster_protocol::UnixTimestampMillis,
+        _all: bool,
+    ) -> Result<std::collections::BTreeSet<String>> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "publication cleanup is unavailable",
+        ))
+    }
+    fn cleanup_publications(
+        &self,
+        _access: &FileAccess<'_>,
+        _retention: &FileRetention<'_>,
+    ) -> Result<usize> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "publication cleanup is unavailable",
+        ))
+    }
     fn reclaim(&self) -> Result<usize>;
 }
 

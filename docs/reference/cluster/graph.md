@@ -246,7 +246,7 @@ runtime authority. A policy binding contains one versioned policy reference and 
 ## Closed payload algebra and subtyping
 
 `PayloadType` is tagged by `kind` and is closed over `null`, `boolean`, `integer`, `number`,
-`string`, structural `record`, homogeneous `array`, and finite `enum`. A record maps field names to
+`string`, `filepath`, structural `record`, homogeneous `array`, and finite `enum`. A record maps field names to
 `{ type, required }`. Enum labels are non-empty, unique, sorted, and finite. The algebra contains no
 unions, references, definitions, tuples, custom schema keywords, regex constraints, or arbitrary
 JSON Schema.
@@ -267,6 +267,27 @@ subtype. An optional field of `T` may be absent from `S`; if present, its value 
 target value. A required source field may satisfy an optional target field. An optional source field
 never satisfies a required target field. Extra source fields are allowed. The relation is recursive,
 deterministic, side-effect free, and never delegates to general JSON Schema evaluation.
+
+A `filepath` is a nonempty string naming an existing regular file or folder inside the execution
+workspace. Worker and verifier responses validate these paths, including nested fields, through
+the ordinary response correction flow. It has no MIME constraint and is distinct from `string`;
+an ordinary string never triggers filesystem access. Validation alone publishes nothing.
+
+Request verifiers (`builtin.request.ask@1`) and `succeed` nodes accept an optional `artifacts` map:
+
+```json
+{
+  "folder": { "kind": "literal", "path": "report" },
+  "file": { "kind": "binding", "value": { "source": "state", "path": ["reportPath"] } }
+}
+```
+
+Bindings must select `filepath` fields. Literal paths are relative to the working root or absolute
+paths confined to it. At an executed request or outer graph success, the host rechecks every
+selected path before exposing the complete set. A profile's internal success continues its caller
+without publishing. Unselected branches and ordinary node results expose no files. Artifact
+declarations participate in graph identity and saved-profile expansion. See
+[target files](../target-files.md) for capture, access and retention.
 
 ## Production full-graph verification
 

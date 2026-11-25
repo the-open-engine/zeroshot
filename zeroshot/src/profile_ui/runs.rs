@@ -614,7 +614,10 @@ fn summary(snapshot: &RunSnapshot, runtime_failure: Option<RuntimeFailure>) -> R
                 .map(RunHistoryTerminalSynopsis::from)
         });
     RunHistorySummary {
-        suspension: snapshot.suspension.clone(),
+        suspension: snapshot
+            .suspension
+            .as_ref()
+            .map(crate::native_v2_observability::public_suspension),
         suspend_requested: snapshot.suspend_requested,
         workspace_recovery: None,
         run_id: snapshot.run_id.clone(),

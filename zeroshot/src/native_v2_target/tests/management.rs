@@ -224,3 +224,112 @@ async fn hosted_removal_holds_registry_lock_through_credential_cleanup() {
     registry.remove("cloud", &authority).await.assert_value();
     assert_eq!(store.get(&target.id).await.assert_value(), None);
 }
+
+#[tokio::test]
+async fn refused_removal_from_a_symlinked_registry_keeps_login_and_recovery_data() {
+    let root = temp_root();
+    let path = root.path("config/targets.json");
+    let registry = FileTargetRegistry::new(path.clone());
+    let target = hosted_target("cloud", "https://unreachable.example");
+    registry.insert(target.clone()).assert_value();
+    let run = RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c991");
+    registry
+        .record_recovery_authorization(&target.id, &run, &Default::default())
+        .assert_value();
+    let linked = root.path("dotfiles/targets.json");
+    std::fs::create_dir_all(linked.parent().assert_value()).assert_value();
+    std::fs::rename(&path, &linked).assert_value();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&linked, &path).assert_value();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file(&linked, &path).assert_value();
+    let before = std::fs::read(&linked).assert_value();
+
+    let store = Arc::new(MemoryCredentialStore::default());
+    store.set(&target.id, "stored-login").await.assert_value();
+    let authority = TargetHttpControlAuthority::with_dependencies(
+        store.clone(),
+        Arc::new(MemoryDeviceCodeNotifier::default()),
+        root.path("auth"),
+    );
+    let error = registry
+        .remove("cloud", &authority)
+        .await
+        .assert_error()
+        .to_string();
+    assert!(error.contains("is a symbolic link"));
+    assert_eq!(
+        store.get(&target.id).await.assert_value().as_deref(),
+        Some("stored-login")
+    );
+    registry
+        .recovery_authorization(&target.id, &run)
+        .assert_value();
+    assert!(
+        std::fs::symlink_metadata(&path)
+            .assert_value()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(std::fs::read(&linked).assert_value(), before);
+}
+
+fn symlink_file(target: &std::path::Path, link: &std::path::Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).assert_value();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file(target, link).assert_value();
+}
+
+fn assert_symlink_refused<T: std::fmt::Debug>(result: Result<T, TargetConnectorError>) {
+    match result {
+        Err(TargetConnectorError::RegistryIo(error))
+            if error.to_string().contains("is a symbolic link") => {}
+        other => panic!("expected a symlinked registry refusal, got {other:?}"),
+    }
+}
+
+#[test]
+fn symlinked_target_registry_is_never_replaced() {
+    let root = temp_root();
+    let linked = root.path("dotfiles/targets.json");
+    let link = root.path("config/targets.json");
+    std::fs::create_dir_all(linked.parent().assert_value()).assert_value();
+    std::fs::create_dir_all(link.parent().assert_value()).assert_value();
+    FileTargetRegistry::new(linked.clone())
+        .get("platform")
+        .assert_value();
+    let original = std::fs::read(&linked).assert_value();
+    symlink_file(&linked, &link);
+
+    let registry = FileTargetRegistry::new(link.clone());
+    assert_symlink_refused(registry.insert(hosted_target("cloud", "https://cloud.example")));
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .assert_value()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(std::fs::read(&linked).assert_value(), original);
+}
+
+#[test]
+fn dangling_target_registry_link_is_not_initialized_over() {
+    let root = temp_root();
+    let missing = root.path("unmounted/targets.json");
+    let link = root.path("config/targets.json");
+    std::fs::create_dir_all(link.parent().assert_value()).assert_value();
+    symlink_file(&missing, &link);
+
+    let registry = FileTargetRegistry::new(link.clone());
+    assert_symlink_refused(registry.insert(hosted_target("cloud", "https://cloud.example")));
+    assert_symlink_refused(registry.get("platform"));
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .assert_value()
+            .file_type()
+            .is_symlink()
+    );
+    assert!(!missing.exists());
+    assert!(!missing.parent().assert_value().exists());
+}

@@ -719,6 +719,7 @@ fn decode_stored(
         return Err(RunLedgerError::Corrupt);
     }
     restore_active_start_times(connection, &mut stored.snapshot)?;
+    restore_terminal_time(connection, &mut stored.snapshot)?;
     Ok(stored)
 }
 
@@ -839,3 +840,31 @@ mod vector_tests;
 #[cfg(all(test, feature = "ui"))]
 #[path = "sqlite/listing_tests.rs"]
 mod listing_tests;
+
+/// Terminal is the final event. Recover its existing indexed time for pre-retention snapshots
+/// without replaying history, mutating retained data or inventing an age for untimed ledgers.
+fn restore_terminal_time(
+    connection: &Connection,
+    snapshot: &mut super::RunSnapshot,
+) -> Result<(), RunLedgerError> {
+    if snapshot.terminal.is_none()
+        || snapshot.terminal_recorded_at.is_some()
+        || !has_recorded_at_column(connection)?
+    {
+        return Ok(());
+    }
+    let sequence =
+        i64::try_from(cursor_sequence(&snapshot.cursor)?).map_err(|_| RunLedgerError::Corrupt)?;
+    snapshot.terminal_recorded_at = connection
+        .query_row(
+            "SELECT recorded_at_ms FROM v2_run_events WHERE run_id = ?1 AND sequence = ?2",
+            params![snapshot.run_id.as_str(), sequence],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+        .optional()
+        .map_err(sqlite_error)?
+        .flatten()
+        .map(decode_recorded_at)
+        .transpose()?;
+    Ok(())
+}

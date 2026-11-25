@@ -43,6 +43,66 @@ fn input_objects(fixture: &Fixture) -> usize {
 }
 
 #[test]
+fn workspace_artifacts_follow_placement_and_survive_managed_cleanup() {
+    for managed in [false, true] {
+        let fixture = Fixture::new().outside_workspace();
+        runtime(&fixture, false);
+        let mut graph: Value =
+            serde_json::from_slice(&fs::read(fixture.root.path("graph.json")).unwrap()).unwrap();
+        graph["root"]["children"][1]["otherwise"]["artifacts"] =
+            json!({"result":{"kind":"literal","path":"mutation.txt"}});
+        fixture.write("graph.json", &graph);
+        let mut command = fixture.run_command("finish", true);
+        command.arg("--workspace");
+        if managed {
+            command.arg("--copy-workspace");
+        }
+        let id = receipt(&command.output().unwrap());
+        let status = settled(&fixture, &id, "finished");
+        assert_eq!(
+            status["status"]["terminalResult"]["status"], "succeeded",
+            "{status}"
+        );
+        let artifact = &status["status"]["metadata"]["artifacts"]["result"];
+        if managed {
+            assert_eq!(artifact["kind"], "managed", "{status}");
+            let copy = Path::new(status["workspace"]["localDirectory"].as_str().unwrap());
+            assert!(!copy.exists(), "the managed root must have been disposed");
+            assert!(!fixture.workspace.join("mutation.txt").exists());
+            let downloaded = fixture.root.path("captured-result");
+            let address = &artifact["address"];
+            assert_eq!(address["scope"]["runId"], id);
+            success(
+                &fixture
+                    .command(&[
+                        "file",
+                        "download",
+                        address["path"].as_str().unwrap(),
+                        downloaded.to_str().unwrap(),
+                        "--run",
+                        &id,
+                    ])
+                    .output()
+                    .unwrap(),
+            );
+            assert_eq!(fs::read(downloaded).unwrap(), b"native worker ran");
+        } else {
+            assert_eq!(artifact["kind"], "local", "{status}");
+            assert_eq!(
+                Path::new(artifact["root"].as_str().unwrap()),
+                fixture.workspace
+            );
+            assert_eq!(artifact["path"], "mutation.txt");
+            assert_eq!(
+                fs::read(fixture.workspace.join("mutation.txt")).unwrap(),
+                b"native worker ran"
+            );
+            assert!(!fixture.root.path("state/files/objects").exists());
+        }
+    }
+}
+
+#[test]
 fn refused_managed_directory_preparation_releases_pins_before_controller_start() {
     let fixture = Fixture::new().outside_workspace();
     runtime(&fixture, false);

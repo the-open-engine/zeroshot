@@ -381,6 +381,7 @@ pub enum PayloadType {
     Integer,
     Number,
     String,
+    Filepath,
     Record {
         #[schemars(
             schema_with = "crate::value::identifier_keyed_map_schema::<FieldName, RecordField>"
@@ -403,6 +404,7 @@ enum PayloadTypeWire {
     Integer,
     Number,
     String,
+    Filepath,
     Record {
         fields: BTreeMap<FieldName, RecordField>,
     },
@@ -422,6 +424,7 @@ impl From<PayloadTypeWire> for PayloadType {
             PayloadTypeWire::Integer => Self::Integer,
             PayloadTypeWire::Number => Self::Number,
             PayloadTypeWire::String => Self::String,
+            PayloadTypeWire::Filepath => Self::Filepath,
             PayloadTypeWire::Record { fields } => Self::Record { fields },
             PayloadTypeWire::Array { items } => Self::Array { items },
             PayloadTypeWire::Enum { values } => Self::Enum { values },
@@ -481,7 +484,8 @@ impl PayloadType {
             | (Self::Integer, Self::Integer)
             | (Self::Integer, Self::Number)
             | (Self::Number, Self::Number)
-            | (Self::String, Self::String) => true,
+            | (Self::String, Self::String)
+            | (Self::Filepath, Self::Filepath) => true,
             (Self::Array { items: source }, Self::Array { items: target }) => {
                 source.is_subtype_of(target)
             }

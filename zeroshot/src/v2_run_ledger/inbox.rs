@@ -56,6 +56,7 @@ pub async fn show(
         for vector in page.vectors {
             if &vector.run_id == run_id
                 && let RunVectorContent::Request {
+                    artifacts,
                     node,
                     text,
                     signals,
@@ -68,6 +69,7 @@ pub async fn show(
                     node,
                     created_at: vector.created_at,
                     request: RunRequest {
+                        artifacts,
                         id: vector.id,
                         text,
                         signals,

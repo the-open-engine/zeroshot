@@ -33,6 +33,44 @@ release them when unused.
 Managed publication names remain reserved after release so an earlier receipt cannot resolve to
 another publication's bytes.
 
+## Graph outputs and cleanup
+
+Declare `artifacts` on a human request or graph success to expose current workspace paths. A
+managed host captures bytes before the request or successful result becomes visible and before
+workspace cleanup. Each selected folder keeps its name and complete layout. Publishing the same
+path at a later breakpoint captures its then-current contents. Retrying one breakpoint recovers
+its original committed receipt, including after a controller restart. The complete receipt must
+fit the existing run-record and response limits. An oversized set fails before its managed bytes
+or names are committed.
+
+Final references appear in result `metadata.artifacts`. Request attachments appear on the
+request-authorized inbox view; ordinary status and vector views omit them. Hosts apply request-read
+authority to request files and run-read authority to final files. Terminal output JSON and Git
+delivery receipts are independent of file publication.
+
+Local in-place runs return `{ "kind": "local", "root": "...", "path": "..." }` references into the
+recorded working folder. They read current contents, become unavailable when removed and recheck
+confinement when opened. Their bytes never enter managed storage or the virtual runs tree.
+
+Managed publications become eligible for explicit cleanup 60 days after publication. Time,
+reads and startup do not remove them: until cleanup, they remain listable, downloadable and usable
+as new inputs. Accepted input pins keep their bytes after a publication is removed.
+
+```bash
+zeroshot cleanup
+zeroshot cleanup --target NAME
+zeroshot cleanup --all
+```
+
+Cleanup on local state or a supporting direct Docker target removes eligible managed publication
+sets and discardable checkpoint lineages at least 60 days after their latest terminal attempt.
+`--all` removes the age filter. Active, queued, suspended and restoring work and its inputs remain
+protected. Cleanup reuses resume/discard locks and reports `publications` and `checkpointLineages`
+removed; repeating it reports zero. Library files, live local outputs, logs and ledgers are outside
+its selection. Physical bytes are released only when their final retained reference is gone.
+Discarding a failed local run's checkpoints still allows plain resume in its current checkout;
+restoring a discarded snapshot is unavailable.
+
 ## Transport and host contract
 
 The Rust protocol crate's `target_files` module owns the binary contract and constants. Its
@@ -43,7 +81,7 @@ marker means unsupported; existing targets keep serving their other operations.
 All file HTTP operations POST to `/native-v2/files` on the selected target's authenticated origin.
 They use `application/vnd.openengine.file-tree.v1`, explicit `Content-Length`, no redirects and
 `Cache-Control: no-store` responses. A request starts with a big-endian u32 metadata length and
-that many JSON bytes (`FileRequest`). Only `replace` appends a binary tree. List/remove/replace
+that many JSON bytes (`FileRequest`). Only `replace` appends a binary tree. List/remove/replace/cleanup
 responses use `FileResponse` JSON; download responses contain a binary tree directly.
 
 A tree starts with the eight bytes `OEFILES1`. Each entry has a big-endian u32 JSON header length
@@ -58,5 +96,8 @@ Incomplete framing, oversized encodings or failed hashes never replace a retaine
 `native_v2_files::TargetFileHost` supplies list, replacement, download, removal, private pinning,
 run-only staging, materialization, managed publication, release and reclamation. Hosts inject
 existing authenticated scope/member authority with no fallback to a caller filesystem. Custom
-servers install it explicitly through `TargetFilesMount`; existing host implementations need no
-changes. Worker artifact receipts and workspace recovery storage retain their existing contracts.
+servers install it explicitly through `TargetFilesMount`. Run allocators inject a
+`RunFilePublisher` for their placement; publication access context stays in the host catalog.
+Implementations must call the supplied preflight validator with the complete receipt before
+committing it, including on replay.
+Existing hosts may leave publication and cleanup unsupported. Worker artifact receipts and workspace recovery storage retain their existing contracts.

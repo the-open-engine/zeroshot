@@ -129,7 +129,7 @@ impl HermesAdapter {
             process.detach_stdout(),
             control,
             redactions.clone(),
-            self.active_memory.as_deref(),
+            (self.active_memory.as_deref(), &self.config.workspace),
         );
         let result = connection.execute(&process, invocation, init).await;
         let result = connection

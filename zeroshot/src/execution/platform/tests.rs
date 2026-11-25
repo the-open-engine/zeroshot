@@ -31,6 +31,18 @@ fn private_state_round_trips_and_replaces_an_existing_file() {
     let root = TemporaryDirectory::for_test("private-state");
     let directory = root.path("private");
     private_directory(&directory).unwrap();
+    let directory = directory.canonicalize().unwrap();
+    // A direct target keeps its file host alive while UI/profile state is created and replaced.
+    // Windows ancestor guards must continue denying redirection throughout those commits.
+    let _store = crate::native_v2_files::DiskFileStore::open(
+        directory.join("files"),
+        "test".to_owned(),
+        std::sync::Arc::new(crate::native_v2_files::SingleAccountFiles {
+            principal: "test".to_owned(),
+            tenant: "test".to_owned(),
+        }),
+    )
+    .unwrap();
     let destination = directory.join("state.json");
     for contents in [b"first".as_slice(), b"second"] {
         let temporary = directory.join("temporary");
@@ -43,6 +55,17 @@ fn private_state_round_trips_and_replaces_an_existing_file() {
         let mut actual = Vec::new();
         std::io::Read::read_to_end(&mut file, &mut actual).unwrap();
         assert_eq!(actual, contents);
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            use windows_sys::Win32::Storage::FileSystem::{FILE_FLAG_BACKUP_SEMANTICS, FILE_WRITE_DATA};
+            let error = fs::OpenOptions::new()
+                .access_mode(FILE_WRITE_DATA)
+                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+                .open(&directory)
+                .unwrap_err();
+            assert_eq!(error.raw_os_error(), Some(32));
+        }
     }
 }
 

@@ -242,6 +242,7 @@ async fn start_controller_process(
                     Some(preparation),
                 )
                 .await?;
+                let file_publisher = local_file_publisher(admitted, &workspace, &storage)?;
                 crate::native_v2_local::build_local_process_candidate(
                     crate::native_v2_local::LocalProcessCandidateRequest {
                         delivery_receipt,
@@ -259,13 +260,51 @@ async fn start_controller_process(
                         native_environment: &native_environment,
                     },
                 )
-                .map(PortableRuntime::new)
+                .map(|runner| {
+                    let mut runtime = PortableRuntime::new(runner);
+                    runtime.file_publisher = Some(file_publisher);
+                    runtime
+                })
             },
             Some(stopping),
         )
         .await?,
     );
     controller.bind().await
+}
+
+fn local_file_publisher(
+    admitted: &crate::native_v2_contract::AdmittedRun,
+    workspace: &Path,
+    storage: &Path,
+) -> Result<
+    Arc<dyn crate::native_v2_files::publication::RunFilePublisher>,
+    crate::native_v2_local::LocalCompositionError,
+> {
+    use crate::native_v2_files::publication::{LocalFilePublisher, ManagedFilePublisher};
+    use crate::native_v2_local::LocalCompositionError;
+
+    if admitted
+        .workspace
+        .as_ref()
+        .is_some_and(|workspace| !workspace.is_in_place())
+    {
+        let state = storage
+            .parent()
+            .and_then(Path::parent)
+            .ok_or(LocalCompositionError::Storage)?;
+        let (store, identity, _) = crate::native_v2_cli::files::local_file_store_at(state)
+            .map_err(|_| LocalCompositionError::Storage)?;
+        Ok(Arc::new(ManagedFilePublisher {
+            workspace: workspace.to_owned(),
+            store: Arc::new(store),
+            identity,
+        }))
+    } else {
+        Ok(Arc::new(LocalFilePublisher {
+            workspace: workspace.to_owned(),
+        }))
+    }
 }
 
 pub fn load_bootstrap_file(

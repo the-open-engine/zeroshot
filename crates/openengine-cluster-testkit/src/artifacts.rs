@@ -173,6 +173,10 @@ pub async fn generate_artifacts() -> Vec<Artifact> {
     ];
 
     let mut artifacts = vec![
+        json_artifact(
+            format!("{ROOT}/fixtures/graph/positive/file-publication.json"),
+            file_publication_fixture(),
+        ),
         json_artifact(format!("{ROOT}/schema.json"), schema),
         json_artifact(format!("{ROOT}/graph.schema.json"), graph_schema),
         json_artifact(
@@ -363,6 +367,7 @@ fn all_payload_type() -> Value {
             "count": { "type": { "kind": "integer" }, "required": true },
             "ratio": { "type": { "kind": "number" }, "required": false },
             "text": { "type": { "kind": "string" }, "required": true },
+            "filepath": { "type": { "kind": "filepath" }, "required": false },
             "items": { "type": { "kind": "array", "items": { "kind": "string" } }, "required": true },
             "verdict": { "type": { "kind": "enum", "values": ["accepted", "rejected"] }, "required": false }
         }
@@ -523,4 +528,24 @@ fn compiled_fixture(par_order: &[&str], sequence_order: &[&str]) -> Value {
             "attemptsPerNode": { "parallel": 1, "ordered": 1 }
         }
     })
+}
+
+fn file_publication_fixture() -> Value {
+    let state = json!({"kind":"record","fields":{
+        "file":{"required":true,"type":{"kind":"filepath"}},
+        "text":{"required":true,"type":{"kind":"string"}}
+    }});
+    let artifacts = json!({"folder":{"kind":"literal","path":"report"},
+        "file":{"kind":"binding","value":{"source":"state","path":["file"]}}});
+    json!({"profile":"openengine.graph.full/v1","initialInput":state,
+    "policy":{"policy":"policy.native-v2@1","default":"deny"},
+    "root":{"kind":"seq","name":"root","state":state,"promotedStatePaths":[],"children":[
+        {"kind":"verifier","name":"approval","worker":"builtin.request.ask@1",
+            "input":{"kind":"record","fields":{"text":{"required":true,"type":{"kind":"string"}}}},
+            "output":{"kind":"record","fields":{}},"signals":{"decision":["approved","rejected"]},
+            "diagnostic":{"kind":"record","fields":{"message":{"required":true,"type":{"kind":"string"}}}},
+            "inputBindings":[{"target":["text"],"value":{"source":"state","path":["text"]}}],
+            "writeBindings":[],"attempts":1,"artifacts":artifacts},
+        {"kind":"succeed","name":"done","output":{"kind":"null"},"bindings":[],"artifacts":artifacts}
+    ]}})
 }

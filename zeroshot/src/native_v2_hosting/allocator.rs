@@ -431,6 +431,7 @@ impl ProductionCapsuleAllocator {
             git_identity: _,
         } = pending;
         let PreparedCapsule {
+            paths,
             filesystem,
             hosted_workspace,
             ..
@@ -518,6 +519,7 @@ impl ProductionCapsuleAllocator {
             }
         }
         Ok(AllocatedCapsule {
+            file_publisher: self.file_publisher(&paths.workspace),
             node_instance_floor: Default::default(),
             runner,
             cleanup,
@@ -814,6 +816,18 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
                 .map_err(|_| CapsuleCleanupUnavailable)?;
         }
         Ok(CapsuleDestroyed::confirmed())
+    }
+
+    async fn recover_file_publication(
+        &self,
+        stored: &crate::v2_run_ledger::StoredRun,
+        request: &crate::native_v2_files::publication::FilePublication,
+    ) -> Result<
+        Option<crate::native_v2_platform::RecoveredFilePublication>,
+        CapsuleAllocationUnavailable,
+    > {
+        self.recover_committed_file_publication(stored, request)
+            .await
     }
 
     async fn reserve_retained_workspace(

@@ -1,5 +1,3 @@
-//! Atomic sibling publication compatible with retained Windows directory guards.
-
 use std::ffi::OsStr;
 use std::fs::OpenOptions;
 use std::io;
@@ -18,23 +16,10 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
-pub(crate) fn commit_file(temporary: &Path, destination: &Path, parent: &Path) -> io::Result<()> {
-    if temporary.parent() != Some(parent) || destination.parent() != Some(parent) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "file publication requires one directory",
-        ));
-    }
-    let name = destination
-        .file_name()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "expected one file name"))?;
-    rename_sibling(temporary, name, true)
-}
-
 /// A simple native rename stays in the source's parent. A full Win32 destination path reopens
 /// that parent for FILE_WRITE_DATA, conflicting with the write/delete-denying directory guards.
 /// Keep the guards and avoid that reopen; do not relax sharing to make publication succeed.
-pub(crate) fn rename_sibling(source: &Path, name: &OsStr, replace: bool) -> io::Result<()> {
+pub(crate) fn rename_in_parent(source: &Path, name: &OsStr, replace: bool) -> io::Result<()> {
     let mut components = Path::new(name).components();
     if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
         return Err(io::Error::new(
@@ -63,7 +48,7 @@ pub(crate) fn rename_sibling(source: &Path, name: &OsStr, replace: bool) -> io::
     let info = buffer.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>();
     let mut status = IO_STATUS_BLOCK::default();
     // SAFETY: the initialized, aligned buffer includes the complete name and remains live through
-    // this synchronous call. RootDirectory stays NULL and only a simple name is permitted.
+    // this synchronous call. RootDirectory stays NULL and validation permits only a simple name.
     let result = unsafe {
         (*info).Anonymous.ReplaceIfExists = replace;
         (*info).FileNameLength = (name.len() * 2) as u32;

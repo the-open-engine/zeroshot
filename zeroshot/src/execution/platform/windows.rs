@@ -15,7 +15,7 @@ use windows_sys::Win32::Storage::FileSystem::{
 use super::FileAccess;
 mod controller;
 mod rename;
-pub(crate) use rename::{commit_file, rename_sibling};
+pub(crate) use rename::rename_in_parent;
 pub(crate) mod security;
 pub(crate) use controller::{
     ControllerChild, controller_termination, guard_controller_console, spawn_controller,
@@ -161,6 +161,19 @@ fn open(
     let file = unsafe { File::from_raw_handle(handle) };
     file_identity(&file)?;
     Ok(file)
+}
+
+pub(crate) fn commit_file(temporary: &Path, destination: &Path, parent: &Path) -> io::Result<()> {
+    if temporary.parent() != Some(parent) || destination.parent() != Some(parent) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "state commit requires one directory",
+        ));
+    }
+    let name = destination.file_name().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "missing destination file name")
+    })?;
+    rename_in_parent(temporary, name, true)
 }
 
 fn wide(path: &Path) -> io::Result<Vec<u16>> {

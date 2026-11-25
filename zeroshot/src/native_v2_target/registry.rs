@@ -167,6 +167,9 @@ impl TargetRegistry for FileTargetRegistry {
             return Err(TargetConnectorError::BuiltinTarget);
         }
         let (_lock, mut state, _) = self.locked_state_async().await?;
+        // Refuse before any cleanup, so a refused save cannot leave a registered target without
+        // its saved login and recovery data.
+        refuse_symlinked_store(&self.path)?;
         let target = state
             .targets
             .get(name)
@@ -584,7 +587,24 @@ fn diagnostic_path(path: &Path) -> PathBuf {
     std::path::absolute(path).unwrap_or_else(|_| path.to_owned())
 }
 
+/// Refuses to replace a symlinked store entry, including a dangling link, so a dotfiles-managed
+/// link is never silently swapped for a regular file. The link is inspected without following it.
+fn refuse_symlinked_store(path: &Path) -> Result<(), TargetConnectorError> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(TargetConnectorError::RegistryIo(
+            std::io::Error::other(format!(
+                "target registry {} is a symbolic link; writing through a symlinked store is unsupported",
+                diagnostic_path(path).display()
+            )),
+        )),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(registry_io(path, error)),
+    }
+}
+
 fn write_registry(path: &Path, state: &RegistryState) -> Result<(), TargetConnectorError> {
+    refuse_symlinked_store(path)?;
     let bytes = serde_json::to_vec_pretty(state)
         .map_err(|error| TargetConnectorError::RegistryJson(diagnostic_path(path), error))?;
     if bytes.len() as u64 > MAX_REGISTRY_BYTES {

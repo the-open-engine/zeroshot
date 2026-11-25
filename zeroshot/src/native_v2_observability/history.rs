@@ -76,7 +76,7 @@ impl RunHistoryService {
             "version":1, "projectionVersion":1,
             "runId":id, "title":stored.admitted.title, "createdAt":created_at(id),
             "phase":stored.snapshot.phase,"cursor":stored.snapshot.cursor,
-            "suspension":stored.snapshot.suspension,"suspendRequested":stored.snapshot.suspend_requested,
+            "suspension":stored.snapshot.suspension.as_ref().map(super::public_suspension),"suspendRequested":stored.snapshot.suspend_requested,
             "terminal":stored.snapshot.terminal,"metadata":super::run_metadata(&stored.snapshot),"historyAvailable":true,
             "graph":graph, "runtime":stored.admitted.runtime,
             "initialInput":stored.admitted.initial_input,"source":stored.admitted.source,
@@ -192,7 +192,7 @@ fn project_page(
     let mut next = after;
     let mut sequence = cursor_sequence(&next).map_err(ledger_error)?;
     let mut events = Vec::with_capacity(source.len());
-    for stored in source {
+    for mut stored in source {
         let at = cursor_sequence(&stored.cursor).map_err(ledger_error)?;
         // Snapshot and event reads may race an append. Pin this page to its observed head.
         if at > head {
@@ -203,6 +203,20 @@ fn project_page(
         }
         sequence = at;
         next = stored.cursor.clone();
+        match &mut stored.event {
+            crate::v2_run_ledger::RunEvent::Suspended { suspension } => {
+                *suspension = super::public_suspension(suspension);
+            }
+            crate::v2_run_ledger::RunEvent::Vector { vector } => {
+                if let openengine_cluster_protocol::RunVectorContent::Request {
+                    artifacts, ..
+                } = &mut vector.content
+                {
+                    artifacts.clear();
+                }
+            }
+            _ => {}
+        }
         let mut value = serde_json::to_value(stored).map_err(|_| unavailable())?;
         project_event(&mut value["event"]);
         events.push(value);
@@ -235,6 +249,8 @@ fn stringify_identifiers(value: &mut Value, keys: &[&str]) {
 
 fn project_event(event: &mut Value) {
     match event["kind"].as_str() {
+        // Keep the cursor position, but never expose an uncommitted request or its selected paths.
+        Some("request_prepared") => *event = json!({"kind":"request_prepared"}),
         Some("node_started" | "execution_voided" | "wait_deferred" | "request_deferred") => {
             stringify_identifiers(&mut event["reference"], &["execution", "nodeInstance"]);
         }

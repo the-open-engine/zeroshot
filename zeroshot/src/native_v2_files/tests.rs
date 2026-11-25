@@ -829,7 +829,10 @@ fn windows_directory_junctions_are_refused() {
     );
 }
 
+mod ports;
 mod regressions;
 
+#[path = "tests/publications.rs"]
+mod publications;
 #[path = "tests/workspaces.rs"]
 mod workspaces;

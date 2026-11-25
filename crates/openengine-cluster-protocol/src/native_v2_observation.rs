@@ -132,6 +132,8 @@ pub struct TokenUsage {
 #[derive(Clone, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunMetadata {
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub artifacts: crate::PublishedFiles,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_usage: Option<TokenUsage>,
     /// Confirmed native delivery evidence, independent of the graph's terminal output.

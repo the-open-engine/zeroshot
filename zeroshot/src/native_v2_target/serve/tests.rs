@@ -249,10 +249,13 @@ async fn direct_serve_surfaces_hosting_preparation_failures() {
     })
     .await
     .assert_error();
-    assert!(matches!(
-        error,
-        TargetServeError::Hosting(ProductionHostingError::Storage)
-    ));
+    assert!(
+        matches!(
+            error,
+            TargetServeError::Hosting(ProductionHostingError::Storage)
+        ),
+        "unexpected storage preparation error: {error:?}"
+    );
 }
 
 #[tokio::test]

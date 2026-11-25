@@ -103,12 +103,12 @@ impl Directory {
         if self.0.path != destination.0.path {
             return Err(invalid("file publication requires one directory"));
         }
-        platform::windows::rename_sibling(&self.0.path.join(source), name, false)
+        platform::windows::rename_in_parent(&self.0.path.join(source), name, false)
     }
 
     pub fn rename_replace(&self, source: &OsStr, destination: &OsStr) -> Result<()> {
         component(source)?;
         component(destination)?;
-        platform::windows::rename_sibling(&self.0.path.join(source), destination, true)
+        platform::windows::rename_in_parent(&self.0.path.join(source), destination, true)
     }
 }

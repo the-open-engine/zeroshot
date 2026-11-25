@@ -71,6 +71,13 @@ impl CliCommand {
 
     fn into_execution_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
         match self {
+            Self::Cleanup { target, all } => Ok(NativeV2CliCommand::File(
+                crate::native_v2_cli::FileCommand {
+                    target: validated_target(target)?,
+                    request: openengine_cluster_protocol::FileRequest::Cleanup { all },
+                    transfer: crate::native_v2_cli::FileCommandTransfer::None,
+                },
+            )),
             Self::File { command } => command.into_command(),
             Self::Delegation { command } => command.into_command(),
             Self::Connection { command } => command.into_command(),
