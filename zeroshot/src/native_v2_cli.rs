@@ -59,6 +59,8 @@ pub use diagnostic::{ERROR_FORMAT_ENV, JSON_ERROR_FORMAT, NativeV2CliDiagnostic}
 #[path = "native_v2_cli/parser.rs"]
 mod parser;
 
+pub mod files;
+pub use files::{FileCommand, FileCommandTransfer};
 mod delegations;
 mod profiles;
 pub use delegations::{DelegationAction, DelegationCommand, DelegationResult};
@@ -392,6 +394,7 @@ pub struct RunLogsCommand {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NativeV2CliCommand {
+    File(FileCommand),
     Memory(MemoryCommand),
     Help(String),
     Version,

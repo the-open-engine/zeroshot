@@ -1,0 +1,340 @@
+{
+  "$defs": {
+    "FileAddress": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/FilePath"
+        },
+        "scope": {
+          "$ref": "#/$defs/FileScope"
+        }
+      },
+      "required": [
+        "scope",
+        "path"
+      ],
+      "type": "object"
+    },
+    "FileEntryWire": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "directory",
+              "type": "string"
+            },
+            "path": {
+              "$ref": "#/$defs/FilePath"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "byteLength": {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "file",
+              "type": "string"
+            },
+            "path": {
+              "$ref": "#/$defs/FilePath"
+            }
+          },
+          "required": [
+            "kind",
+            "path",
+            "byteLength"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "FilePath": {
+      "description": "Portable slash-separated names, with no aliases on supported filesystems. Empty denotes the\nselected root only; addresses require a nonempty path. Case collisions within a tree are invalid.",
+      "type": "string"
+    },
+    "FileRequest": {
+      "description": "HTTP POST body: big-endian u32 JSON length, this JSON, then a tree for replace only.\nTree framing: magic, repeated (big-endian u32 header length, FileEntry JSON, file bytes and\nraw SHA-256 for files), zero u32, EOF. Parents precede children; root is first and mandatory.\nBoth directions require Content-Length. Receivers validate the complete transfer before publish.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "list",
+              "type": "string"
+            },
+            "path": {
+              "$ref": "#/$defs/FilePath"
+            },
+            "scope": {
+              "$ref": "#/$defs/FileScope"
+            }
+          },
+          "required": [
+            "action",
+            "scope",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "list_members",
+              "type": "string"
+            },
+            "selection": {
+              "$ref": "#/$defs/FileSelection"
+            }
+          },
+          "required": [
+            "action",
+            "selection"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "replace",
+              "type": "string"
+            },
+            "address": {
+              "$ref": "#/$defs/FileAddress"
+            },
+            "operation": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "address",
+            "operation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "download",
+              "type": "string"
+            },
+            "selection": {
+              "$ref": "#/$defs/FileSelection"
+            }
+          },
+          "required": [
+            "action",
+            "selection"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "remove",
+              "type": "string"
+            },
+            "address": {
+              "$ref": "#/$defs/FileAddress"
+            }
+          },
+          "required": [
+            "action",
+            "address"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "FileResponse": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "list",
+              "type": "string"
+            },
+            "paths": {
+              "items": {
+                "$ref": "#/$defs/FileAddress"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "paths"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "entries": {
+              "items": {
+                "$ref": "#/$defs/FileEntryWire"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "members",
+              "type": "string"
+            },
+            "selection": {
+              "$ref": "#/$defs/FileSelection"
+            }
+          },
+          "required": [
+            "kind",
+            "selection",
+            "entries"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "address": {
+              "$ref": "#/$defs/FileAddress"
+            },
+            "kind": {
+              "const": "replaced",
+              "type": "string"
+            },
+            "operation": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "address",
+            "operation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "removed",
+              "type": "string"
+            },
+            "removed": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "removed"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "FileScope": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "user",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "org",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "run",
+              "type": "string"
+            },
+            "runId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "runId"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "FileSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "$ref": "#/$defs/FileAddress"
+        },
+        "member": {
+          "$ref": "#/$defs/FilePath"
+        }
+      },
+      "required": [
+        "address",
+        "member"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "entry": {
+      "$ref": "#/$defs/FileEntryWire"
+    },
+    "request": {
+      "$ref": "#/$defs/FileRequest"
+    },
+    "response": {
+      "$ref": "#/$defs/FileResponse"
+    }
+  },
+  "required": [
+    "request",
+    "response",
+    "entry"
+  ],
+  "title": "TargetFilesSchema",
+  "type": "object"
+}

@@ -71,6 +71,7 @@ impl CliCommand {
 
     fn into_execution_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
         match self {
+            Self::File { command } => command.into_command(),
             Self::Delegation { command } => command.into_command(),
             Self::Connection { command } => command.into_command(),
             Self::Profile { command } => command.into_command(),
@@ -934,7 +935,7 @@ fn required_target(target: String) -> Result<String, NativeV2CliError> {
     Ok(target)
 }
 
-fn validated_target(target: Option<String>) -> Result<Option<String>, NativeV2CliError> {
+pub(super) fn validated_target(target: Option<String>) -> Result<Option<String>, NativeV2CliError> {
     if let Some(target) = &target {
         validate_public_id(target, "target name")?;
     }

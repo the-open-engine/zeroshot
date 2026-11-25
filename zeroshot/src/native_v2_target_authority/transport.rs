@@ -33,6 +33,10 @@ use super::{
 use crate::native_v2_platform::NativeV2PlatformController;
 use super::private_access::{PrivateTargetAccess, TargetBootstrapKey};
 
+#[path = "transport_files.rs"]
+mod files;
+pub use files::TargetFilesMount;
+
 #[path = "transport_history.rs"]
 mod history;
 #[path = "transport_http.rs"]
@@ -62,6 +66,7 @@ struct DirectTaskResolutionRequest {
 /// Concrete target-wide HTTP/WebSocket binding. Hosted access consumes bearer authority supplied
 /// by its host. Explicit direct access uses one static target identity and no Authorization.
 pub struct NativeV2TargetServer {
+    files: Option<TargetFilesMount>,
     target: Arc<NativeV2TargetAuthority>,
     access: TargetServerAccess,
     oecp_endpoint: String,
@@ -144,6 +149,7 @@ impl NativeV2TargetServer {
         let endpoint = oecp_endpoint.into();
         validate_oecp_endpoint(&endpoint)?;
         Ok(Self {
+            files: None,
             target,
             access,
             oecp_endpoint: endpoint,
@@ -231,6 +237,9 @@ impl NativeV2TargetServer {
         }
         if head.is_websocket_upgrade() {
             return self.serve_oecp(stream, head).await;
+        }
+        if head.path == openengine_cluster_protocol::TARGET_FILES_PATH {
+            return self.serve_files(stream, head).await;
         }
         let request = match read_http_request(&mut stream, head).await {
             Ok(request) => request,
@@ -487,6 +496,11 @@ impl NativeV2TargetServer {
             .with_node_runtime_lanes()
             .with_decision_models()
             .with_steering();
+        if self.files.is_some() {
+            document.extensions.files = Some(openengine_cluster_protocol::TargetFilesDiscovery {
+                kind: openengine_cluster_protocol::TARGET_FILES_KIND.to_owned(),
+            });
+        }
         if let Some(catalog) = self.target.run_sizes() {
             document = document.with_run_sizes(catalog);
         }

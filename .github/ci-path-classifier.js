@@ -20,6 +20,7 @@ const NATIVE_PATHS = new Set([
   'clippy.toml',
   'rust-toolchain.toml',
   'rustfmt.toml',
+  'scripts/test-macos.sh',
   'scripts/test-windows.ps1',
   'tests/tooling/smoke-ui.js',
 ]);

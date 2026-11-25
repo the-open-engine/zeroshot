@@ -11,9 +11,17 @@ mod checks;
 use checks::{RequiredChecks, classify_required_checks, failure_diagnostic};
 
 const POLICY_QUERY: &str = r#"
-query($owner: String!, $name: String!, $number: Int!, $endCursor: String, $head: String!) {
+query($owner: String!, $name: String!, $number: Int!, $endCursor: String, $head: String!, $branch: String!) {
   repository(owner: $owner, name: $name) {
     nameWithOwner
+    mergeQueue(branch: $branch) {
+      id
+      entries(first: 100) {
+        totalCount
+        queuePageInfo: pageInfo { hasNextPage endCursor }
+        nodes { id enqueuedAt jump pullRequest { id baseRefName repository { nameWithOwner } } }
+      }
+    }
     pullRequest(number: $number) {
       id
       number
@@ -79,6 +87,7 @@ query($owner: String!, $name: String!, $number: Int!, $endCursor: String, $head:
 "#;
 
 pub(super) struct PolicySnapshot {
+    pub(super) queue_recovery: Option<queue::RecoveryPolicy>,
     pub(super) pull_request_id: String,
     pub(super) is_in_merge_queue: bool,
     pub(super) auto_merge_enabled: bool,
@@ -325,7 +334,12 @@ pub(super) fn query_arguments(
     review: &SourceReviewReceipt,
 ) -> Result<Vec<String>, SourceDeliveryError> {
     let mut arguments = review_query_arguments(review, POLICY_QUERY)?;
-    arguments.extend(["-f".to_owned(), format!("head={}", review.head_revision)]);
+    arguments.extend([
+        "-f".to_owned(),
+        format!("head={}", review.head_revision),
+        "-f".to_owned(),
+        format!("branch={}", review.target_branch),
+    ]);
     Ok(arguments)
 }
 
@@ -342,6 +356,7 @@ pub(super) fn classify_policy(
             "GitHub returned incomplete delivery policy",
         ));
     }
+    let queue_recovery = queue::recovery_policy(&value, review)?;
     let pages: Vec<QueryPageWire> = serde_json::from_value(value).map_err(|error| {
         SourceDeliveryError::api(
             None,
@@ -359,10 +374,12 @@ pub(super) fn classify_policy(
     if !complete {
         return Ok(waiting_snapshot());
     }
-    if let Some(snapshot) = terminal_snapshot(&first_pull_request)? {
-        return Ok(snapshot);
-    }
-    Ok(classify_snapshot(&first_pull_request, &contexts))
+    let mut snapshot = match terminal_snapshot(&first_pull_request)? {
+        Some(snapshot) => snapshot,
+        None => classify_snapshot(&first_pull_request, &contexts),
+    };
+    snapshot.queue_recovery = queue_recovery;
+    Ok(snapshot)
 }
 
 fn collect_contexts(
@@ -418,14 +435,16 @@ fn page_is_complete(
 
 pub(super) fn queue_check_failures(
     value: Value,
-) -> Result<(String, Vec<u64>), SourceDeliveryError> {
+) -> Result<Option<(String, Vec<u64>)>, SourceDeliveryError> {
     let contexts: Vec<CheckContextWire> =
         serde_json::from_value(value).map_err(|_| SourceDeliveryError::Rejected)?;
     let evidence = classify_required_checks(&contexts);
-    Ok((
-        failure_diagnostic(evidence.failures),
-        evidence.failed_job_ids,
-    ))
+    Ok((!evidence.failures.is_empty()).then(|| {
+        (
+            failure_diagnostic(evidence.failures),
+            evidence.failed_job_ids,
+        )
+    }))
 }
 
 pub(super) fn include_check_logs(snapshot: &mut PolicySnapshot, logs: &[(u64, JobLog)]) {
@@ -522,6 +541,7 @@ fn classify_snapshot(
     }
     if !evidence.failures.is_empty() {
         return PolicySnapshot {
+            queue_recovery: None,
             pull_request_id: pull_request.id.clone(),
             is_in_merge_queue: pull_request.is_in_merge_queue,
             auto_merge_enabled: pull_request.auto_merge_request.is_some(),
@@ -546,6 +566,7 @@ fn classify_snapshot(
     let pull_request_ready =
         !matches!(evidence.checks, RequiredChecks::Pending) && pull_request_ready(pull_request);
     PolicySnapshot {
+        queue_recovery: None,
         pull_request_id: pull_request.id.clone(),
         is_in_merge_queue: pull_request.is_in_merge_queue,
         auto_merge_enabled: pull_request.auto_merge_request.is_some(),
@@ -627,6 +648,7 @@ fn terminal_snapshot(
         _ => return Err(SourceDeliveryError::Rejected),
     };
     Ok(state.map(|state| PolicySnapshot {
+        queue_recovery: None,
         pull_request_id: pull_request.id.clone(),
         is_in_merge_queue: pull_request.is_in_merge_queue,
         auto_merge_enabled: pull_request.auto_merge_request.is_some(),
@@ -650,6 +672,7 @@ fn merged_snapshot(
         .ok_or(SourceDeliveryError::Rejected)?;
     (pull_request.state == "MERGED")
         .then_some(PolicySnapshot {
+            queue_recovery: None,
             pull_request_id: pull_request.id.clone(),
             is_in_merge_queue: pull_request.is_in_merge_queue,
             auto_merge_enabled: pull_request.auto_merge_request.is_some(),
@@ -688,6 +711,7 @@ fn approval_handoff_policy_ready(base_ref: &RefWire) -> bool {
 
 fn waiting_snapshot() -> PolicySnapshot {
     PolicySnapshot {
+        queue_recovery: None,
         pull_request_id: String::new(),
         is_in_merge_queue: false,
         auto_merge_enabled: false,

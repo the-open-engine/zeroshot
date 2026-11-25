@@ -1,4 +1,4 @@
-//! A removed queue candidate is feedback, never permission to silently enqueue it again.
+//! Removed candidates require feedback, except for bounded queue-order conflict recovery.
 use super::*;
 use std::collections::BTreeSet;
 
@@ -46,32 +46,123 @@ pub(in super::super) async fn observe_removal(
     review: &SourceReviewReceipt,
     snapshot: &mut PolicySnapshot,
     credential: SourceDeliveryCredential<'_>,
-) -> Result<(), SourceDeliveryError> {
-    if snapshot.is_in_merge_queue || !matches!(snapshot.state, SourceReviewState::Open { .. }) {
-        return Ok(());
+) -> Result<Option<RemovalFailure>, SourceDeliveryError> {
+    if !matches!(
+        snapshot.state,
+        SourceReviewState::Open { .. } | SourceReviewState::Conflict
+    ) {
+        return Ok(None);
     }
     let admission = {
-        let effects = authority.queue_effects.0.lock().await;
-        effects
-            .get(&identity(review))
-            .and_then(|effect| effect.settled.as_ref())
+        let mut effects = authority.queue_effects.0.lock().await;
+        let Some(effect) = effects.get_mut(&identity(review)) else {
+            return Ok(None);
+        };
+        // Readmission permission belongs to this complete observation only.
+        effect.recoverable = None;
+        if effect.task.as_ref().is_some_and(|task| task.is_finished()) {
+            let _ = effect.settle().await;
+        }
+        // Exact-head check failures need no removal proof; repair still requires withdrawal.
+        if matches!(
+            snapshot.state,
+            SourceReviewState::Open {
+                checks: SourceChecks::Failed { .. }
+            }
+        ) {
+            return Ok(None);
+        }
+        if snapshot.is_in_merge_queue
+            || (effect.uncertain || effect.task.is_some())
+                && (matches!(snapshot.state, SourceReviewState::Conflict)
+                    || snapshot.head_update.is_some())
+        {
+            return recovery::pending(snapshot).map(|()| None);
+        }
+        effect
+            .settled
+            .as_ref()
             .and_then(|result| result.as_ref().ok())
             .cloned()
     };
     let Some(admission) = admission else {
-        return Ok(());
+        return Ok(None);
     };
     let value = authority
         .api(&review_query_arguments(review, OUTCOME_QUERY)?, credential)
         .await?;
-    if let Some((diagnostic, jobs)) = removed_candidate(value, review, &admission)? {
+    let effects = authority.queue_effects.0.lock().await;
+    let Some(effect) = effects.get(&identity(review)) else {
+        return recovery::pending(snapshot).map(|()| None);
+    };
+    if effect
+        .settled
+        .as_ref()
+        .and_then(|result| result.as_ref().ok())
+        != Some(&admission)
+    {
+        return recovery::pending(snapshot).map(|()| None);
+    }
+    if let Some((removal, checks)) = removed_candidate(value, review, &admission)? {
+        if effect.recovered_removals.contains(&removal.id) {
+            return recovery::pending(snapshot).map(|()| None);
+        }
+        let checks = policy::queue_check_failures(Value::Array(checks))?;
+        if removal.reason == "merge_conflict" && checks.is_none() {
+            if removal.removed_at == admission.enqueued_at {
+                return Err(SourceDeliveryError::api(
+                    None,
+                    "Merge queue conflict removal cannot be ordered after the current admission",
+                ));
+            }
+            drop(effects);
+            recovery::recover(authority, review, snapshot, (admission, removal.id)).await?;
+            return Ok(None);
+        }
+        let removal_id = removal.id.clone();
+        let (diagnostic, jobs) = removal_feedback(removal, checks)?;
         snapshot.state = SourceReviewState::Open {
             checks: SourceChecks::Failed { diagnostic },
         };
         snapshot.failed_job_ids = jobs;
         snapshot.pull_request_ready = false;
+        Ok(Some(RemovalFailure {
+            admission,
+            removal_id,
+        }))
+    } else {
+        // A retained admission needs current removal evidence before any repair.
+        recovery::pending(snapshot).map(|()| None)
     }
-    Ok(())
+}
+
+/// Queue failure evidence remains bound to its admission through asynchronous log retrieval.
+pub(in super::super) struct RemovalFailure {
+    admission: QueueAdmission,
+    removal_id: String,
+}
+
+impl RemovalFailure {
+    pub(in super::super) async fn revalidate(
+        self,
+        authority: &GhCliDeliveryAuthority,
+        review: &SourceReviewReceipt,
+        snapshot: &mut PolicySnapshot,
+    ) -> Result<(), SourceDeliveryError> {
+        let effects = authority.queue_effects.0.lock().await;
+        if effects.get(&identity(review)).is_some_and(|effect| {
+            effect
+                .settled
+                .as_ref()
+                .and_then(|result| result.as_ref().ok())
+                == Some(&self.admission)
+                && !effect.recovered_removals.contains(&self.removal_id)
+        }) {
+            Ok(())
+        } else {
+            recovery::pending(snapshot)
+        }
+    }
 }
 
 #[derive(Eq, PartialEq)]
@@ -79,13 +170,14 @@ struct Removal {
     id: String,
     reason: String,
     revision: Option<String>,
+    removed_at: time::OffsetDateTime,
 }
 
 fn removed_candidate(
     value: Value,
     review: &SourceReviewReceipt,
     admission: &QueueAdmission,
-) -> Result<Option<(String, Vec<u64>)>, SourceDeliveryError> {
+) -> Result<Option<(Removal, Vec<Value>)>, SourceDeliveryError> {
     let pages = value.as_array().ok_or_else(invalid_outcome)?;
     let mut identity = None;
     let mut contexts = Vec::new();
@@ -110,23 +202,25 @@ fn removed_candidate(
             &mut cursors,
         )?);
     }
-    removal_feedback(identity.ok_or_else(invalid_outcome)?, contexts).map(Some)
+    Ok(Some((identity.ok_or_else(invalid_outcome)?, contexts)))
 }
 
 fn removal_feedback(
     removal: Removal,
-    contexts: Vec<Value>,
+    checks: Option<(String, Vec<u64>)>,
 ) -> Result<(String, Vec<u64>), SourceDeliveryError> {
-    let (checks, jobs) = policy::queue_check_failures(Value::Array(contexts))?;
     let diagnostic = format!(
-        "Merge queue removed candidate {} before merge ({}). Reassess the queue failure before requesting another admission.\n{checks}",
+        "Merge queue removed candidate {} before merge ({}). Reassess the queue failure before requesting another admission.",
         removal
             .revision
             .as_deref()
             .unwrap_or("without a published queue revision"),
         removal.reason,
     );
-    Ok((diagnostic, jobs))
+    match checks {
+        Some((checks, jobs)) => Ok((format!("{diagnostic}\n{checks}"), jobs)),
+        None => Err(SourceDeliveryError::api(None, diagnostic)),
+    }
 }
 
 fn outcome_pull_request<'a>(
@@ -183,6 +277,7 @@ fn removal_identity(removed: &Value) -> Result<Removal, SourceDeliveryError> {
         .filter(|id| !id.is_empty())
         .ok_or_else(invalid_outcome)?;
     Ok(Removal {
+        removed_at: queue_timestamp(&removed["createdAt"]).ok_or_else(invalid_outcome)?,
         id: id.to_owned(),
         reason: removed["reason"]
             .as_str()

@@ -723,6 +723,8 @@ pub struct TargetTaskResolutionDiscovery {
 #[serde(default, rename_all = "snake_case")]
 pub struct TargetDiscoveryExtensions {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub files: Option<crate::TargetFilesDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub resume_runtime: Option<TargetResumeRuntimeDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub steering: Option<TargetSteeringDiscovery>,
@@ -805,7 +807,8 @@ pub struct TargetDiscoveryDocument {
 impl TargetDiscoveryExtensions {
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.api_key.is_none()
+        self.files.is_none()
+            && self.api_key.is_none()
             && self.hosted_runs.is_none()
             && self.run_history.is_none()
             && self.stacks.is_none()
