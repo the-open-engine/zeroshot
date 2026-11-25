@@ -1,5 +1,5 @@
 import { ApiError, type ApiClient } from './api';
-import { appendGroupedHistory } from './grouped-history';
+import { appendGroupedHistory, runPosition } from './grouped-history';
 import { watchHistoryEvents, type HistoryObserver } from './history-stream';
 import { historyRetryDelay } from './history-response';
 import type { HistoryRetryDelay } from './history-readiness';
@@ -109,12 +109,14 @@ export function createRunHistorySource(
       watchHistoryEvents(new URL(path(id, '/events', after), base), observer, signal, fetcher),
   };
 }
-type Example = { detail: RunDetail; events: HistoryEvent[] };
+type Example = { detail: RunDetail } & ({ events: HistoryEvent[] } | { pages: HistoryPage[] });
 function exampleSummary(detail: RunDetail): RunSummary {
   const terminal: RunSummary['terminal'] =
     detail.terminal?.status === 'succeeded' ? { status: 'succeeded' } : detail.terminal;
   return {
     runId: detail.runId,
+    currentPartId: detail.currentPartId,
+    partCount: detail.parts?.length,
     title: detail.title,
     phase: detail.phase,
     suspension: detail.suspension,
@@ -150,6 +152,13 @@ export function createExampleRunHistory(
         });
     return examplesPromise;
   }
+  async function selected(id: string) {
+    const example = (await examples()).find(
+      ({ detail }) => detail.runId === id || detail.parts?.includes(id)
+    );
+    if (!example) throw new Error('Example not found.');
+    return example;
+  }
   return {
     async list() {
       return {
@@ -158,13 +167,27 @@ export function createExampleRunHistory(
       };
     },
     async detail(id) {
-      const example = (await examples()).find(({ detail }) => detail.runId === id);
-      if (!example) throw new Error('Example not found.');
+      const example = await selected(id);
       return { ...readRunDetail(example.detail, id), example: true };
     },
     async page(id, after) {
-      const example = (await examples()).find(({ detail }) => detail.runId === id);
-      if (!example) throw new Error('Example not found.');
+      const example = await selected(id);
+      if ('pages' in example) {
+        const position = runPosition(after) ?? { part: id, cursor: after };
+        const page = example.pages.find((page) => page.partId === position.part);
+        const from = cursorSequence(position.cursor);
+        if (!page || from > cursorSequence(page.partHeadCursor!))
+          throw new Error('Unknown example cursor.');
+        if (position.cursor === page.partAfterCursor) return page;
+        const later = (cursor: string) => cursorSequence(cursor) > from;
+        return {
+          ...page,
+          partAfterCursor: position.cursor,
+          events: page.events.filter((record) => later(record.cursor)),
+          imports: page.imports?.filter((record) => later(record.cursor)),
+          omittedCursors: page.omittedCursors?.filter(later),
+        };
+      }
       const start =
         after === 'v2:0' ? 0 : example.events.findIndex((event) => event.cursor === after) + 1;
       if (after !== 'v2:0' && start === 0) throw new Error('Unknown example cursor.');

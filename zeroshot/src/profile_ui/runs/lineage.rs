@@ -5,9 +5,11 @@ use catalog::{Catalog, RemoteCatalog};
 use axum::response::{IntoResponse, Response};
 use openengine_cluster_protocol::{TokenUsage, WorkspaceRecovery};
 use std::collections::{HashMap, HashSet};
-use crate::native_v2_observability::lineage::{LineageError, RunLineage, part_cursor, split_cursor};
+use crate::native_v2_observability::lineage::{LineageError, RunLineage, split_cursor};
 use crate::v2_run_ledger::merge_usage;
-use crate::native_v2_observability::history::parts::{grouped_definition, qualify_state, RunPartsPage};
+use crate::native_v2_observability::history::parts::{
+    grouped_definition, grouped_summary, RunPartsPage,
+};
 
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -111,7 +113,7 @@ impl NativeRunHistory {
                 } else {
                     catalog::head_summary(self, &current, catalog.as_ref()).await?
                 };
-                runs.push(catalog::menu_row(entry, &id, &current, count)?);
+                runs.push(grouped_summary(&id, count, entry));
             }
             let Some(cursor) = page.next_cursor else {
                 break;

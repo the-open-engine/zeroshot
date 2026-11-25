@@ -117,19 +117,19 @@ def review(name, text, verdict="accepted", output=None):
 
 
 class Fixture:
-    def __init__(self, name, profile, initial, description, index, profile_name=None, created=None):
+    def __init__(self, name, profile, initial, description, index, created=None):
         self.name = name
-        self.profile_name = profile_name or name
         self.profile = profile
-        self.run_id = "example-" + name
         self.initial = initial
         self.description = description
         self.created = created if created is not None else BASE_TIME + index * 3600000
+        stamp = f"{self.created:012x}"
+        self.run_id = (f"{stamp[:8]}-{stamp[8:]}-7000-8000-000000000000"
+                       if name == APPROVAL else "example-" + name)
         # The ledger's clock: every event records when it was appended (`recordedAt`).
         self.clock = self.created
         self.settled = []
         self.held = None
-        self.successor = None
         self.nodes = {node["name"]: node for node in walk(profile["graph"]["root"])}
         self.values = copy.deepcopy(initial)
         self.events = []
@@ -235,21 +235,11 @@ class Fixture:
         self.add(kind="vector", vector=request)
         self.held = {"ref": ref, "node": node, "indices": indices, "inputs": inputs, "request": request}
 
-    def pause(self, successor):
-        """The paused run's detail: suspended on its question, linked to the run an answer started."""
-        request = self.held["request"]
-        cursor = self.events[-1]["cursor"]
-        detail = self.detail(cursor, "suspended", None)
-        detail["suspension"] = self.events[-1]["event"]["suspension"]
-        detail["workspaceRecovery"] = {"successorRunId": successor.run_id}
-        return {"detail": detail, "events": self.events}
-
-    def continue_with(self, name, signals, feedback, waited, description):
+    def continue_with(self, signals, feedback, waited):
         """The successor an answer starts: earlier work carried over, then the held request settled."""
         request = self.held["request"]
         answered = request["createdAt"] + waited
-        successor = Fixture(name, self.profile, self.initial, description, 0,
-                            profile_name=self.profile_name, created=answered)
+        successor = Fixture(self.name, self.profile, self.initial, self.description, 0, created=answered)
         successor.events = []
         successor.values = copy.deepcopy(self.values)
         successor.executions = self.executions
@@ -259,7 +249,7 @@ class Fixture:
         for event in self.events:
             if event["event"]["kind"] == "vector":
                 successor.add(**copy.deepcopy(event["event"]))
-        successor.add(kind="vector", vector={"kind": "continuation", "id": f"{name}-continuation",
+        successor.add(kind="vector", vector={"kind": "continuation", "id": f"{successor.run_id}-continuation",
                                              "runId": successor.run_id, "createdAt": answered,
                                              "resumedFrom": self.run_id})
         for ref, node, indices, inputs, outcome in self.settled:
@@ -270,7 +260,7 @@ class Fixture:
         successor.add(kind="safe_log", execution=None, stream="system",
                       line="Simulated example. No agent, repository change, or delivery operation was executed.")
         answer = {"signals": signals, "output": {"feedback": feedback}}
-        successor.add(kind="vector", vector={"kind": "answer", "id": f"{name}-answer", "runId": successor.run_id,
+        successor.add(kind="vector", vector={"kind": "answer", "id": f"{successor.run_id}-answer", "runId": successor.run_id,
                                              "createdAt": answered, "requestId": request["id"], "answer": answer})
         reference = dict(held["ref"], runId=successor.run_id)
         outcome = {"status": "verifier", "output": answer["output"], "artifacts": [], "signals": signals}
@@ -278,7 +268,6 @@ class Fixture:
         successor.settled.append((held["ref"], held["node"], held["indices"], held["inputs"], outcome))
         successor.values.update(signals)
         successor.values["acceptanceFeedback"] = feedback
-        self.successor = successor
         return successor
 
     def carry(self, ref, node, indices, inputs, state):
@@ -295,7 +284,7 @@ class Fixture:
             "runId": self.run_id, "title": self.name.replace("-", " ").capitalize(),
             "phase": phase, "cursor": cursor, "terminal": result,
             "createdAt": self.created, "historyAvailable": True, "example": True,
-            "source": {"profile": self.profile_name, "simulation": self.description},
+            "source": {"profile": self.name, "simulation": self.description},
             "graph": self.profile["graph"], "runtime": self.profile["runtime"],
             "initialInput": self.initial,
             "history": {"initialCursor": "v2:0", "cursor": cursor, "complete": True,
@@ -478,32 +467,54 @@ def build_more(profiles):
 
 
 def build_approval(profiles):
-    """Three runs of one patch: asked, rejected with feedback and asked again, then approved."""
+    """One patch is rejected with feedback, revised, approved and delivered."""
     profile = approval_profile(profiles[NAMES[8]])
     initial = {"task": "Patch tenant-boundary authorization and include focused regression coverage.",
                "issueNumber": "42",
                "approvalQuestion": "Does this patch close the tenant boundary bug? Approve, or reject with what is missing."}
     review_code = lambda text: review("code", text)
-    first = Fixture("security-patch-approval", profile, initial,
-                    "A person reviews the patch: the run pauses for an answer, and each answer continues it in a new run.",
-                    10, profile_name=APPROVAL)
+    first = Fixture(APPROVAL, profile, initial,
+                    "A reviewer rejects the patch, checks the revised tests and approves delivery.",
+                    10)
     first.batch(step("worker", "Added the missing tenant boundary check and regression cases."))
     first.batch(review_code("The guard runs before lookup, and public errors do not reveal another tenant's account."))
     first.batch(ask("approval", initial["approvalQuestion"]))
-    second = first.continue_with("security-patch-approval-revised", {"verdict": "rejected"},
-                                 "Add a regression test for tenants with no accounts.", 2 * HOUR + 14 * 60000,
-                                 "The person rejected the patch with feedback; the repair is asked about again.")
+    second = first.continue_with({"verdict": "rejected"},
+                                 "Add a regression test for tenants with no accounts.", 2 * HOUR + 14 * 60000)
     second.batch(step("review_repair", "Added a regression test for tenants with no accounts."))
     second.values["approvalQuestion"] = "Regression test added for tenants with no accounts. Approve the patch now?"
     second.batch(review_code("Empty-tenant case is covered and passes."))
     second.batch(ask("approval", second.values["approvalQuestion"]))
-    third = second.continue_with("security-patch-approval-merged", {"verdict": "accepted"},
-                                 "Looks good.", 38 * 60000,
-                                 "The person approved the revised patch, and it was delivered.")
+    third = second.continue_with({"verdict": "accepted"}, "Looks good.", 38 * 60000)
     third.batch(step("deliver", "Simulated merge receipt: required checks passed and the exact candidate was merged.",
                      {"headRevision": "3333333333333333333333333333333333333333", "mergeRevision": "4444444444444444444444444444444444444444", "mode": "merge", "outcome": "merged", "pullRequestId": "example-pr-42", "repository": "example/simulated-repository", "targetBranch": "main", "version": "v2"},
                      {"delivery": "merged"}))
-    return [first.pause(second), second.pause(third), third.finish("done")]
+    detail = third.finish("done")["detail"]
+    parts = [first, second, third]
+    head = f"{third.run_id}@{detail['cursor']}"
+    detail.update(runId=first.run_id, createdAt=first.created, partId=third.run_id,
+        currentPartId=third.run_id, parts=[part.run_id for part in parts], cursor=head)
+    detail["history"].update(initialCursor=f"{first.run_id}@v2:0", cursor=head)
+    pages = []
+    for index, part in enumerate(parts):
+        end = part.events[-1]["cursor"]
+        latest = index == len(parts) - 1
+        page = {"runId": first.run_id, "currentPartId": third.run_id, "partId": part.run_id,
+                "partAfterCursor": "v2:0", "partNextCursor": end, "partHeadCursor": end,
+                "nextCursor": head if latest else f"{parts[index + 1].run_id}@v2:0",
+                "headCursor": head, "complete": latest, "events": []}
+        for record in part.events:
+            event, cursor = record["event"], record["cursor"]
+            if event["kind"] == "vector" and event["vector"]["runId"] != part.run_id:
+                page.setdefault("omittedCursors", []).append(cursor)
+                continue
+            row = dict(record, partId=part.run_id, runCursor=f"{part.run_id}@{cursor}")
+            if event["kind"] == "vector" and event["vector"]["kind"] == "continuation":
+                row["resumeReason"] = "request"
+            key = "imports" if event["kind"] == "prior_execution" else "events"
+            page.setdefault(key, []).append(row)
+        pages.append(page)
+    return [{"detail": detail, "pages": pages}]
 
 
 def main():
@@ -516,10 +527,10 @@ def main():
         existing = json.loads(OUTPUT.read_text())
         profiles = {item["detail"]["source"]["profile"]: item["detail"] for item in existing}
     examples = build(profiles)
-    assert len(examples) == 13
+    assert len(examples) == 11
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(json.dumps(examples, ensure_ascii=False, indent=2) + "\n")
-    print(f"Wrote {len(examples)} simulated examples, {sum(len(x['events']) for x in examples)} events.")
+    print(f"Wrote {len(examples)} simulated examples.")
 
 
 if __name__ == "__main__":

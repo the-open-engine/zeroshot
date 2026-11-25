@@ -10,6 +10,22 @@ use super::{
 pub use crate::native_v2_observability::lineage::{part_cursor, scope_diagnostic_cursors, split_cursor};
 use crate::v2_run_ledger::{initial_cursor, RunPhase};
 
+/// Project the current part's menu entry under the original submission.
+pub fn grouped_summary(root: &RunId, count: usize, entry: RunHistorySummary) -> Value {
+    let current = &entry.run_id;
+    let mut row = json!(entry);
+    row["runId"] = json!(root);
+    row["createdAt"] = json!(created_at(root));
+    row["currentPartId"] = json!(current);
+    row["partId"] = json!(current);
+    row["partCount"] = json!(count);
+    if let Some(cursor) = entry.cursor {
+        row["cursor"] = json!(part_cursor(current, &cursor));
+    }
+    qualify_state(&mut row, current);
+    row
+}
+
 /// Qualify the current definition for the supplied ordered, authorized run parts.
 /// The host supplies aggregate usage and owns the lifecycle of the current part.
 pub fn grouped_definition(parts: &[RunId], mut detail: RunDefinition) -> Option<Value> {
@@ -54,7 +70,7 @@ fn qualify_diagnostics(context: &mut Value, part: &RunId) {
     }
 }
 
-pub(crate) fn qualify_state(body: &mut Value, part: &RunId) {
+fn qualify_state(body: &mut Value, part: &RunId) {
     if let Some(failure) = body.get_mut("runtimeFailure") {
         qualify_cursor(failure, part, "atCursor");
         if let Some(context) = failure.get_mut("context") {

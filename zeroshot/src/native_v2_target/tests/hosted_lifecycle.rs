@@ -129,7 +129,7 @@ fn assert_platform_requests(requests: &[CapturedHttpRequest]) {
     assert_eq!(
         requests
             .iter()
-            .filter(|request| request.path == "/native-v2/runs/run-hosted/logs")
+            .filter(|request| request.path == "/native-v2/runs/run-hosted/logs?partId=run-hosted")
             .count(),
         1,
         "finished watches read memory logs once through the hosted authority"

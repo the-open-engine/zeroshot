@@ -5,7 +5,7 @@ use openengine_cluster_protocol::{
 };
 use reqwest::header::{ACCEPT, CACHE_CONTROL};
 use reqwest::{RequestBuilder, Response, Url};
-use serde::de::DeserializeOwned;
+use serde::{Serialize, de::DeserializeOwned};
 
 use super::contract::{
     HostedRunsDescriptor, StacksDescriptor, authority_error, http_error, read_success_json,
@@ -174,6 +174,22 @@ impl TargetHttpControlAuthority {
         }
     }
 
+    async fn hosted_run_post<P: Serialize, T: DeserializeOwned>(
+        &self,
+        request: (Url, &AccessToken, P),
+        operation: &'static str,
+        maximum_bytes: Option<usize>,
+    ) -> Result<T, TargetAuthorityError> {
+        let (url, access, params) = request;
+        let request = self
+            .authorized(self.client.post(url), access)?
+            .header(ACCEPT, "application/json")
+            .header(CACHE_CONTROL, "no-store")
+            .json(&params);
+        self.hosted_json((request, access), operation, maximum_bytes)
+            .await
+    }
+
     pub(super) async fn hosted_get_json<T: DeserializeOwned>(
         &self,
         request: (Url, &AccessToken),
@@ -298,15 +314,11 @@ impl TargetHttpControlAuthority {
     ) -> Result<CliRunForceResult, TargetAuthorityError> {
         let (routes, access) = self.require_hosted_run_access(target).await?;
         let url = routes.force_url(&params.run_id)?;
-        let mut body = serde_json::Map::new();
-        if let Some(part) = params.part_id {
-            body.insert("partId".into(), serde_json::json!(part));
-        }
-        let request = self
-            .authorized(self.client.post(url), &access)?
-            .header(ACCEPT, "application/json")
-            .json(&body);
-        self.hosted_json((request, &access), "hosted run force", None)
+        let body = match params.part_id {
+            Some(part) => serde_json::json!({ "partId": part }),
+            None => serde_json::json!({}),
+        };
+        self.hosted_run_post((url, &access, body), "hosted run force", None)
             .await
     }
 }

@@ -895,8 +895,8 @@ class Run:
         stream = self._client._watch(self.id, after, self.part_id, follow=follow)
         async with aclosing(stream) as statuses:
             async for status in statuses:
-                if self.part_id is None and status.phase == "suspended":
-                    # Guard actions with the question or pause actually shown to the caller.
+                if self.part_id is None and status.phase in {"suspended", "finished"}:
+                    # Guard the next action with the actionable state shown to the caller.
                     self._observed_part_id = status.part_id
                 yield status
 

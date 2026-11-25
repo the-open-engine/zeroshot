@@ -255,7 +255,11 @@ function StandaloneRunsContent({ services, bootstrap, viewScope }: StandaloneRun
           source={source}
           onOpenRun={(run) => {
             if (selection && run.runId !== selection.id && run.parts?.includes(selection.id)) {
-              window.history.replaceState(null, '', runLink(run.runId, false, selection.part));
+              window.history.replaceState(
+                null,
+                '',
+                runLink(run.runId, selection.example, selection.part)
+              );
               setSelection(selectedRun());
             }
           }}

@@ -1442,6 +1442,28 @@ def test_answers_guard_the_last_suspension_yielded_by_watch(
     asyncio.run(exercise())
 
 
+def test_resuming_after_follow_uses_the_part_that_finished(
+    fake_native: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_HISTORY_PART", "suspended-part")
+    monkeypatch.setenv("FAKE_HEAD_PART", "finished-part")
+    monkeypatch.setenv("FAKE_WATCH_FAILURE", "terminal")
+
+    async def exercise() -> None:
+        async with Client() as client:
+            run = client.get_run("logical")
+            events = [event async for event in run.watch(follow=True)]
+            assert [(event.phase, event.part_id) for event in events] == [
+                ("suspended", "suspended-part"),
+                ("running", "finished-part"),
+                ("finished", "finished-part"),
+            ]
+            resumed = await run.resume()
+            assert resumed.id == run.id and resumed.current_part_id == "successor"
+
+    asyncio.run(exercise())
+
+
 def test_saved_part_alias_resolves_the_root_for_status_watch_steer_and_discard(
     fake_native: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

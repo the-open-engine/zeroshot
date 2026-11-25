@@ -161,22 +161,3 @@ impl MenuFamilies {
         }
     }
 }
-
-pub(super) fn menu_row(
-    entry: RunHistorySummary,
-    id: &RunId,
-    current: &RunId,
-    count: usize,
-) -> Result<Value, ApiError> {
-    let mut row = serde_json::to_value(entry).map_err(|_| unavailable())?;
-    row["runId"] = json!(id);
-    row["createdAt"] = json!(created_at(id));
-    row["currentPartId"] = json!(current);
-    row["partId"] = json!(current);
-    row["partCount"] = json!(count);
-    if let Some(cursor) = row["cursor"].as_str() {
-        row["cursor"] = json!(part_cursor(current, &Cursor::new(cursor)));
-    }
-    qualify_state(&mut row, current);
-    Ok(row)
-}

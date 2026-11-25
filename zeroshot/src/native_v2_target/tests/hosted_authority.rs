@@ -253,7 +253,7 @@ fn hosted_run_response(request: &CapturedHttpRequest) -> Option<String> {
             }),
             json!({"type": "closed", "reason": "done"})
         )),
-        ("GET", "/native-v2/runs/run-hosted/logs") => {
+        ("GET", "/native-v2/runs/run-hosted/logs?partId=run-hosted") => {
             Some(format!("{}\n", json!({"type": "closed", "reason": "done"})))
         }
         ("GET", "/native-v2/runs/run-hosted/logs?from_cursor=v2%3A2&execution=worker%2F1") => {
