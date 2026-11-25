@@ -364,8 +364,8 @@ for the whole outer group, including nested groups and all mapped batches; indiv
 writers do not have separate snapshots. Read-only boundaries can share the same workspace bytes.
 
 Both modes keep the original `runId` and start a new part with fresh credentials.
-Status reports the active or latest part as `currentPartId`. CLI JSON also preserves the
-`resumedFrom` field on a resume receipt and `successorRunId` on an answered inbox request.
+Status reports the latest part as `currentPartId`. A resume receipt identifies the previous
+part as `resumedFromPartId`. An answered inbox request identifies the next part as `successorPartId`.
 Use `zeroshot status RUN_ID --part PART_ID` to inspect an earlier attempt. Each part uses the original graph, input, source, and
 delivery lineage. A selected checkpoint or the continuation of a suspended run restores each supported
 `node_instance` agent's provider conversation as it was at the checkpoint, even on another machine
@@ -501,8 +501,8 @@ that advertises `openengine.request-ask/v1`. See [Ask a person](ask-a-person.md)
 In the browser, a request step shows its question and allowed answers. While the run waits, the
 status line reads **Waiting for a person** with the question, and the step shows the deadline and
 the `answer` command. When the deadline passes, the open view marks it and removes the answer hint;
-this does not imply that a successor has recorded an expiry. Replay uses the selected position's
-recorded time and shows successor information only at the current end of history.
+expiry is recorded when the run takes its timeout route. Replay uses the selected position's
+recorded time.
 In the live run view, the same URL follows the answer into the next part. Replay keeps the
 selected moment. A second question appears in order after the first answer. Earlier work keeps
 its original logs and usage, and a checkpoint retry marks where the graph started again.
@@ -517,8 +517,8 @@ printf '%s' 'Check the Windows path too.' | zeroshot steer RUN_ID --text-stdin
 ```
 
 Supply exactly one text source. An admitted, running or suspended run accepts direction.
-Steering keeps a suspended run suspended. A run with a successor refuses and names that successor;
-steer the successor instead. Stopping runs and runs past the end of their graph refuse steering.
+Use the original run ID to steer the current part, including after a resume or answer. Steering
+keeps a suspended run suspended. Stopping runs and runs past the end of their graph refuse steering.
 
 Use `--node NAME` to select the exact name of one agent in the run's admitted runtime plan.
 The node need not have started: every mapped copy and future visit with that name is eligible.

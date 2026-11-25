@@ -112,12 +112,11 @@ anything.” After confirming the failure and checkpoint, say: “Resume it from
 SUCCESSOR_PART_ID for the next part. Follow the recovered run and report its observed result.”
 
 Expect `get_run`, `read_run_logs`, and `list_run_checkpoints`, followed after the recovery
-request by `resume_run`. On a server exposing `partId` and `successorPartId`, verify the call
-pins the inspected part, requests the supplied new part and keeps the stable run ID. Inspect
-the failed part and its recovered successor separately. After a lost response, check whether the
-requested part was admitted. Any retry uses the same IDs and checkpoint. A stale request must
-report the conflict and leave a single accepted successor. On a server exposing `successorRunId`,
-verify the client uses the advertised schema and observes the returned successor run.
+request by `resume_run`. Verify the call uses the original `runId`, the inspected `partId` and
+the supplied `successorPartId`. Follow the original run ID and verify that `currentPartId`
+matches the requested part. After a lost response, check whether that part was admitted. Any
+retry uses the same IDs and checkpoint. A stale request must report the conflict and leave a
+single accepted successor.
 
 ## Negative cases
 

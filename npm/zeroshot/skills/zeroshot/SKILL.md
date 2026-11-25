@@ -78,19 +78,16 @@ another run. A failed Platform run does not authorize silently implementing the 
    submitted payload and key. If the response is lost, replay those identical values to recover the
    original run receipt; do not invent a new key or require a client-generated run ID. If replay
    cannot establish acceptance, report the uncertainty and stop rather than submitting new work.
-5. Keep the submitted `runId`. When the receipt includes `currentPartId`, the run ID remains
-   stable across requests, resumes and checkpoint retries. Use `get_run`, `wait_for_run` with
+5. Keep the submitted `runId` across requests, resumes and checkpoint retries. Use `get_run`, `wait_for_run` with
    its status cursor, and `read_run_logs` with its history cursor. Keep each cursor with its
    stream and part selection. A wait lasts up to 30 seconds. Report a suspension that still needs
    input and the final outcome or delivery evidence when available.
-6. Inspect `list_run_checkpoints` before a requested recovery. If the discovered `resume_run`
-   schema exposes `partId` and `successorPartId`, pass the stable `runId`, the part the user
-   inspected, the chosen `from` selector, and a fresh UUIDv7 for the new part. Keep all four
-   values for identical retries. Follow the original run ID after acceptance. If the selected
-   part became stale, read current status and report it before taking another action.
-   On a server advertising `successorRunId` instead, use that field and follow its returned run
-   ID. Generate a UUID with host tooling or use one supplied by the user. Use `stop_run` or
-   `discard_run_workspace` only when the user intends that action.
+6. Inspect `list_run_checkpoints` before a requested recovery. Call `resume_run` with the
+   stable `runId`, the inspected `partId`, the chosen `from` selector, and a fresh UUIDv7 as
+   `successorPartId`. Generate it with host tooling or use one supplied by the user. Keep all
+   four values for identical retries. Follow the original run ID after acceptance. If the selected
+   part became stale, read current status and report it before taking another action. Use
+   `stop_run` or `discard_run_workspace` only when the user intends that action.
 
 The same server exposes typed environment and Memory operations. Before those writes, capture
 `workspace_id` from `get_authoring_catalog` and supply current revisions where required; do not
