@@ -38,7 +38,11 @@ fn wire_request(key: &str, workspace: bool) -> RunSubmitParams {
 }
 
 async fn mixed_runs(workspace: bool) -> (Harness, RunId) {
-    let harness = harness(Behavior::Hang).await;
+    let mut harness = harness(Behavior::Hang).await;
+    if workspace {
+        // This shared Git fixture otherwise requires a delivery node, unlike a workspace host.
+        harness.controller.delivery_policy = crate::native_v2_admission::DeliveryPolicy::Optional;
+    }
     let finished = submit_test_request(
         &harness.controller,
         wire_request("finished-wire", workspace),
