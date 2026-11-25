@@ -139,7 +139,7 @@ async function withSuspendedSteps(
   reason: 'request' | 'wait' | 'command',
   check: (view: {
     container: HTMLElement;
-    render: (successorRunId?: string) => Promise<void>;
+    render: () => Promise<void>;
     reads: () => number[];
     expiresAt: number;
   }) => Promise<void>,
@@ -172,7 +172,12 @@ async function withSuspendedSteps(
     ...runDetailFixture('paused-run'),
     phase: 'suspended',
     suspension,
-    workspaceRecovery: { successorRunId: knownSuccessor },
+    ...(knownSuccessor && {
+      partId: 'paused-run',
+      currentPartId: knownSuccessor,
+      parts: ['paused-run', knownSuccessor],
+      partView: true,
+    }),
     observation: { state: 'complete' },
     graph: {
       ...runDetailFixture().graph,
@@ -250,15 +255,14 @@ async function withSuspendedSteps(
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
-  const render = async (successorRunId?: string) => {
+  const render = async () => {
     await act(async () =>
       root.render(
         createElement(RunHistoryView, {
           runId: detail.runId,
           source,
           workers: [],
-          successorRunId,
-          runHref: (id: string) => `/host/runs/${id}`,
+          partHref: (id: string) => `/host/runs/paused-run/parts/${id}`,
         })
       )
     );
@@ -291,50 +295,6 @@ test('opening a step during playback keeps the shared replay timer running', asy
     await act(async () => t.mock.timers.tick(950));
     assert.notEqual(container.querySelector('.timeline-caption')!.textContent, caption);
     assert.ok(container.querySelector('[aria-label="Pause replay"]'));
-  });
-});
-
-test('mounted Steps adopts a host successor and replays the request before handoff consistently', async (t) => {
-  await withSuspendedSteps(t, 'request', async ({ container, render, reads }) => {
-    await render();
-    assert.match(container.querySelector('.run-outcome')!.textContent!, /Waiting for a person/);
-    await act(async () => approvalRow(container).querySelector('button')!.click());
-    assert.match(approvalRow(container).textContent!, /Answer with/);
-    await render('continued-run');
-    assert.match(
-      container.querySelector('.run-outcome')!.textContent!,
-      /Continued in run continued-run/
-    );
-    assert.match(approvalRow(container).textContent!, /Handed off/);
-    assert.doesNotMatch(approvalRow(container).textContent!, /Waiting|Answer with|closed without/);
-    assert.equal(
-      container.querySelector('.run-handoff')?.getAttribute('href'),
-      '/host/runs/continued-run'
-    );
-    assert.deepEqual(reads(), [1, 1]);
-
-    // The immediately preceding moment is the request vector, after request_deferred.
-    await clickButton(container, 'Previous event');
-    assert.match(approvalRow(container).textContent!, /Waiting for an answer/);
-    assert.match(approvalRow(container).textContent!, /Waiting since/);
-    assert.doesNotMatch(
-      approvalRow(container).textContent!,
-      /Handed off|closed without|Answer with/
-    );
-    assert.match(container.querySelector('.run-outcome')!.textContent!, /Waiting for a person/);
-    assert.equal(container.querySelector('a[href="/host/runs/continued-run"]'), null);
-    // The collapsed row and expanded details describe the same historical question.
-    await act(async () => approvalRow(container).querySelector('button')!.click());
-    assert.match(approvalRow(container).textContent!, /Waiting since/);
-    assert.doesNotMatch(approvalRow(container).textContent!, /closed without/);
-    await showGraph(container);
-    assert.doesNotMatch(renderedText(container), /Continued in a successor run/);
-    await clickButton(container, 'Go to latest');
-    assert.equal(
-      container.querySelector('.history-header a')?.getAttribute('href'),
-      '/host/runs/continued-run'
-    );
-    assert.deepEqual(reads(), [1, 1]);
   });
 });
 
@@ -374,6 +334,14 @@ test('a predecessor opened with a known successor replays its recorded question 
     async ({ container, render }) => {
       await render();
       assert.match(approvalRow(container).textContent!, /Handed off/);
+      assert.match(
+        container.querySelector('.run-outcome')!.textContent!,
+        /Continued in part continued-run/
+      );
+      assert.equal(
+        container.querySelector('.run-handoff')?.getAttribute('href'),
+        '/host/runs/paused-run/parts/continued-run'
+      );
       await clickButton(container, 'Previous event');
       assert.match(approvalRow(container).textContent!, /Waiting for an answer/);
       assert.doesNotMatch(approvalRow(container).textContent!, /closed without|Handed off/);

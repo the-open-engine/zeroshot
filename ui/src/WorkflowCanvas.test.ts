@@ -363,7 +363,7 @@ async function expandInPlace(container: HTMLElement) {
 for (const [request, label] of [
   [undefined, 'Waiting for an answer'],
   ['pending', 'Waiting for an answer'],
-  ['continued', 'Continued in a successor run'],
+  ['continued', 'Continued in a later part'],
   ['expired', 'Expired without an answer'],
 ] as const) {
   test(`a suspended request card says "${label}" when its question is ${request ?? 'unknown'}`, async (t) => {

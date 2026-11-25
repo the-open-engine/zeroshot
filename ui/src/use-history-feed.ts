@@ -37,16 +37,87 @@ function pageRecordCount(page: HistoryPage) {
   return page.events.length + (page.imports?.length ?? 0) + (page.omittedCursors?.length ?? 0);
 }
 
+function samePart(detail: RunDetail, page: HistoryPage) {
+  return (
+    detail.partView &&
+    detail.runId === page.runId &&
+    detail.partId === page.partId &&
+    detail.currentPartId === page.currentPartId
+  );
+}
+
+/** A queued handoff can expose retained parts before its own definition is readable. */
+async function retainedStart(source: RunHistoryReader, id: string, signal: AbortSignal) {
+  if (!source.forPart) return;
+  const page = await source.page(id, undefined, signal);
+  const { partId, currentPartId } = page;
+  if (
+    !partId ||
+    partId !== page.runId ||
+    !currentPartId ||
+    partId === currentPartId ||
+    page.partAfterCursor !== 'v2:0'
+  )
+    return;
+  const part = await source.forPart(partId).detail(id, signal);
+  if (!samePart(part, page)) return;
+  const detail: RunDetail = {
+    ...part,
+    partView: false,
+    phase: 'pending',
+    terminal: null,
+    runtimeFailure: undefined,
+    suspension: undefined,
+    suspendRequested: false,
+    workspaceRecovery: undefined,
+    metadata: undefined,
+    observation: page.observation,
+    cursor: page.headCursor,
+    history: {
+      ...part.history,
+      initialCursor: `${partId}@v2:0`,
+      cursor: page.headCursor,
+      complete: false,
+    },
+  };
+  return { detail, page };
+}
+
+async function readHistoryStart(
+  source: RunHistoryReader,
+  id: string,
+  signal: AbortSignal,
+  allowRetained: boolean,
+  pending: () => void
+): Promise<{ detail: RunDetail; page?: HistoryPage }> {
+  return readHistoryWhenReady(
+    async () => {
+      try {
+        return { detail: await source.detail(id, signal) };
+      } catch (error) {
+        if (!allowRetained || source.retryDelay?.(error) === undefined) throw error;
+        const retained = await retainedStart(source, id, signal);
+        if (!retained) throw error;
+        return retained;
+      }
+    },
+    signal,
+    source.retryDelay,
+    pending
+  );
+}
+
 function applyObservation(previous: RunDetail | undefined, root: string, page: HistoryPage) {
   if (!previous || previous.runId !== root) return previous;
   let next = { ...previous, observation: page.observation ?? previous.observation };
   if (!page.partAfterCursor || page.partId !== page.currentPartId) return next;
-  if (next.currentPartId !== page.currentPartId) {
+  if (next.currentPartId !== page.currentPartId || next.phase === 'pending') {
     next = {
       ...next,
       currentPartId: page.currentPartId,
-      partId: page.partId,
-      parts: [...(next.parts ?? []), page.partId!],
+      parts: next.parts?.includes(page.partId!)
+        ? next.parts
+        : [...(next.parts ?? []), page.partId!],
       phase: 'running',
       suspension: undefined,
       terminal: null,
@@ -73,20 +144,27 @@ function useHeadMetadata(
   const detailHead = useRef<string | undefined>(undefined);
   const detailCursor = useRef<string | undefined>(undefined);
   function remember(detail: RunDetail) {
-    detailHead.current = detail.currentPartId;
+    detailHead.current = detail.partId ?? detail.currentPartId;
     detailCursor.current = detail.cursor;
   }
   function refresh(root: string, page: HistoryPage, controller: AbortController | undefined) {
-    if (page.currentPartId && needsDetail(page, detailHead.current, detailCursor.current)) {
+    if (
+      controller &&
+      page.currentPartId &&
+      needsDetail(page, detailHead.current, detailCursor.current)
+    ) {
       const head = page.currentPartId;
       const cursor = page.headCursor;
       detailHead.current = head;
       detailCursor.current = cursor;
-      void source
-        .detail(root, controller?.signal)
+      void readHistoryWhenReady(
+        () => source.detail(root, controller.signal),
+        controller.signal,
+        source.retryDelay
+      )
         .then((detail) => {
           if (
-            controller?.signal.aborted ||
+            controller.signal.aborted ||
             detailHead.current !== head ||
             detailCursor.current !== cursor ||
             detail.currentPartId !== head
@@ -98,6 +176,7 @@ function useHeadMetadata(
             previous?.runId === root
               ? {
                   ...previous,
+                  partId: detail.partId,
                   parts: detail.parts,
                   graph: detail.graph,
                   runtime: detail.runtime,
@@ -109,7 +188,7 @@ function useHeadMetadata(
           );
         })
         .catch((cause) => {
-          if (!controller?.signal.aborted) setError(message(cause));
+          if (!controller.signal.aborted) setError(message(cause));
         });
     }
   }
@@ -182,12 +261,14 @@ export function useHistoryFeed(
         if (!controller.signal.aborted && generation === loadGeneration.current)
           setHistoryPending(true);
       };
-      const detail = await readHistoryWhenReady(
-        () => dataSource.detail(id, controller.signal),
+      const { detail, page: first } = await readHistoryStart(
+        dataSource,
+        id,
         controller.signal,
-        dataSource.retryDelay,
+        reset,
         pending
       );
+      let initialPage = first;
       if (controller.signal.aborted || generation !== loadGeneration.current) return;
       setHistoryPending(false);
       setRun(detail);
@@ -207,12 +288,15 @@ export function useHistoryFeed(
         bytes = 0,
         complete = false;
       while (!complete && count < 5000 && bytes < 8 * 1024 * 1024) {
-        const page = await readHistoryWhenReady(
-          () => dataSource.page(id, pageCursor.current, controller.signal),
-          controller.signal,
-          dataSource.retryDelay,
-          pending
-        );
+        const page =
+          initialPage ??
+          (await readHistoryWhenReady(
+            () => dataSource.page(id, pageCursor.current, controller.signal),
+            controller.signal,
+            dataSource.retryDelay,
+            pending
+          ));
+        initialPage = undefined;
         if (controller.signal.aborted || generation !== loadGeneration.current) return;
         setHistoryPending(false);
         requireProgress(page, pageCursor.current);

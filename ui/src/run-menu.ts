@@ -1,5 +1,13 @@
 import { runIdPattern } from './grouped-history';
-import type { RunSummary } from './run-history';
+import { humanize, suspensionStatus, type RunSummary } from './run-history';
+
+export function runMenuStatus(run: RunSummary) {
+  if (run.phase === 'queued') return 'Queued';
+  if (!run.historyAvailable) return 'History unavailable';
+  if (run.phase === 'suspended') return suspensionStatus(run.suspension);
+  if (run.phase === 'running' && run.suspendRequested) return 'Suspension requested';
+  return humanize(run.terminal?.status ?? run.phase);
+}
 
 /** A refreshed interval replaces the physical rows which may have just joined a family.
  * Preserve other pages in the menu, including unavailable or older entries. */

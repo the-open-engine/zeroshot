@@ -19,7 +19,7 @@ export interface RunHistoryReader {
   retryDelay?: HistoryRetryDelay;
   forPart?(partId: string): RunHistoryReader;
   detail(id: string, signal?: AbortSignal): Promise<RunDetail>;
-  page(id: string, after: string, signal?: AbortSignal): Promise<HistoryPage>;
+  page(id: string, after?: string, signal?: AbortSignal): Promise<HistoryPage>;
   watch?(id: string, after: string, observer: HistoryObserver, signal?: AbortSignal): () => void;
 }
 export interface RunHistorySource extends RunHistoryReader {
@@ -94,7 +94,7 @@ export function createRunHistorySource(
     return `runs/${encodeURIComponent(id)}${route}${query.size ? '?' + query : ''}`;
   };
   return {
-    forPart: (part) => createRunHistorySource(api, base, fetcher, part),
+    forPart: partId ? undefined : (part) => createRunHistorySource(api, base, fetcher, part),
     retryDelay: historyRetryDelay,
     list: (after, signal) =>
       api(`runs${after ? `?after=${encodeURIComponent(after)}` : ''}`, undefined, signal),
@@ -172,6 +172,7 @@ export function createExampleRunHistory(
     },
     async page(id, after) {
       const example = await selected(id);
+      after ??= example.detail.history.initialCursor;
       if ('pages' in example) {
         const position = runPosition(after) ?? { part: id, cursor: after };
         const page = example.pages.find((page) => page.partId === position.part);

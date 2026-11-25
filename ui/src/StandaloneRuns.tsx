@@ -1,4 +1,4 @@
-import { mergeRunPage, searchRunMenu } from './run-menu';
+import { mergeRunPage, runMenuStatus, searchRunMenu } from './run-menu';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, ChevronDown, ChevronRight, RefreshCw, Search } from 'lucide-react';
 import { AppHeader } from './AppHeader';
@@ -6,7 +6,7 @@ import { RunHistoryBoundary } from './RunHistoryBoundary';
 import { workspaceStorageKeys } from './workspace-storage';
 import { RunHistoryView } from './RunHistoryView';
 import { createExampleRunHistory } from './run-history-source';
-import { humanize, suspensionStatus, type RunSummary } from './run-history';
+import type { RunSummary } from './run-history';
 import type { Bootstrap } from './api';
 import type { WorkspaceServices } from './workspace-services';
 
@@ -20,12 +20,6 @@ const dateLabel = (time?: number | null) =>
         minute: '2-digit',
       })
     : '';
-const runState = (run: RunSummary) =>
-  run.phase === 'suspended'
-    ? suspensionStatus(run.suspension)
-    : run.phase === 'running' && run.suspendRequested
-      ? 'Suspension requested'
-      : humanize(run.terminal?.status ?? (run.phase === 'finished' ? 'Finished' : run.phase));
 function selectedRun() {
   const [kind, id, section, part] = window.location.hash.slice(1).split('/').slice(1);
   try {
@@ -138,7 +132,9 @@ function StandaloneRunsContent({ services, bootstrap, viewScope }: StandaloneRun
       }
   }
   const { matches: filtered, lookupId } = searchRunMenu(runs, query);
-  const latest = runs.find((run) => run.historyAvailable);
+  const latest = runs.find(
+    (run) => run.historyAvailable || (run.phase === 'queued' && (run.partCount ?? 1) > 1)
+  );
   // The list's periodic refresh brings the successor a suspended run gains while its page is open.
   const listed = (selection?.example ? examples : runs).find((run) => run.runId === selection?.id);
   return (
@@ -264,9 +260,13 @@ function StandaloneRunsContent({ services, bootstrap, viewScope }: StandaloneRun
             }
           }}
           workers={bootstrap.workers ?? []}
-          runHref={(id) => runLink(id, selection?.example)}
-          successorRunId={listed?.workspaceRecovery?.successorRunId}
+          partHref={
+            selection && !selection.example && history.forPart
+              ? (part) => runLink(selection.id, false, part)
+              : undefined
+          }
           listedPartId={listed?.currentPartId}
+          listedPhase={listed?.phase}
           emptyAction={
             latest && (
               <button className="button" onClick={() => choose(latest)}>
@@ -290,30 +290,20 @@ function RunListItem({
   choose: (run: RunSummary) => void;
 }) {
   return (
-    <div>
-      <button
-        className={`run-list-item ${active ? 'active' : ''}`}
-        aria-current={active ? 'true' : undefined}
-        onClick={() => choose(run)}
-      >
-        <span className={`run-dot state-${run.terminal?.status ?? run.phase}`} />
-        <span>
-          <strong>{run.title}</strong>
-          <small>
-            {run.example ? 'Example' : dateLabel(run.createdAt) || run.runId.slice(0, 8)}
-            <span>{run.historyAvailable ? runState(run) : 'History unavailable'}</span>
-          </small>
-        </span>
-      </button>
-      {!run.currentPartId && run.workspaceRecovery?.successorRunId && (
-        <a
-          className="run-successor"
-          href={runLink(run.workspaceRecovery.successorRunId, run.example)}
-        >
-          Continue to successor
-        </a>
-      )}
-    </div>
+    <button
+      className={`run-list-item ${active ? 'active' : ''}`}
+      aria-current={active ? 'true' : undefined}
+      onClick={() => choose(run)}
+    >
+      <span className={`run-dot state-${run.terminal?.status ?? run.phase}`} />
+      <span>
+        <strong>{run.title}</strong>
+        <small>
+          {run.example ? 'Example' : dateLabel(run.createdAt) || run.runId.slice(0, 8)}
+          <span>{runMenuStatus(run)}</span>
+        </small>
+      </span>
+    </button>
   );
 }
 

@@ -60,19 +60,15 @@ type RunHistoryViewProps = {
   runId?: string;
   source: RunHistoryReader;
   listedPartId?: string;
+  listedPhase?: string;
   onOpenRun?: (run: RunDetail) => void;
   workers: WorkerOption[];
   emptyAction?: ReactNode;
   viewKey?: string;
-  /** The host owns navigation between runs. */
-  runHref?: (runId: string) => string;
+  /** Link to an exact part in this run. */
+  partHref?: (partId: string) => string;
   /** Set when a host page already shows the run's title and status above this view. */
   embedded?: boolean;
-  /**
-   * The successor the host's own run list reports for this run. A suspended run gains one after
-   * this view read its detail; the host's existing refresh brings it without a reload.
-   */
-  successorRunId?: string;
 };
 /** What the graph shows of the run, and whether it follows a live run's latest events. */
 function observed(
@@ -101,26 +97,14 @@ function replayPosition(history: HistoryFeed, moments: ReturnType<typeof history
   return { safePosition, moment, current: loadedHead && moment.index === events.length - 1 };
 }
 
-function useHistoryProjection(
-  history: HistoryFeed,
-  source: RunHistoryReader,
-  listedSuccessor?: string
-) {
+function useHistoryProjection(history: HistoryFeed, source: RunHistoryReader) {
   const { run, events, cursorIndex, control } = history;
   const moments = useMemo(() => historyMoments(events, cursorIndex), [events, cursorIndex]);
   const { safePosition, moment, current } = replayPosition(history, moments);
   const replayPart = events[moment.index]?.partId ?? events[0]?.partId;
   const definition = useReplayDefinition(run, replayPart, source);
   const { document } = definition;
-  const projection = useProjection(
-    document,
-    events,
-    moment.index,
-    control,
-    run,
-    listedSuccessor,
-    current
-  );
+  const projection = useProjection(document, events, moment.index, control, run, current);
   return { moments, safePosition, moment, current, definition, document, projection };
 }
 
@@ -130,11 +114,11 @@ export function RunHistoryView({
   workers,
   emptyAction,
   viewKey,
-  runHref,
+  partHref,
   embedded = false,
-  successorRunId: listedSuccessor,
   onOpenRun,
   listedPartId,
+  listedPhase,
 }: RunHistoryViewProps) {
   const { saved: savedView, canvas, setCanvas, layout, setLayout } = useRunView(viewKey);
   const [playing, setPlaying] = useState(false);
@@ -186,7 +170,7 @@ export function RunHistoryView({
     cursor: historyViewCursor(history.restoreCursor.current, events, cursorIndex),
   });
   const { moments, safePosition, moment, current, definition, document, projection } =
-    useHistoryProjection(history, source, listedSuccessor);
+    useHistoryProjection(history, source);
   useEffect(() => {
     window.document.title = `${run?.title ?? 'Runs'} · Zeroshot`;
   }, [run?.title]);
@@ -275,6 +259,8 @@ export function RunHistoryView({
     setExecution(id);
     setRevealStep({ invocation: id, tick: Date.now() });
   }
+  const latest = safePosition === moments.length - 1;
+  const queued = queuedAtHead(history, latest, listedPartId, listedPhase);
   const toggle = <RunViewToggle layout={layout} setLayout={switchLayout} />;
   return (
     <main className="workspace history-workspace">
@@ -284,6 +270,7 @@ export function RunHistoryView({
             run={run}
             terminal={displayedTerminal}
             history={history}
+            queued={queued}
             position={safePosition}
             momentsCount={moments.length}
             openLog={() =>
@@ -291,8 +278,6 @@ export function RunHistoryView({
             }
             retry={() => void history.loadHistory(run.runId, source, false)}
             embedded={embedded}
-            runHref={runHref}
-            successorRunId={projection.successorRunId}
           />
           <div
             className={`editor-body history-body ${inspector && layout === 'graph' ? '' : 'inspector-closed'}`}
@@ -303,12 +288,11 @@ export function RunHistoryView({
                   terminal: displayedTerminal,
                   currentFailure,
                   // Steps not recorded yet may still run when live or replaying before the end.
-                  open:
-                    !displayedTerminal &&
-                    (history.isLiveRun || safePosition < moments.length - 1 || !history.loadedHead),
+                  open: !displayedTerminal && (history.isLiveRun || !latest || !history.loadedHead),
                   following,
+                  queued,
                   answerable: current && run.phase === 'suspended',
-                  runHref,
+                  partHref,
                 })}
                 execution={execution}
                 select={selectStep}
@@ -454,7 +438,7 @@ function runContext(
   projection: NonNullable<ReturnType<typeof useProjection>>,
   position: Pick<
     RunContext,
-    'terminal' | 'currentFailure' | 'open' | 'following' | 'answerable' | 'runHref'
+    'terminal' | 'currentFailure' | 'open' | 'following' | 'answerable' | 'partHref' | 'queued'
   >
 ): RunContext {
   const successor = projection.successorRunId;
@@ -472,6 +456,7 @@ function runContext(
     now: projection.now,
     waiting:
       !position.terminal &&
+      !position.queued &&
       !successor &&
       (!!projection.suspension?.request ||
         projection.invocations.some(
@@ -754,32 +739,47 @@ function useReplayTimer(replay: {
   }, [playing, cursorIndex, playbackNode]);
 }
 
+function queuedAtHead(
+  history: HistoryFeed,
+  latest: boolean,
+  listedPart?: string,
+  listedPhase?: string
+) {
+  return (
+    listedPhase === 'queued' &&
+    listedPart === history.run?.currentPartId &&
+    latest &&
+    history.run?.phase === 'pending' &&
+    history.following &&
+    !history.restorePending
+  );
+}
+
 function RunHistoryHeader({
   run,
   terminal,
   history,
+  queued,
   position,
   momentsCount,
   openLog,
   retry,
   embedded,
-  runHref,
-  successorRunId,
 }: {
   run: RunDetail;
   terminal: RunTerminal | undefined;
   history: HistoryFeed;
+  queued: boolean;
   position: number;
   momentsCount: number;
   openLog: () => void;
   retry: () => void;
   embedded: boolean;
-  runHref?: (runId: string) => string;
-  successorRunId?: string;
 }) {
   const preparing = isPreparingEnvironment(run, history.events);
-  const shownStatus =
-    history.loadedHead && position === momentsCount - 1
+  const shownStatus = queued
+    ? 'Queued'
+    : history.loadedHead && position === momentsCount - 1
       ? currentHistoryState(run, terminal, preparing, position === 0)
       : 'Replay';
   return (
@@ -788,9 +788,6 @@ function RunHistoryHeader({
         <div className="workspace-header history-header">
           <div className="profile-title">
             <h1 title={run.title}>{run.title}</h1>
-            {!run.parts && successorRunId && runHref && (
-              <a href={runHref(successorRunId)}>Continue to successor</a>
-            )}
             <span
               className={`run-status state-${terminal?.status ?? (shownStatus === 'failed' ? 'failed' : 'replay')}`}
             >

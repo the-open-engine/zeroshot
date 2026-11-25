@@ -53,7 +53,7 @@ export type StoryEntry =
       group?: string;
       steps: StoryStep[];
     };
-export type StoryOutcome = { text: string; state: NodeState; facts: string[] };
+export type StoryOutcome = { text: string; state: NodeState | 'queued'; facts: string[] };
 
 type Execution = StoryStep & {
   start: number;
@@ -395,7 +395,7 @@ export function projectOutcome(
   /** The run an answer or resume continued this one in, which took over its open question. */
   successor?: string,
   controls: readonly ControlVisit[] = [],
-  position: { suspension?: RunSummary['suspension']; now?: number } = {}
+  position: { suspension?: RunSummary['suspension']; now?: number; queued?: boolean } = {}
 ): StoryOutcome {
   const executions = foldAttempts(document, invocations, controls, clock.at);
   const rounds = new Map<string, number>();
@@ -427,7 +427,8 @@ export function projectOutcome(
     return terminal.status === 'succeeded'
       ? { text: 'Run completed', state: 'succeeded', facts }
       : { text: `Run failed · ${humanize(terminal.reason)}`, state: 'failed', facts };
-  if (handedOff) return { text: `Continued in run ${successor}`, state: 'suspended', facts };
+  if (position.queued) return { text: 'Queued', state: 'queued', facts };
+  if (handedOff) return { text: `Continued in part ${successor}`, state: 'suspended', facts };
   if (asking?.request && position.now !== undefined && position.now >= asking.request.expiresAt)
     return { text: `Request deadline passed · ${asking.request.text}`, state: 'suspended', facts };
   if (asking?.request)

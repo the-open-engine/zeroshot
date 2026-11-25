@@ -21,7 +21,7 @@ impl RemoteCatalog {
 
     pub(super) fn remember(&mut self, after: Option<&RunId>, page: &RunHistoryList) {
         for entry in &page.runs {
-            if entry.history_available && has_links(entry.workspace_recovery.as_ref()) {
+            if has_links(entry.workspace_recovery.as_ref()) {
                 self.linked.insert(entry.run_id.clone(), entry.clone());
             }
         }
@@ -31,7 +31,14 @@ impl RemoteCatalog {
         }
     }
 
-    async fn linked(&mut self, id: &RunId) -> Result<Option<&RunHistorySummary>, ApiError> {
+    pub(super) fn into_head(mut self, id: &RunId) -> Option<RunHistorySummary> {
+        self.linked.remove(id)
+    }
+
+    pub(super) async fn linked(
+        &mut self,
+        id: &RunId,
+    ) -> Result<Option<&RunHistorySummary>, ApiError> {
         while !self.linked.contains_key(id)
             && !self.exhausted
             && self.after.as_ref().is_none_or(|last| id < last)
@@ -145,9 +152,7 @@ impl MenuFamilies {
         let family = match self.roots.remove(id) {
             Some(family) => family,
             None if source.needs_lineage_lookup(entry) => {
-                let origin = catalog
-                    .and(entry.workspace_recovery.clone())
-                    .filter(|_| entry.history_available);
+                let origin = catalog.and(entry.workspace_recovery.clone());
                 resolve(source, id, origin, catalog).await?
             }
             None => return Ok(Some((id.clone(), 1))),

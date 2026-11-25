@@ -18,6 +18,10 @@ export function useReplayDefinition(
   const [retryKey, setRetry] = useState(0);
   useEffect(() => {
     if (!historical || !root || !source.forPart || cache.has(historical)) return;
+    if (run?.phase === 'pending' && run.partId === historical) {
+      cache.set(historical, run);
+      return;
+    }
     const controller = new AbortController();
     const exact = source.forPart(historical);
     setFailure(undefined);
@@ -41,8 +45,8 @@ export function useReplayDefinition(
           });
       });
     return () => controller.abort();
-  }, [historical, root, source, cache, retryKey]);
-  const selected = historical ? cache.get(historical) : run;
+  }, [historical, root, source, cache, retryKey, run?.partId, run?.phase]);
+  const selected = recordedDefinition(run, part, historical, cache);
   const document = useMemo(
     () => selected && { name: selected.runId, graph: selected.graph, runtime: selected.runtime },
     [selected]
@@ -50,7 +54,18 @@ export function useReplayDefinition(
   return {
     document,
     error: failure?.part === historical ? failure?.message : undefined,
-    loading: !!historical && !selected,
+    loading: Boolean(run && !selected),
     retry: () => setRetry((n) => n + 1),
   };
+}
+
+function recordedDefinition(
+  run: RunDetail | undefined,
+  part: string | undefined,
+  historical: string | undefined,
+  cache: Map<string, RunDetail>
+) {
+  if (historical) return cache.get(historical) ?? (historical === run?.partId ? run : undefined);
+  if (!run?.partView && run?.partId && part === run.currentPartId && part !== run.partId) return;
+  return run;
 }

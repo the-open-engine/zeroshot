@@ -18,13 +18,18 @@ pub(in crate::profile_ui) struct BrowserQuery {
     part_id: Option<String>,
 }
 
+struct BrowserFamily {
+    chain: RunLineage,
+    remote_head: Option<RunHistorySummary>,
+}
+
 type BrowserParams = Result<Query<BrowserQuery>, axum::extract::rejection::QueryRejection>;
 
 async fn selection(
     source: &NativeRunHistory,
     id: String,
     query: BrowserParams,
-) -> Result<(RunId, BrowserQuery, RunLineage), ApiError> {
+) -> Result<(RunId, BrowserQuery, BrowserFamily), ApiError> {
     let query = query.map_err(|_| invalid_cursor())?.0;
     let id = parse_id(id)?;
     let family = source.family(&id).await?;
@@ -69,14 +74,30 @@ impl NativeRunHistory {
         }
     }
 
-    async fn family(&self, id: &RunId) -> Result<RunLineage, ApiError> {
+    async fn family(&self, id: &RunId) -> Result<BrowserFamily, ApiError> {
         let catalog = self.remote_catalog();
-        let origin = if catalog.is_some() {
-            self.recovery(id.clone()).await?
+        let origin = if let Some(catalog) = &catalog {
+            match self.recovery(id.clone()).await {
+                Err(error) if error.code == HistoryProblemCode::HistoryPending.as_str() => {
+                    // A host can commit a queued handoff before its ledger is readable.
+                    catalog
+                        .lock()
+                        .await
+                        .linked(id)
+                        .await?
+                        .ok_or(error)?
+                        .workspace_recovery
+                        .clone()
+                }
+                result => result?,
+            }
         } else {
             None
         };
-        catalog::resolve(self, id, origin, catalog.as_ref()).await
+        let chain = catalog::resolve(self, id, origin, catalog.as_ref()).await?;
+        let remote_head =
+            catalog.and_then(|catalog| catalog.into_inner().into_head(chain.current()));
+        Ok(BrowserFamily { chain, remote_head })
     }
 
     fn remote_catalog(&self) -> Option<Catalog> {
@@ -127,7 +148,7 @@ impl NativeRunHistory {
         // Local archive status may be unavailable after the controller exits; ownership is
         // still retained separately and should not depend on probing a controller socket.
         (entry.history_available && matches!(&self.0, NativeRunHistorySource::Local(_)))
-            || (entry.history_available && catalog::has_links(entry.workspace_recovery.as_ref()))
+            || catalog::has_links(entry.workspace_recovery.as_ref())
     }
 
     async fn part_summary(&self, id: &RunId) -> Result<RunHistorySummary, ApiError> {
@@ -139,7 +160,7 @@ impl NativeRunHistory {
                     .ok()
                     .flatten();
                 let mut summary = summary(&stored.snapshot, failure);
-                summary.workspace_recovery = self.recovery(id.clone()).await?;
+                summary.workspace_recovery = local.part_recovery(id.clone()).await?;
                 Ok(summary)
             }
             NativeRunHistorySource::Remote(remote) => {
@@ -191,34 +212,36 @@ impl NativeRunHistory {
 
     async fn browser_page(
         &self,
-        family: &RunLineage,
+        family: &BrowserFamily,
         offset: (&RunId, Cursor),
         known_head: Option<RunHistorySummary>,
     ) -> Result<RunPartsPage, ApiError> {
         let (part, cursor) = offset;
-        let position = family
+        let chain = &family.chain;
+        let position = chain
             .parts()
             .iter()
             .position(|id| id == part)
             .ok_or_else(invalid_cursor)?;
         let mut page = self.physical_page(part, Some(cursor.clone())).await?;
-        if let Some(previous) = position
-            .checked_sub(1)
-            .and_then(|at| family.parts().get(at))
-        {
+        if let Some(previous) = position.checked_sub(1).and_then(|at| chain.parts().get(at)) {
             self.describe_continuation(&mut page, previous, part)
                 .await?;
         }
-        let at_head = part == family.current();
-        let current = if !at_head || page.finished {
-            match known_head {
-                Some(head) => Some(head),
-                None => Some(self.part_summary(family.current()).await?),
-            }
-        } else {
+        let at_head = part == chain.current();
+        let fetched;
+        let current = if at_head && !page.finished {
             None
+        } else if let Some(head) = known_head
+            .as_ref()
+            .or(family.remote_head.as_ref().filter(|_| !at_head))
+        {
+            Some(head)
+        } else {
+            fetched = self.part_summary(chain.current()).await?;
+            Some(&fetched)
         };
-        RunPartsPage::from_part(family.parts(), (position, cursor), page, current.as_ref())
+        RunPartsPage::from_part(chain.parts(), (position, cursor), page, current)
             .ok_or_else(invalid_cursor)
     }
     async fn describe_continuation(
@@ -332,12 +355,12 @@ pub(in crate::profile_ui) async fn show(
     }
     match query.part_id {
         Some(part) => {
-            let part = exact_part(&family, part)?;
-            let mut value = exact_value(state.runs.detail(&part).await?, &family, &part);
-            value["parts"] = json!(family.parts());
+            let part = exact_part(&family.chain, part)?;
+            let mut value = exact_value(state.runs.detail(&part).await?, &family.chain, &part);
+            value["parts"] = json!(family.chain.parts());
             Ok(Json(value))
         }
-        None => state.runs.browser_detail(&family).await.map(Json),
+        None => state.runs.browser_detail(&family.chain).await.map(Json),
     }
 }
 
@@ -348,14 +371,14 @@ pub(in crate::profile_ui) async fn history(
 ) -> Result<Json<Value>, ApiError> {
     let (id, query, family) = selection(&state.runs, id, query).await?;
     if let Some(part) = query.part_id {
-        let part = exact_part(&family, part)?;
+        let part = exact_part(&family.chain, part)?;
         let page = state
             .runs
             .page(&part, exact_cursor(&part, query.after)?)
             .await?;
-        return Ok(Json(exact_value(page, &family, &part)));
+        return Ok(Json(exact_value(page, &family.chain, &part)));
     }
-    let (part, cursor) = position(&id, &family, query.after)?;
+    let (part, cursor) = position(&id, &family.chain, query.after)?;
     let page = state
         .runs
         .browser_page(&family, (&part, cursor), None)
@@ -370,12 +393,13 @@ pub(in crate::profile_ui) async fn events(
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
     let (id, query, family) = selection(&state.runs, id, query).await?;
+    let after = cursor_header_or_query(query.after, &headers)?;
     if let Some(part) = query.part_id {
-        let part = exact_part(&family, part)?;
-        let cursor = exact_cursor(&part, cursor_header_or_query(query.after, &headers)?)?;
-        return part_events(state, part, cursor, family).await;
+        let part = exact_part(&family.chain, part)?;
+        let cursor = exact_cursor(&part, after)?;
+        return part_events(state, part, cursor, family.chain).await;
     }
-    let (part, cursor) = position(&id, &family, cursor_header_or_query(query.after, &headers)?)?;
+    let (part, cursor) = position(&id, &family.chain, after)?;
     let first = state
         .runs
         .browser_page(&family, (&part, cursor), None)
@@ -431,7 +455,7 @@ async fn part_events(
 
 struct BrowserFollow {
     source: NativeRunHistory,
-    family: RunLineage,
+    family: BrowserFamily,
     first: Option<RunPartsPage>,
     part: RunId,
     cursor: Cursor,
@@ -505,7 +529,7 @@ impl BrowserFollow {
             // A failed part may already have a confirmed retry by the time a slow reader
             // drains its last page. Recheck ownership before closing that stream.
             let current = self.source.family(&self.part).await?;
-            if current.current() != self.family.current() {
+            if current.chain.current() != self.family.chain.current() {
                 self.family = current;
                 return self
                     .source
@@ -536,6 +560,6 @@ impl BrowserFollow {
         {
             self.family = self.source.family(&self.part).await?;
         }
-        Ok((self.family.current() == &self.part).then_some(head))
+        Ok((self.family.chain.current() == &self.part).then_some(head))
     }
 }

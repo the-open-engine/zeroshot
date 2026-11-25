@@ -37,7 +37,7 @@ async fn recovery(fixture: &Fixture, part: &RunId, parent: Option<&RunId>, child
     .assert_value();
 }
 
-async fn successor(fixture: &Fixture, id: &RunId) -> SqliteRunLedger {
+pub(super) async fn successor(fixture: &Fixture, id: &RunId) -> SqliteRunLedger {
     let directory = fixture.root.join("runs").join(id.as_str());
     crate::execution::platform::create_private_directory(&directory).assert_value();
     let ledger = SqliteRunLedger::open(directory.join("runs.sqlite3")).assert_value();
@@ -59,7 +59,7 @@ async fn successor(fixture: &Fixture, id: &RunId) -> SqliteRunLedger {
     ledger
 }
 
-async fn suspended(fixture: &Fixture) {
+pub(super) async fn suspended(fixture: &Fixture) {
     fixture
         .ledger
         .append(

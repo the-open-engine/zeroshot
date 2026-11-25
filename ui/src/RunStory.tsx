@@ -161,9 +161,9 @@ export function RunStory({
                     <span>
                       {section.handoff.label ?? (
                         <>
-                          Continued from{' '}
-                          {run.runHref ? (
-                            <a href={run.runHref(section.handoff.from)}>{section.handoff.from}</a>
+                          Continued from part{' '}
+                          {run.partHref ? (
+                            <a href={run.partHref(section.handoff.from)}>{section.handoff.from}</a>
                           ) : (
                             section.handoff.from
                           )}
@@ -306,7 +306,10 @@ function storyStepStatus(step: StoryStep, run: RunContext) {
   const state = stopped ? 'skipped' : step.state;
   // At the end of its history, a question this run handed to its successor no longer waits here.
   const handedOff =
-    step.state === 'suspended' && !!step.request && !step.request.resolution && !!run.successor;
+    step.state === 'suspended' &&
+    !!step.request &&
+    !step.request.resolution &&
+    (!!run.successor || !!run.queued);
   const deadlinePassed =
     step.request &&
     !step.request.resolution &&

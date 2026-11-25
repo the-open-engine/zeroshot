@@ -1,10 +1,16 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { act, createElement } from 'react';
-import { appendHistory, readRunDetail, type RunHistoryReader } from './run-history-source';
+import { ApiError, createApiClient } from './api';
+import {
+  appendHistory,
+  createRunHistorySource,
+  readRunDetail,
+  type RunHistoryReader,
+} from './run-history-source';
 import { groupedControlPage } from './grouped-history';
 import { projectHistory, type HistoryEvent, type HistoryPage, type RunDetail } from './run-history';
-import { mergeRunPage, searchRunMenu } from './run-menu';
+import { mergeRunPage, runMenuStatus, searchRunMenu } from './run-menu';
 import { projectStory } from './run-story';
 import { runDetailFixture } from './test-support';
 import {
@@ -184,7 +190,7 @@ test('a copied vector with a reducer transition retains its native replay anchor
   assert.equal(normalized.control?.[0].cursor, normalized.events[0].cursor);
 });
 
-async function renderViewer(t: TestContext, source: RunHistoryReader) {
+async function renderViewer(t: TestContext, source: RunHistoryReader, runId = root) {
   stubWorker(t);
   installBrowser(t);
   const { RunHistoryView } = await viewerModule(t);
@@ -193,7 +199,7 @@ async function renderViewer(t: TestContext, source: RunHistoryReader) {
   document.body.append(container);
   const mount = createRoot(container);
   await act(async () =>
-    mount.render(createElement(RunHistoryView, { runId: root, source, workers: [] }))
+    mount.render(createElement(RunHistoryView, { runId, source, workers: [] }))
   );
   await flushEffects();
   return {
@@ -204,6 +210,127 @@ async function renderViewer(t: TestContext, source: RunHistoryReader) {
     },
   };
 }
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+test('cold open replays retained steps while the head is queued and preserves a pinned graph on arrival', async (t) => {
+  const pending = () =>
+    Response.json(
+      { code: 'history_pending', message: 'Preparing the current part' },
+      { status: 503 }
+    );
+  const metadataRequested = deferred<void>();
+  const headPage = deferred<HistoryPage>();
+  const headDetail = deferred<RunDetail>();
+  const first = page(
+    root,
+    child,
+    0,
+    [
+      { kind: 'node_started', reference: ref(root, 'work', '1') },
+      { kind: 'safe_log', execution: '1', line: 'retained compiler output' },
+      suspended,
+    ],
+    0
+  );
+  const exact = {
+    ...definition(child, 'suspended'),
+    partId: root,
+    partView: true,
+    runtime: { ...doc.runtime, harness: 'pi', provider: 'anthropic' },
+  };
+  let opens = 0;
+  const reads: (string | undefined)[] = [];
+  const base = new URL('http://localhost/ui/api/');
+  const fetcher: typeof fetch = async (url) => {
+    const { pathname, searchParams } = new URL(String(url));
+    if (pathname.endsWith('/history')) {
+      assert.equal(pathname, base.pathname + 'runs/' + child + '/history');
+      const after = searchParams.get('after') ?? undefined;
+      reads.push(after);
+      if (after === undefined) return reads.length === 1 ? pending() : Response.json(first);
+      assert.equal(after, `${child}@v2:0`);
+      return Response.json(await headPage.promise);
+    }
+    if (searchParams.has('partId')) {
+      assert.equal(searchParams.get('partId'), root);
+      assert.equal(pathname, base.pathname + 'runs/' + child);
+      return Response.json(exact);
+    }
+    if (pathname === base.pathname + 'runs/' + child) {
+      return pending();
+    }
+    assert.equal(pathname, base.pathname + 'runs/' + root);
+    if (++opens === 1) return pending();
+    metadataRequested.resolve();
+    return Response.json(await headDetail.promise);
+  };
+  const source = createRunHistorySource(createApiClient(base, fetcher), base, fetcher);
+  source.retryDelay = (cause) =>
+    cause instanceof ApiError && cause.code === 'history_pending' ? 1 : undefined;
+  const { container, close } = await renderViewer(t, source, child);
+  try {
+    assert.match(renderedText(container), /retained compiler output/);
+    assert.deepEqual(reads, [undefined, undefined, `${child}@v2:0`]);
+    await showGraph(container);
+    await clickButton(container, 'Previous event');
+    await clickButton(container, 'Show details');
+    const position = () =>
+      container.querySelector<HTMLInputElement>('[aria-label="History position"]')!.value;
+    const pinned = position();
+    assert.match(renderedText(container), /pi \/ anthropic/);
+    await act(async () =>
+      headPage.resolve({
+        ...page(child, child, 0, [continuation, terminal], 2),
+        finished: true,
+        observation: { state: 'complete' },
+      })
+    );
+    await metadataRequested.promise;
+    await act(async () => headDetail.resolve(definition(child, 'finished')));
+    await flushEffects();
+    assert.equal(position(), pinned);
+    assert.match(renderedText(container), /pi \/ anthropic/);
+    await clickButton(container, 'Go to latest');
+    assert.match(renderedText(container), /codex \/ openai/);
+  } finally {
+    await close();
+  }
+});
+
+for (const failureAt of ['definition', 'retained page'] as const)
+  test(`a refused ${failureAt} is surfaced without another archive lookup`, async (t) => {
+    const reads: string[] = [];
+    const base = new URL('http://localhost/ui/api/');
+    const fetcher: typeof fetch = async (url) => {
+      const path = new URL(String(url)).pathname;
+      reads.push(path);
+      if (failureAt === 'retained page' && reads.length === 1)
+        return Response.json({ code: 'history_pending' }, { status: 503 });
+      return Response.json(
+        { code: 'forbidden', message: 'History access was refused.' },
+        { status: 403 }
+      );
+    };
+    const source = createRunHistorySource(createApiClient(base, fetcher), base, fetcher);
+    const { container, close } = await renderViewer(t, source, child);
+    try {
+      assert.match(renderedText(container), /History access was refused/);
+      const address = base.pathname + 'runs/' + child;
+      assert.deepEqual(
+        reads,
+        failureAt === 'definition' ? [address] : [address, address + '/history']
+      );
+    } finally {
+      await close();
+    }
+  });
 
 for (const pinned of [false, true])
   test(`a ${pinned ? 'pinned replay' : 'live viewer'} receives a successor on the existing subscription`, async (t) => {
@@ -424,4 +551,16 @@ test('Steps and Graph navigate between original work and a later checkpoint prer
   } finally {
     await close();
   }
+});
+
+test('the run menu reports a queued successor before native history is available', () => {
+  const queued = {
+    ...runDetailFixture(),
+    currentPartId: 'queued-part',
+    phase: 'queued',
+    historyAvailable: false,
+    cursor: null,
+  };
+  assert.equal(runMenuStatus(queued), 'Queued');
+  assert.equal(runMenuStatus({ ...queued, phase: 'unavailable' }), 'History unavailable');
 });
