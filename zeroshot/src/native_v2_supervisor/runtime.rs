@@ -155,6 +155,7 @@ pub(super) fn dispatch_decisions(run_id: &RunId, decisions: Vec<Decision>) -> Ve
                 input,
             }),
             Decision::VoidLoser { .. }
+            | Decision::RequestArtifacts { .. }
             | Decision::Continue { .. }
             | Decision::Promote { .. }
             | Decision::Terminal { .. } => None,
@@ -349,7 +350,7 @@ pub(super) const fn safe_log_stream(stream: LiveOutputStream) -> SafeLogStream {
     }
 }
 
-pub(super) fn reduce(
+pub(crate) fn reduce(
     admitted: &AdmittedRun,
     snapshot: &RunSnapshot,
 ) -> Result<crate::full_v1_reducer::Reduction, NativeV2SupervisorError> {

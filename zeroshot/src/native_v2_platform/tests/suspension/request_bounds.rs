@@ -45,6 +45,7 @@ async fn seed_request(ledger: &FakeRunLedger, event: usize) -> RunId {
         execution: ExecutionId::new(1).assert_value(),
     };
     let request = openengine_cluster_protocol::RunRequest {
+        artifacts: Default::default(),
         id: VectorId::new("q".repeat(64)).assert_value(),
         text: "Approve?".to_owned(),
         signals: serde_json::from_value(json!({"decision":["approved","rejected"]})).assert_value(),
@@ -72,6 +73,7 @@ async fn seed_request(ledger: &FakeRunLedger, event: usize) -> RunId {
                         run_id: run_id.clone(),
                         created_at: UnixTimestampMillis::MIN,
                         content: RunVectorContent::Request {
+                            artifacts: Default::default(),
                             node: node.clone(),
                             text: request.text.clone(),
                             signals: request.signals.clone(),

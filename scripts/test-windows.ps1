@@ -33,6 +33,14 @@ foreach ($required in $containedTests) {
     if ($inventory -notcontains "${required}: test") { throw "Missing Windows regression: $required" }
 }
 
+# Direct targets retain file-store ancestor guards while UI/profile state is atomically replaced.
+$library = @($tests | Where-Object { $_.target.name -eq 'zeroshot_engine' })
+if ($library.Count -ne 1) { throw 'Missing Windows native library test executable' }
+$stateInventory = @(& $library[0].executable --list)
+if ($LASTEXITCODE -ne 0) { throw 'Cannot list Windows native library tests' }
+$stateCommit = 'execution::platform::tests::private_state_round_trips_and_replaces_an_existing_file'
+if ($stateInventory -notcontains "${stateCommit}: test") { throw "Missing Windows regression: $stateCommit" }
+
 # The observation suite invokes isolated wire-contract controls. Compile their leaf tests here
 # as well, before CI starts the bounded native execution host (including the non-UI profile).
 $wireTarget = if ($env:CARGO_TARGET_DIR) { Join-Path $env:CARGO_TARGET_DIR 'wire-contract' } else { Join-Path 'target' 'wire-contract' }

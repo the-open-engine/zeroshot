@@ -39,6 +39,7 @@ mod runtime;
 use runtime::RuntimeObservation;
 
 mod projection;
+pub(crate) use projection::public_suspension;
 use projection::{
     bounded_attach_output, changes_public_status, log_notification, opaque_execution,
     require_active_reference, resolve_public_execution, run_metadata, status_from_snapshot,

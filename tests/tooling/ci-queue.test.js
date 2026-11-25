@@ -238,4 +238,11 @@ it('requires the contained Windows Job regressions in the compiled portable test
   assert.match(script, /\$inventory = @\(& \$portable\[0\]\.executable --list\)/);
   assert.match(script, /\$inventory -notcontains "\$\{required\}: test"/);
   assert.ok(script.indexOf('$containedTests =') < script.indexOf('if ($BuildOnly)'));
+  assert.ok(
+    script.includes(
+      'execution::platform::tests::private_state_round_trips_and_replaces_an_existing_file'
+    )
+  );
+  assert.match(script, /\$stateInventory -notcontains "\$\{stateCommit\}: test"/);
+  assert.ok(script.indexOf('$stateCommit =') < script.indexOf('if ($BuildOnly)'));
 });

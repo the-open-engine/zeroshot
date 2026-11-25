@@ -109,7 +109,18 @@ impl RunPhase {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct PendingRequest {
+    pub suspension: openengine_cluster_protocol::RunSuspension,
+    pub paths: BTreeMap<openengine_cluster_protocol::FieldName, String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunSnapshot {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub artifacts: openengine_cluster_protocol::PublishedFiles,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_request: Option<PendingRequest>,
     pub run_id: RunId,
     pub title: RunTitle,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -134,6 +145,8 @@ pub struct RunSnapshot {
     /// This does not make the run terminal: cleanup and any auxiliary usage still precede that.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub primary_graph: Option<PrimaryGraphCompletion>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_recorded_at: Option<UnixTimestampMillis>,
     pub terminal: Option<TerminalResult>,
     pub token_usage: Option<TokenUsage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -231,7 +244,10 @@ impl RunSnapshot {
             execution_seed: Vec::new(),
             node_instance_floor: 0,
             primary_graph: None,
+            artifacts: BTreeMap::new(),
+            pending_request: None,
             terminal: None,
+            terminal_recorded_at: None,
             token_usage: None,
             failure_context: None,
         }
@@ -242,7 +258,7 @@ impl RunSnapshot {
         self.execution_output(execution).cloned()
     }
 
-    fn execution_output(&self, execution: ExecutionId) -> Option<&Value> {
+    pub(crate) fn execution_output(&self, execution: ExecutionId) -> Option<&Value> {
         let outcome = if let Some(node) = self.executions.get(&execution) {
             let NodeState::Completed { outcome, .. } = &node.state else {
                 return None;
@@ -338,6 +354,12 @@ pub enum NodeState {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
 pub enum RunEvent {
+    RequestPrepared {
+        pending: PendingRequest,
+    },
+    FinalArtifactsPublished {
+        artifacts: openengine_cluster_protocol::PublishedFiles,
+    },
     /// Used node instances imported independently of checkpoint prerequisites.
     NodeInstancesReserved {
         through: u64,

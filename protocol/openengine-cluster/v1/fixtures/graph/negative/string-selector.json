@@ -14,6 +14,12 @@
             "kind": "boolean"
           }
         },
+        "filepath": {
+          "required": false,
+          "type": {
+            "kind": "filepath"
+          }
+        },
         "items": {
           "required": true,
           "type": {
@@ -75,6 +81,12 @@
                 "required": true,
                 "type": {
                   "kind": "boolean"
+                }
+              },
+              "filepath": {
+                "required": false,
+                "type": {
+                  "kind": "filepath"
                 }
               },
               "items": {
@@ -434,6 +446,12 @@
                   "kind": "boolean"
                 }
               },
+              "filepath": {
+                "required": false,
+                "type": {
+                  "kind": "filepath"
+                }
+              },
               "items": {
                 "required": true,
                 "type": {
@@ -540,6 +558,12 @@
                 "required": true,
                 "type": {
                   "kind": "boolean"
+                }
+              },
+              "filepath": {
+                "required": false,
+                "type": {
+                  "kind": "filepath"
                 }
               },
               "items": {
@@ -650,6 +674,12 @@
                   "kind": "boolean"
                 }
               },
+              "filepath": {
+                "required": false,
+                "type": {
+                  "kind": "filepath"
+                }
+              },
               "items": {
                 "required": true,
                 "type": {
@@ -757,6 +787,12 @@
                 "required": true,
                 "type": {
                   "kind": "boolean"
+                }
+              },
+              "filepath": {
+                "required": false,
+                "type": {
+                  "kind": "filepath"
                 }
               },
               "items": {
@@ -878,6 +914,12 @@
                   "kind": "boolean"
                 }
               },
+              "filepath": {
+                "required": false,
+                "type": {
+                  "kind": "filepath"
+                }
+              },
               "items": {
                 "required": true,
                 "type": {
@@ -956,6 +998,12 @@
                 "required": true,
                 "type": {
                   "kind": "boolean"
+                }
+              },
+              "filepath": {
+                "required": false,
+                "type": {
+                  "kind": "filepath"
                 }
               },
               "items": {
@@ -1050,6 +1098,12 @@
                   "kind": "boolean"
                 }
               },
+              "filepath": {
+                "required": false,
+                "type": {
+                  "kind": "filepath"
+                }
+              },
               "items": {
                 "required": true,
                 "type": {
@@ -1111,6 +1165,12 @@
             "required": true,
             "type": {
               "kind": "boolean"
+            }
+          },
+          "filepath": {
+            "required": false,
+            "type": {
+              "kind": "filepath"
             }
           },
           "items": {

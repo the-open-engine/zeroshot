@@ -20,9 +20,9 @@ pub use history::{
 };
 
 use openengine_cluster_protocol::{
-    ChoiceNode, ControlSelector, ControlSource, DataSelector, FieldPath, GraphNode, Guard, Join,
-    EnumLabel, MapNode, NodeName, NodeOutputChannel, ParNode, PositiveInteger, TerminalResult,
-    WorkerErrorCode, WorkerOutcome, WorkerRef,
+    ArtifactPath, FieldName, ChoiceNode, ControlSelector, ControlSource, DataSelector, FieldPath,
+    GraphNode, Guard, Join, EnumLabel, MapNode, NodeName, NodeOutputChannel, ParNode,
+    PositiveInteger, TerminalResult, WorkerErrorCode, WorkerOutcome, WorkerRef,
 };
 use openengine_cluster_server::admission::VerifiedGraph;
 use serde::{Deserialize, Serialize};
@@ -56,6 +56,10 @@ pub enum Decision {
         iteration: u64,
         worker: WorkerRef,
         input: Value,
+    },
+    RequestArtifacts {
+        node: NodeName,
+        paths: BTreeMap<FieldName, String>,
     },
     VoidLoser {
         execution: ExecutionId,
@@ -92,6 +96,7 @@ pub struct Reduction {
     pub boundary: Option<ExecutionBoundary>,
     pub decisions: Vec<Decision>,
     pub terminal: Option<TerminalResult>,
+    pub artifacts: BTreeMap<FieldName, String>,
 }
 
 impl Reduction {
@@ -203,8 +208,12 @@ impl<'a> FullV1Reducer<'a> {
         )?;
         engine.ensure_history_consumed()?;
         engine.canonicalize_void_decisions();
-        let terminal = match status {
-            Status::Terminal { mut projection, .. } => {
+        let (terminal, artifacts) = match status {
+            Status::Terminal {
+                mut projection,
+                artifacts,
+                ..
+            } => {
                 if let TerminalResult::Failed { context, .. } = &mut projection
                     && (!engine.loop_evidence.exhausted_loops.is_empty()
                         || engine.loop_evidence.incomplete)
@@ -213,9 +222,9 @@ impl<'a> FullV1Reducer<'a> {
                     evidence.exhausted_loops = engine.loop_evidence.exhausted_loops;
                     evidence.incomplete |= engine.loop_evidence.incomplete;
                 }
-                Some(projection)
+                (Some(projection), artifacts)
             }
-            Status::Continue { .. } | Status::Pending => None,
+            Status::Continue { .. } | Status::Pending => (None, BTreeMap::new()),
         };
         if let Some(projection) = terminal.clone() {
             engine.decisions.push(Decision::Terminal { projection });
@@ -225,6 +234,7 @@ impl<'a> FullV1Reducer<'a> {
                 boundary: engine.boundary,
                 decisions: engine.decisions,
                 terminal,
+                artifacts,
             },
             evaluations: engine.trace.as_ref().map_or(0, TraceCollector::evaluations),
             trace: engine
@@ -387,6 +397,7 @@ enum Status {
     Terminal {
         position: HistoryPosition,
         projection: TerminalProjection,
+        artifacts: BTreeMap<FieldName, String>,
     },
 }
 
@@ -407,9 +418,11 @@ impl Status {
             Self::Terminal {
                 position,
                 projection,
+                artifacts,
             } => Self::Terminal {
                 position: position.max(prior),
                 projection,
+                artifacts,
             },
             Self::Continue { position } => Self::Continue {
                 position: position.max(prior),

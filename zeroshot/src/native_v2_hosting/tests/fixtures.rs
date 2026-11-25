@@ -89,6 +89,7 @@ impl RepositoryFixture {
 
 pub(super) fn hosting_config(storage_root: PathBuf) -> ProductionHostingConfig {
     ProductionHostingConfig {
+        file_store: None,
         suspension: None,
         request_ask: false,
         run_sizes: None,

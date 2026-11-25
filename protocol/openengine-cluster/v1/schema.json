@@ -295,6 +295,45 @@
       ],
       "type": "object"
     },
+    "ArtifactPath": {
+      "description": "An explicitly published workspace path. Bindings require the distinct filepath type.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "literal",
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "binding",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/DataSelector"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "ArtifactProducer": {
       "additionalProperties": false,
       "properties": {
@@ -1059,6 +1098,73 @@
       ],
       "type": "object"
     },
+    "FileAddress": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/FilePath"
+        },
+        "scope": {
+          "$ref": "#/$defs/FileScope"
+        }
+      },
+      "required": [
+        "scope",
+        "path"
+      ],
+      "type": "object"
+    },
+    "FilePath": {
+      "description": "Portable slash-separated names, with no aliases on supported filesystems. Empty denotes the\nselected root only; addresses require a nonempty path. Case collisions within a tree are invalid.",
+      "type": "string"
+    },
+    "FileScope": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "user",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "org",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "run",
+              "type": "string"
+            },
+            "runId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "runId"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "GetParams": {
       "additionalProperties": false,
       "properties": {
@@ -1350,6 +1456,16 @@
         {
           "additionalProperties": false,
           "properties": {
+            "artifacts": {
+              "additionalProperties": false,
+              "description": "Files exposed only by builtin.request.ask@1. Ordinary verifiers cannot publish.",
+              "patternProperties": {
+                "^[A-Za-z_][A-Za-z0-9_.-]*$": {
+                  "$ref": "#/$defs/ArtifactPath"
+                }
+              },
+              "type": "object"
+            },
             "attempts": {
               "maximum": 9007199254740991,
               "minimum": 1,
@@ -1768,6 +1884,16 @@
         {
           "additionalProperties": false,
           "properties": {
+            "artifacts": {
+              "additionalProperties": false,
+              "description": "Files exposed only when this success terminates the outer graph.",
+              "patternProperties": {
+                "^[A-Za-z_][A-Za-z0-9_.-]*$": {
+                  "$ref": "#/$defs/ArtifactPath"
+                }
+              },
+              "type": "object"
+            },
             "bindings": {
               "items": {
                 "$ref": "#/$defs/InputBinding"
@@ -4524,6 +4650,19 @@
         {
           "additionalProperties": false,
           "properties": {
+            "kind": {
+              "const": "filepath",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "fields": {
               "additionalProperties": {
                 "$ref": "#/$defs/RecordField"
@@ -4693,6 +4832,53 @@
         }
       },
       "type": "object"
+    },
+    "PublishedFile": {
+      "description": "Managed references retain captured bytes. Local references resolve the current working file.\nNeither form contains file bytes or changes the graph's authored JSON result.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "address": {
+              "$ref": "#/$defs/FileAddress"
+            },
+            "kind": {
+              "const": "managed",
+              "type": "string"
+            },
+            "target": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "target",
+            "address"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "local",
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "root": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "root",
+            "path"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "PullRequestFeedback": {
       "enum": [
@@ -5487,6 +5673,15 @@
       "additionalProperties": false,
       "description": "Runtime-owned metadata accompanying terminal status and retained run history.",
       "properties": {
+        "artifacts": {
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[A-Za-z_][A-Za-z0-9_.-]*$": {
+              "$ref": "#/$defs/PublishedFile"
+            }
+          },
+          "type": "object"
+        },
         "deliveryReceipt": {
           "description": "Confirmed native delivery evidence, independent of the graph's terminal output."
         },
@@ -5507,6 +5702,15 @@
       "additionalProperties": false,
       "description": "The question and result shape declared by a host-run request verifier.",
       "properties": {
+        "artifacts": {
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[A-Za-z_][A-Za-z0-9_.-]*$": {
+              "$ref": "#/$defs/PublishedFile"
+            }
+          },
+          "type": "object"
+        },
         "expiresAt": {
           "maximum": 9007199254740991,
           "minimum": 1,
@@ -6395,6 +6599,15 @@
         },
         {
           "properties": {
+            "artifacts": {
+              "additionalProperties": false,
+              "patternProperties": {
+                "^[A-Za-z_][A-Za-z0-9_.-]*$": {
+                  "$ref": "#/$defs/PublishedFile"
+                }
+              },
+              "type": "object"
+            },
             "expiresAt": {
               "maximum": 9007199254740991,
               "minimum": 1,

@@ -128,7 +128,7 @@ impl ScriptAdapter {
         if let Some((code, message)) = process_failure(&output.process) {
             return fail(control, code, message).await;
         }
-        parse_output(&bytes, invocation, control).await
+        parse_output(&bytes, invocation, control, &self.workspace).await
     }
 }
 
@@ -136,6 +136,7 @@ async fn parse_output(
     bytes: &[u8],
     invocation: &DriverInvocation,
     control: &DriverControl,
+    workspace: &std::path::Path,
 ) -> Result<WorkerOutcome, NodeRunnerError> {
     let value = match serde_json::from_slice(bytes) {
         Ok(value) => value,
@@ -148,7 +149,15 @@ async fn parse_output(
             .await;
         }
     };
-    let outcome = match invocation.response.parse_agent_value(value) {
+    let outcome = match invocation
+        .response
+        .parse_agent_value(value)
+        .and_then(|outcome| {
+            invocation
+                .response
+                .validate_filepaths(&outcome, workspace)?;
+            Ok(outcome)
+        }) {
         Ok(outcome) => outcome,
         Err(error) => {
             return fail(
