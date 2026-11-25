@@ -2,8 +2,10 @@
 
 mod native_v2_target;
 
+use std::future::Future;
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
+use std::pin::Pin;
 
 use thiserror::Error;
 use zeroshot_engine::native_v2_cli::local::{LOCAL_CONTROLLER_MODE, LocalCliBackend};
@@ -42,33 +44,41 @@ enum ProcessError {
     Output(#[from] std::io::Error),
 }
 
-async fn run() -> Result<(), ProcessError> {
+fn run(runtime: &tokio::runtime::Runtime) -> Result<(), ProcessError> {
     let arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
-    if run_private_controller(&arguments).await? {
+    if run_private_controller(runtime, &arguments)? {
         return Ok(());
     }
-    dispatch(parse_native_v2_args(arguments)?).await
+    runtime.block_on(dispatch(parse_native_v2_args(arguments)?))
 }
 
-async fn dispatch(command: NativeV2CliCommand) -> Result<(), ProcessError> {
+fn dispatch(
+    command: NativeV2CliCommand,
+) -> Pin<Box<dyn Future<Output = Result<(), ProcessError>>>> {
+    // Construct only the selected command's future before polling it on the native stack.
     match command {
-        NativeV2CliCommand::File(command) => {
+        NativeV2CliCommand::File(command) => Box::pin(async move {
             native_v2_target::files::execute(command, &mut std::io::stdout().lock())
                 .await
                 .map_err(ProcessError::from)
-        }
+        }),
         NativeV2CliCommand::Acp { profile } => {
-            serve_local_acp(profile).await.map_err(ProcessError::from)
+            Box::pin(async move { serve_local_acp(profile).await.map_err(ProcessError::from) })
         }
-        NativeV2CliCommand::Ui { listen, target } => serve_ui(listen, target).await,
-        NativeV2CliCommand::TargetServe(config) => serve_direct_target(config)
-            .await
-            .map_err(ProcessError::from),
-        command => run_public_command(command).await,
+        NativeV2CliCommand::Ui { listen, target } => Box::pin(serve_ui(listen, target)),
+        NativeV2CliCommand::TargetServe(config) => Box::pin(async move {
+            serve_direct_target(config)
+                .await
+                .map_err(ProcessError::from)
+        }),
+        command => Box::pin(run_public_command(command)),
     }
 }
 
-async fn run_private_controller(arguments: &[std::ffi::OsString]) -> Result<bool, ProcessError> {
+fn run_private_controller(
+    runtime: &tokio::runtime::Runtime,
+    arguments: &[std::ffi::OsString],
+) -> Result<bool, ProcessError> {
     let Some(bootstrap) = private_controller_bootstrap(arguments)? else {
         return Ok(false);
     };
@@ -76,7 +86,7 @@ async fn run_private_controller(arguments: &[std::ffi::OsString]) -> Result<bool
         record_unloaded_startup_failure(&bootstrap, &error);
         return Err(error.into());
     }
-    run_controller_process(&bootstrap).await?;
+    runtime.block_on(run_controller_process(&bootstrap))?;
     Ok(true)
 }
 
@@ -223,9 +233,12 @@ fn main() {
     main_runtime();
 }
 
-#[tokio::main]
-async fn main_runtime() {
-    if let Err(error) = run().await {
+fn main_runtime() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("Failed building the Runtime");
+    if let Err(error) = run(&runtime) {
         write_process_error(&error);
         std::process::exit(1);
     }

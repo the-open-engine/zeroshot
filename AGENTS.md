@@ -2022,6 +2022,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   validates executables after restoring under its workspace lease, before admission.
   Box resume input-state inspection before constructing the large prepared run, and heap-pin
   successor startup to keep checkpoint resume within the portable suite's 1 MiB stack budget.
+  Construct and box the selected public CLI command before polling it on the native stack.
   Workspace mode has graph memory only and creates no repository-memory identity.
   Workspace folders, input ownership and artifact addresses remain physical-part state; logical
   status projects the selected part's workspace alongside the canonical run and current-part IDs.
