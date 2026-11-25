@@ -15,7 +15,14 @@ fn wire_request(key: &str, workspace: bool) -> RunSubmitParams {
     if workspace {
         let mut graph = serde_json::to_value(&request.submission.graph).assert_value();
         graph["initialInput"] = json!({"kind":"null"});
-        graph["root"] = graph["root"]["children"][0].take();
+        let worker = graph["root"]["children"][0].take();
+        graph["root"] = json!({
+            "kind":"seq", "name":"root", "state":{"kind":"null"},
+            "children":[worker, {
+                "kind":"succeed", "name":"done", "output":{"kind":"null"}, "bindings":[]
+            }],
+            "promotedStatePaths":[]
+        });
         request.submission.graph = serde_json::from_value(graph).assert_value();
         request.submission.initial_input = Value::Null;
         request
