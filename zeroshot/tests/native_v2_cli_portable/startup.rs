@@ -1,5 +1,7 @@
 //! Fresh and resumed controller startup preserves admitted run state.
 
+#[path = "resume_checkpoint_tests.rs"]
+mod resume_checkpoint;
 #[path = "resume_runtime_tests.rs"]
 mod resume_runtime;
 #[path = "resume_runtime_refusal_tests.rs"]
@@ -308,7 +310,7 @@ fn contained_local_policy_reaches_submission_and_resume() {
         serde_json::from_slice(failed.stdout.split(|b| *b == b'\n').next().unwrap()).unwrap();
     let id = receipt["runId"].as_str().unwrap();
     let resumed = fixture
-        .command(&["resume", id, "--controller", "contained"])
+        .command(&["resume", id, "--restart", "--controller", "contained"])
         .env("FIXTURE_MODE", "finish")
         .output()
         .unwrap();
@@ -358,7 +360,7 @@ pub(super) fn assert_terminal_restart(fixture: &Fixture, id: &str, worker: u32, 
     );
     std::fs::remove_file(fixture.workspace.join("mutation.txt")).unwrap();
     let resumed = fixture
-        .command(&["resume", id, "--controller", "contained"])
+        .command(&["resume", id, "--restart", "--controller", "contained"])
         .env("FIXTURE_MODE", "finish")
         .output()
         .unwrap();

@@ -343,6 +343,11 @@ impl Repository {
             .env_clear()
             .envs(environment)
             .env("HOME", &self.root)
+            // Pack creation needs writable scratch space even when the controller's ambient
+            // temporary directory is unavailable. Keep it in the existing private repository.
+            .env("TMPDIR", &self.root)
+            .env("TMP", &self.root)
+            .env("TEMP", &self.root)
             .env("RESTIC_PASSWORD_FILE", self.password_path())
             .env("RESTIC_REPOSITORY", self.repository_path())
             .stdin(Stdio::null())

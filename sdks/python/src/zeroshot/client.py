@@ -575,7 +575,7 @@ class Client:
             secrets = tuple(self._provided_environment.values())
         if isinstance(self.target, LocalTarget) and self.target.state_dir is not None:
             environment["ZEROSHOT_STATE_DIR"] = str(
-                Path(self.target.state_dir).expanduser().resolve()
+                Path(self.target.state_dir).expanduser().absolute()
             )
         if (
             not local_registry
@@ -988,7 +988,7 @@ class Run:
         return status
 
     async def resume(self, *, runtime: _Runtime | None = None, part_id: str | None = None) -> Run:
-        """Continue this attempt, optionally replacing its runtime configuration.
+        """Continue a suspension or restart a failed attempt, optionally replacing its runtime.
 
         Args:
             part_id: Resume only if this part is still current. Defaults to the observed part.
@@ -1006,6 +1006,7 @@ class Run:
             *self._client._route_arguments(),
             *self._client._controller_arguments(),
             *self._client._forwarding_arguments(),
+            "--api-default",
         ]
         with tempfile.TemporaryDirectory(prefix="zeroshot-resume-") as directory:
             if runtime is not None:
@@ -1174,8 +1175,8 @@ class Run:
 
         Local runs keep their checkout, ledger, logs and delivery recovery state. Running or
         resuming lineage members refuse deletion; an uncontinued suspension must be
-        force-stopped first, and an interrupted restore must be completed. A plain local
-        resume still uses the current checkout.
+        force-stopped first, and an interrupted restore must be completed. Restarting a local
+        failed run through resume() still uses the current checkout.
 
         Returns:
             Whether retained workspace or checkpoint data was deleted.

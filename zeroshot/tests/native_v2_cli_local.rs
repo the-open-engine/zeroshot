@@ -419,7 +419,9 @@ async fn failed_local_run_restarts_on_its_retained_workspace_with_fresh_connecti
         failed_status.assert_key("workspaceRecovery")
     );
 
-    let resumed = fixture.json(&["resume", &failed_run_id], "finish").await;
+    let resumed = fixture
+        .json(&["resume", &failed_run_id, "--restart"], "finish")
+        .await;
     assert_eq!(resumed["runId"], failed_run_id);
     let successor_run_id = resumed
         .assert_key("currentPartId")

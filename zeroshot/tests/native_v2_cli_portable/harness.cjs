@@ -35,6 +35,15 @@ if (process.argv.includes('--version')) {
   let prompt = "";
   process.stdin.on('data', (chunk) => { inputBytes += chunk.length; prompt += chunk; });
   process.stdin.on('end', () => {
+    if (process.env.REVIEW_RECEIPTS) {
+      fs.appendFileSync(process.env.REVIEW_RECEIPTS, 'review\n');
+      emit({ type: 'thread.started', thread_id: 'review-session' });
+      emit({ type: 'item.completed', item: { type: 'agent_message', text: JSON.stringify({
+        response: { output: null, signals: { done: mode === 'review-finish' ? 'yes' : 'no' }, diagnostic: null }
+      }) } });
+      emit({ type: 'turn.completed', usage: { input_tokens: 5, output_tokens: 2 } });
+      return;
+    }
     if (completedStep) fs.writeFileSync('completed.txt', 'retained work');
     if (mode === 'fail' || model === 'retired-model') process.exit(1);
     if (model === 'requires-completed-work' && !fs.existsSync('completed.txt')) process.exit(44);
@@ -55,9 +64,17 @@ if (process.argv.includes('--version')) {
     }
     const correction = mode === 'correction' && !process.argv.includes('resume');
     if (process.argv.includes('resume')) fs.writeFileSync('resumed.txt', 'same session');
-    emit({ type: 'item.completed', item: {
-      type: 'agent_message', text: correction ? 'invalid-json' : JSON.stringify({ response: process.env.ZEROSHOT_NODE_NAME === 'prerequisite' ? { saved: 'preserved-output' } : null })
-    } });
-    process.stdout.write(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 5, output_tokens: 2 } }));
+    const finish = () => {
+      emit({ type: 'item.completed', item: {
+        type: 'agent_message', text: correction ? 'invalid-json' : JSON.stringify({ response: process.env.ZEROSHOT_NODE_NAME === 'prerequisite' ? { saved: 'preserved-output' } : null })
+      } });
+      process.stdout.write(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 5, output_tokens: 2 } }));
+    };
+    if (mode === 'suspend-complete') {
+      fs.writeFileSync('suspend-ready', 'ready');
+      const timer = setInterval(() => {
+        if (fs.existsSync('release')) { clearInterval(timer); finish(); }
+      }, 20);
+    } else finish();
   });
 }

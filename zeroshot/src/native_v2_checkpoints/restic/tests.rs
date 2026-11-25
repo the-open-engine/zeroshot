@@ -817,6 +817,33 @@ fn scripted_repository(root: &Path, script: &str) -> Repository {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn restic_temporary_files_use_the_private_repository_root() {
+    let root = tempfile::tempdir().assert_value();
+    let repository = scripted_repository(
+        root.path(),
+        r#"#!/bin/sh
+set -eu
+test "$TMPDIR" = "$HOME"
+test "$TMP" = "$HOME"
+test "$TEMP" = "$HOME"
+printf 'private pack' > "$TMPDIR/restic-temp-pack-probe"
+"#,
+    );
+    repository.prepare_paths().assert_value();
+    repository
+        .run(root.path(), &arguments(["cat", "config"]))
+        .await
+        .assert_value();
+    platform::validate_private_file(&platform::open_directory(&repository.root).unwrap())
+        .assert_value();
+    assert_eq!(
+        std::fs::read(repository.root.join("restic-temp-pack-probe")).unwrap(),
+        b"private pack"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn real_child_large_progress_and_stderr_cannot_hide_committed_summary() {
     let root = tempfile::tempdir().assert_value();
     let id = "c".repeat(64);

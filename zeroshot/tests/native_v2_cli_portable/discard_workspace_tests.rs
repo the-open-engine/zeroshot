@@ -102,7 +102,7 @@ fn tree(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
 }
 
 #[test]
-fn local_discard_frees_failed_lineage_preserves_checkout_and_allows_plain_resume() {
+fn local_discard_frees_failed_lineage_preserves_checkout_and_allows_explicit_restart() {
     let fixture = Fixture::new().outside_workspace();
     fs::write(
         fixture.workspace.join(".git/info/exclude"),
@@ -119,7 +119,7 @@ fn local_discard_frees_failed_lineage_preserves_checkout_and_allows_plain_resume
         .as_str()
         .unwrap();
     let next = fixture
-        .command(&["resume", &original])
+        .command(&["resume", &original, "--restart"])
         .env("FIXTURE_MODE", "fail")
         .output()
         .unwrap();
@@ -180,13 +180,13 @@ fn local_discard_frees_failed_lineage_preserves_checkout_and_allows_plain_resume
             .unwrap();
         assert!(!output.status.success());
         assert!(
-            String::from_utf8_lossy(&output.stderr).contains("no checkpoints"),
+            String::from_utf8_lossy(&output.stderr).contains("checkpoints"),
             "{output:?}"
         );
         assert_eq!(tree(&fixture.workspace), before);
     }
     let resumed = fixture
-        .command(&["resume", &successor])
+        .command(&["resume", &successor, "--restart"])
         .env("FIXTURE_MODE", "finish")
         .output()
         .unwrap();
@@ -219,7 +219,7 @@ fn local_discard_refuses_a_running_successor_and_never_checkpointed_runs_are_noo
     let failed = fixture.run("fail", false);
     let original = receipt(&failed);
     let next = fixture
-        .command(&["resume", &original])
+        .command(&["resume", &original, "--restart"])
         .env("FIXTURE_MODE", "block")
         .output()
         .unwrap();
@@ -343,7 +343,7 @@ fn local_discard_preserves_request_continuations_without_new_checkpoints() {
     );
     assert_eq!(tree(&fixture.workspace), before);
     let resumed = fixture
-        .command(&["resume", &failed])
+        .command(&["resume", &failed, "--restart"])
         .env("FIXTURE_MODE", "finish")
         .output()
         .unwrap();
@@ -365,7 +365,7 @@ fn local_discard_preserves_request_continuations_without_new_checkpoints() {
     let answered = answer(&next, "finish");
     finished(&fixture, &answered);
     let resumed = fixture
-        .command(&["resume", &answered])
+        .command(&["resume", &answered, "--restart"])
         .env("FIXTURE_MODE", "finish")
         .output()
         .unwrap();
@@ -440,7 +440,7 @@ fn local_discard_reconciles_the_restore_marker_left_by_an_interrupted_launcher()
         assert_eq!(fixture.json(&["discard-workspace", id])["discarded"], false);
     }
     let resumed = fixture
-        .command(&["resume", &successor])
+        .command(&["resume", &successor, "--restart"])
         .env("FIXTURE_MODE", "finish")
         .output()
         .unwrap();

@@ -42,7 +42,7 @@ Runs without forge delivery and `--validate-only` keep their existing behavior.
 Local `--push`, `--pr` and `--ship` runs require a clean checkout before agents start. Commit, stash
 or remove staged, unstaged and unignored untracked changes named in the refusal. Finish or abort a
 pending merge first. Changed submodule commit pointers count; files inside submodules do not.
-A plain `zeroshot resume` does not repeat this check: the successor works on the checkout as it is,
+`zeroshot resume RUN_ID --restart` does not repeat this check: the successor works on the checkout as it is,
 so changes you make after a failure can be delivered with the run's own work. Runs without Git
 delivery keep their normal behavior. Delivery shows Git's warning when a run adds an unregistered
 embedded repository, but permits the gitlink; register it as a submodule when others need to clone it.
@@ -187,7 +187,7 @@ Resume starts with fresh rejection memory. Once the cause is removed,
 [select the `deliver` checkpoint](observe-and-control.md#restart-or-resume-a-failed-run) with
 `zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID` to retry the retained candidate without
 another agent round. Local checkpoint restores also require `--discard-workspace-changes`, which
-replaces current files and the index; preserve any later edits first. A plain `zeroshot resume RUN_ID`
+replaces current files and the index; preserve any later edits first. `zeroshot resume RUN_ID --restart`
 restarts from that run's entry point and can run workers and reviewers again before delivery,
 potentially changing the candidate.
 

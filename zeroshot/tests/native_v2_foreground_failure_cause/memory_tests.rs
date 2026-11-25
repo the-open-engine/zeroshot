@@ -54,7 +54,9 @@ async fn corrupt_memory_store_is_visible_with_postmortem_disabled_and_preserves_
             assert!(!failed.status.success());
             let receipt = json_lines(&failed.stdout);
             let predecessor = receipt[0]["runId"].as_str().unwrap();
-            let resumed = fixture.output(&["resume", predecessor], "finish").await;
+            let resumed = fixture
+                .output(&["resume", predecessor, "--restart"], "finish")
+                .await;
             assert_success(&resumed, "resume keeps memory failures nonfatal");
             let resumed_stderr = String::from_utf8_lossy(&resumed.stderr);
             assert!(

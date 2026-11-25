@@ -1227,9 +1227,20 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   contained runtime preparation, so raw RPC replacements retain target policy and provider defaults.
   Omission retains saved runtime and authorization behavior; authorization files need no migration.
 - `openengine.workspace-checkpoints/v1` adds `run/checkpoints` and selected checkpoint resume to
-  retained workspace recovery. Default resume of a failed run restarts it where it started on the
-  retained workspace: a submitted run at the graph root, a successor at the boundary it began at;
-  checkpoint resume restores a private input snapshot and settled prerequisite executions. Checkpoint
+  retained workspace recovery. The CLI defaults failed-run resume to the newest entry checkpoint,
+  following every bounded inventory page of the resolved current part and passing its ID through
+  the existing resume API. Keep that part fixed across inventory pages and the guarded resume.
+  Local restoration requires `--discard-workspace-changes`; no entry means an explicit `--restart`
+  is required. `--restart` preserves the API's restart behavior on the retained workspace: a submitted
+  run at the graph root, a successor at the boundary it began at. Python `Run.resume()` uses the
+  private `--api-default` bridge to preserve API omission semantics without a status probe:
+  failed runs restart and suspended runs continue. Native resume owns eligibility and
+  reconciliation, including controller loss and interrupted-ledger recovery. Do not select SDK
+  resume behavior from read-only observation, which can be unavailable or stale.
+  Python makes an explicit local state directory absolute without resolving aliases; native
+  controller endpoint identity follows the CLI's state-directory path spelling.
+  Checkpoint resume restores
+  a private input snapshot and settled prerequisite executions; its selected node can run again. Checkpoint
   continuations, including request and other suspended successors, restore captured `node_instance`
   provider conversations. Each such successor writes `conversation-origin.json` (the source
   checkpoint directory and selection) to its checkpoint directory before preparation can fail. A
@@ -1266,6 +1277,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   removes the full stage. Capture does not sync each copied workspace file or directory;
   metadata and catalogs retain their durable writes. Small catalogs atomically map logical
   checkpoint IDs to Restic snapshots.
+  Restic's `TMPDIR`, `TMP` and `TEMP` use its existing private checkpoint repository root,
+  independently of the controller's ambient temporary directory.
   Restic drains progress and private stderr completely with bounded memory, retaining only the
   latest summary under a per-record size bound. Errors identify the operation and failure stage
   or exit status without private child output; failed backups never replace a published checkpoint.
@@ -1317,9 +1330,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   metadata before launch, and clears it once that successor is ready. The local stage is named
   after its attempt, so the next resume removes only that stage. The same selection must still
   resolve to the pinned snapshot; another consented checkpoint selection replaces the record, and a
-  plain resume is refused while it remains. A `Latest` record left by an older plain resume is
-  completed only with consent: `resume RUN_ID --discard-workspace-changes` replays its pinned
-  snapshot. Outside that case the flag requires `--from-checkpoint`. Successful lineages
+  restart without restore consent is refused while it remains. A `Latest` record left by an older plain resume is
+  completed only with consent: `resume RUN_ID --restart --discard-workspace-changes` replays its pinned
+  snapshot. Outside that case the flag requires a selected checkpoint. Successful lineages
   delete their catalogs and repository only after durable terminal success; failed and suspended lineages retain
   both for resume. Disposable checkpoint staging cleanup is best effort after confirmed
   runtime cleanup and before observer ledger access. Copied read-only directories are made writable
@@ -1341,7 +1354,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `delivery-state.json`, ledgers and logs. Native no-follow
   directory validation rejects redirected repository roots before cleanup. Recovery records
   durably disable checkpoints before deleting data, preserving admitted submissions for replay;
-  plain resume applies that policy to its successor and keeps the current checkout and delivery state.
+  explicit restart applies that policy to its successor and keeps the current checkout and delivery state.
   The Python run handle exposes the same routed operation as `discard_workspace() -> bool`.
   Hosted factories advertise checkpoints only when they implement storage and restore. Snapshot
   restore requires exclusive workspace ownership and preserves the checkout root and Git identity.

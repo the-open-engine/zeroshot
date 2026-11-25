@@ -434,7 +434,7 @@ question you inspected, pass its `partId` to `zeroshot answer RUN_ID --part PART
 If the run has advanced, the command reports the stale part. While a question is pending,
 `resume` directs you to `answer` even if you selected a checkpoint.
 
-If the next part fails or is lost, `zeroshot resume RUN_ID` restarts right after the answer.
+If the next part fails or is lost, `zeroshot resume RUN_ID --restart` restarts right after the answer.
 The request stays answered, and `node_instance` agents continue their conversations from when
 the question was asked. A part lost before its starting point was recorded restarts at the root
 with new conversations and asks again.

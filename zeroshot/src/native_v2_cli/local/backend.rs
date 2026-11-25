@@ -49,7 +49,7 @@ impl LocalCliBackend {
     }
 }
 
-/// Chooses the snapshot a local successor restores, if any. Plain resume keeps the user-owned
+/// Chooses the snapshot a local successor restores, if any. API restart keeps the user-owned
 /// checkout as it is. Replacing it needs `--discard-workspace-changes`: to roll back to a selected
 /// checkpoint, or to complete an interrupted restore of the latest snapshot, which earlier plain
 /// resumes recorded. While an interrupted restore remains, a resume that would not complete a
@@ -73,7 +73,7 @@ fn local_restore_selection(
         && (discard_workspace_changes || matches!(from, Some(RunResumeFrom::Checkpoint { .. })))
     {
         return Err(NativeV2CliError::Usage(
-            "run has no checkpoints (workspaceCheckpoints is false); use a plain resume to keep \
+            "run has no checkpoints (workspaceCheckpoints is false); use --restart to keep \
              the current checkout"
                 .to_owned(),
         ));
@@ -107,7 +107,7 @@ fn local_restore_selection(
             restore_command(run_id, &pending.selection)
         ))),
         None if discard_workspace_changes => Err(NativeV2CliError::Usage(
-            "--discard-workspace-changes requires --from-checkpoint; a plain resume keeps the \
+            "--discard-workspace-changes requires --from-checkpoint; --restart keeps the \
              current checkout"
                 .to_owned(),
         )),
@@ -117,7 +117,8 @@ fn local_restore_selection(
 
 fn restore_command(run_id: &RunId, selection: &CheckpointRestoreSelection) -> String {
     let selection = match selection {
-        CheckpointRestoreSelection::Latest | CheckpointRestoreSelection::Continue => String::new(),
+        CheckpointRestoreSelection::Latest => " --restart".to_owned(),
+        CheckpointRestoreSelection::Continue => String::new(),
         CheckpointRestoreSelection::Checkpoint { checkpoint_id } => {
             format!(" --from-checkpoint {}", checkpoint_id.as_str())
         }

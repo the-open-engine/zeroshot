@@ -918,7 +918,9 @@ impl LocalFixture {
             assert!(!tool.live(), "owner death alone did not stop the writer");
             let end = Instant::now() + Duration::from_secs(20);
             loop {
-                let output = self.output(&["resume", &run_id], "finish").await;
+                let output = self
+                    .output(&["resume", &run_id, "--restart"], "finish")
+                    .await;
                 if output.status.success() {
                     assert!(
                         !tool.live(),

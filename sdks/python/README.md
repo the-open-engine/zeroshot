@@ -216,7 +216,7 @@ The returned handle keeps the logical ID and records the new current part.
 
 `await run.discard_workspace()` uses the client's target and returns whether retained data was
 deleted. For a finished local run it frees the recovery lineage's checkpoints while preserving
-the checkout, ledger, logs and delivery recovery state. Plain resume keeps using the current
+the checkout, ledger, logs and delivery recovery state. `Run.resume()` keeps using the current
 checkout. Named targets discard their retained workspace as before.
 
 ## Environment values

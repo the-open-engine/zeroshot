@@ -240,6 +240,8 @@ pub(in crate::native_v2_cli) struct FakeBackend {
     submitted_stacks: Arc<Mutex<Vec<PreparedStackRequest>>>,
     resume_requirements: Option<RunConnectionRequirements>,
     resume_source: Option<Value>,
+    resume_part_id: Option<RunId>,
+    checkpoint_pages: Option<Vec<RunCheckpointsResult>>,
     trusted_resume_requirements: Option<RunConnectionRequirements>,
     resource_scope: Option<openengine_cluster_protocol::ConnectionScope>,
     unavailable_machine_identity: bool,
@@ -255,6 +257,15 @@ pub(super) enum CursorCallKind {
 }
 
 impl FakeBackend {
+    pub(super) fn with_resume_part(mut self, part: &str) -> Self {
+        self.resume_part_id = Some(RunId::new(part));
+        self
+    }
+
+    pub(super) fn with_checkpoint_pages(mut self, pages: Vec<RunCheckpointsResult>) -> Self {
+        self.checkpoint_pages = Some(pages);
+        self
+    }
     pub(super) fn with_context_sources(
         mut self,
         pins: Vec<openengine_cluster_protocol::ResolvedSource>,
@@ -847,7 +858,9 @@ impl NativeV2CliBackend for FakeBackend {
         }
         if let Some(requirements) = &self.resume_requirements {
             return serde_json::from_value(json!({
-                "partId":params.run_id,"currentPartId":params.run_id,"runId":params.run_id,
+                "partId":self.resume_part_id.as_ref().unwrap_or(&params.run_id),
+                "currentPartId":self.resume_part_id.as_ref().unwrap_or(&params.run_id),
+                "runId":params.run_id,
                 "title":"Repair checkout",
                 "source":self.resume_source.as_ref().cloned().unwrap_or_else(source),
                 "size":"medium",
@@ -1111,19 +1124,34 @@ impl NativeV2CliBackend for FakeBackend {
             target: target.map(str::to_owned),
             params: params.clone(),
         });
+        if let Some(pages) = &self.checkpoint_pages {
+            let index = params.after.as_ref().map_or(0, |after| {
+                pages
+                    .iter()
+                    .position(|page| page.next_after.as_ref() == Some(after))
+                    .assert_value()
+                    + 1
+            });
+            return Ok(pages[index].clone());
+        }
+        let last_page = params
+            .after
+            .as_ref()
+            .is_some_and(|after| after.as_str() == "entry-8");
         Ok(RunCheckpointsResult {
             controller: None,
             part_id: params.run_id.clone(),
             run_id: params.run_id,
             checkpoints: vec![RunCheckpoint {
-                checkpoint_id: CheckpointId::new("entry-8").assert_value(),
-                sequence: PositiveInteger::new(8).assert_value(),
+                checkpoint_id: CheckpointId::new(if last_page { "entry-9" } else { "entry-8" })
+                    .assert_value(),
+                sequence: PositiveInteger::new(if last_page { 9 } else { 8 }).assert_value(),
                 node: NodeName::new("repair").assert_value(),
                 map_indices: vec![2, 1],
                 loop_iterations: vec![3],
                 created_at: UnixTimestampMillis::new(42).assert_value(),
             }],
-            next_after: Some(CheckpointId::new("entry-8").assert_value()),
+            next_after: (!last_page).then(|| CheckpointId::new("entry-8").assert_value()),
         })
     }
 

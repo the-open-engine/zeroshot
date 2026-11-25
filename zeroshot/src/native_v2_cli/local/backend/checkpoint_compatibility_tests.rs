@@ -460,7 +460,7 @@ fn interrupted_restore_blocks_a_resume_that_would_not_complete_it() {
     for (selection, hint) in [
         (
             CheckpointRestoreSelection::Latest,
-            format!("`{command} --discard-workspace-changes`"),
+            format!("`{command} --restart --discard-workspace-changes`"),
         ),
         (
             CheckpointRestoreSelection::Checkpoint {
