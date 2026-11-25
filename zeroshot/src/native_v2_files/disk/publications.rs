@@ -103,66 +103,76 @@ impl DiskFileStore {
         }
         // No bytes or names are imported until the complete acknowledgement is representable.
         (request.preflight)(&files)?;
-        for (field, path, address, partition, identity, name_key) in imports {
-            check_cancelled(cancellation)?;
-            let mut staged = paths::TemporaryFile::new(&self.root)?;
-            super::super::pack(
-                &path,
-                &mut CancelledWriter {
-                    file: &mut staged.file,
-                    cancellation,
-                },
-            )
-            .map_err(|error| {
-                std::io::Error::new(
-                    error.kind(),
-                    format!(
-                        "artifacts.{} path {:?}: {error}",
-                        field.as_str(),
-                        selected[field]
-                    ),
-                )
-            })?;
-            staged.file.rewind()?;
-            let (blob, _) = self.import(&mut staged.file, &mut |entry| {
-                self.check_entry(
-                    FileAuthorization {
-                        access,
-                        action: FileAction::Publish,
-                        selection: &FileSelection {
-                            address: address.clone(),
-                            member: root_path(),
-                        },
+        let result = (|| {
+            for (field, path, address, partition, identity, name_key) in imports {
+                check_cancelled(cancellation)?;
+                let mut staged = paths::TemporaryFile::new(&self.root)?;
+                super::super::pack(
+                    &path,
+                    &mut CancelledWriter {
+                        file: &mut staged.file,
+                        cancellation,
                     },
-                    &partition,
-                    entry,
                 )
-            })?;
-            catalog.trees.insert(
-                identity,
-                Tree {
-                    partition,
-                    address: address.clone(),
-                    blob,
-                    owner: Some(owner.clone()),
+                .map_err(|error| {
+                    std::io::Error::new(
+                        error.kind(),
+                        format!(
+                            "artifacts.{} path {:?}: {error}",
+                            field.as_str(),
+                            selected[field]
+                        ),
+                    )
+                })?;
+                staged.file.rewind()?;
+                let (blob, _) = self.import(&mut staged.file, &mut |entry| {
+                    self.check_entry(
+                        FileAuthorization {
+                            access,
+                            action: FileAction::Publish,
+                            selection: &FileSelection {
+                                address: address.clone(),
+                                member: root_path(),
+                            },
+                        },
+                        &partition,
+                        entry,
+                    )
+                })?;
+                catalog.trees.insert(
+                    identity,
+                    Tree {
+                        partition,
+                        address: address.clone(),
+                        blob,
+                        owner: Some(owner.clone()),
+                    },
+                );
+                catalog.operations.insert(name_key, fingerprint.clone());
+            }
+            catalog.publications.insert(
+                operation,
+                Publication {
+                    partition: publication_partition.unwrap_or_default(),
+                    owner,
+                    fingerprint,
+                    published_at: now,
+                    files: files.clone(),
+                    released: false,
                 },
             );
-            catalog.operations.insert(name_key, fingerprint.clone());
+            check_cancelled(cancellation)?;
+            self.save(&catalog)?;
+            Ok(files)
+        })();
+        if result.is_err()
+            && let Ok(committed) = self.read_catalog_locked()
+        {
+            // Save can fail after replacing the catalog. Reclaim only against committed
+            // references, retaining the lock throughout and preserving the capture error.
+            let _ = self.reclaim_locked(&committed);
         }
-        catalog.publications.insert(
-            operation,
-            Publication {
-                partition: publication_partition.unwrap_or_default(),
-                owner,
-                fingerprint,
-                published_at: now,
-                files: files.clone(),
-                released: false,
-            },
-        );
-        check_cancelled(cancellation)?;
-        self.save(&catalog)?;
-        Ok(files)
+        result
     }
 
     /// Read a committed receipt without touching the workspace or creating a publication.

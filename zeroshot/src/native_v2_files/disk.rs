@@ -211,6 +211,11 @@ impl DiskFileStore {
             .writable_file(std::ffi::OsStr::new("catalog.lock"))?;
         paths::regular(&lock)?;
         lock.lock_exclusive()?;
+        Ok((lock, self.read_catalog_locked()?))
+    }
+
+    // The caller holds the catalog lock, including when reloading after an ambiguous save.
+    fn read_catalog_locked(&self) -> Result<Catalog> {
         let catalog = match self.root.read_file(std::ffi::OsStr::new("catalog.json")) {
             Ok(file) => {
                 paths::regular(&file)?;
@@ -232,7 +237,7 @@ impl DiskFileStore {
         if catalog.target != self.target {
             return Err(denied());
         }
-        Ok((lock, catalog))
+        Ok(catalog)
     }
 
     fn save(&self, catalog: &Catalog) -> Result<()> {

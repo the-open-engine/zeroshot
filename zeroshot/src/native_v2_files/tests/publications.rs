@@ -696,7 +696,11 @@ fn request_and_final_access_are_independent_and_cleanup_preserves_pending_work()
     );
 }
 
-struct InterruptTransfer(std::sync::atomic::AtomicBool);
+struct InterruptTransfer {
+    fail: std::sync::atomic::AtomicBool,
+    cancel: std::sync::atomic::AtomicBool,
+    cancellation: tokio::sync::watch::Sender<bool>,
+}
 struct RemoveAfterFirstCapture(std::path::PathBuf);
 impl FileAuthorizer for RemoveAfterFirstCapture {
     fn authorize(&self, request: FileAuthorization<'_>) -> Result<String> {
@@ -712,15 +716,19 @@ impl FileAuthorizer for RemoveAfterFirstCapture {
 }
 impl FileAuthorizer for InterruptTransfer {
     fn authorize(&self, request: FileAuthorization<'_>) -> Result<String> {
-        if self.0.load(std::sync::atomic::Ordering::SeqCst)
-            && request.action == FileAction::Publish
+        if request.action == FileAction::Publish
             && request.selection.address.path.as_str().contains("/second/")
             && request.selection.member.as_str() == "file"
         {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::ConnectionReset,
-                "transfer interrupted",
-            ));
+            if self.fail.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionReset,
+                    "transfer interrupted",
+                ));
+            }
+            if self.cancel.load(std::sync::atomic::Ordering::SeqCst) {
+                self.cancellation.send_replace(true);
+            }
         }
         Ok("partition".to_owned())
     }
@@ -730,7 +738,13 @@ fn interrupted_second_tree_never_exposes_the_first_and_the_same_identity_can_ret
     let temp = tempdir();
     std::fs::create_dir_all(temp.path().join("report")).unwrap();
     std::fs::write(temp.path().join("report/file"), "complete").unwrap();
-    let authorization = Arc::new(InterruptTransfer(true.into()));
+    let (sender, signal) = tokio::sync::watch::channel(false);
+    let cancellation = DriverCancellation::new(signal);
+    let authorization = Arc::new(InterruptTransfer {
+        fail: true.into(),
+        cancel: false.into(),
+        cancellation: sender,
+    });
     let disk = DiskFileStore::open(
         temp.path().join("store"),
         "target-one".to_owned(),
@@ -742,33 +756,58 @@ fn interrupted_second_tree_never_exposes_the_first_and_the_same_identity_can_ret
         target: "target-one",
         identity: &identity,
     };
+    let retained = bytes(b"accepted input");
+    replace(&disk, &access, &retained, "retained");
+    disk.pin(
+        &access,
+        &FilePinRequest {
+            pin: pin(),
+            source: selection(),
+        },
+    )
+    .unwrap();
+    disk.remove(&access, &address()).unwrap();
+    let objects = || {
+        std::fs::read_dir(temp.path().join("store/objects"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    let retained_objects = objects();
+    assert_eq!(retained_objects.len(), 1);
+    let committed = std::fs::read(temp.path().join("store/catalog.json")).unwrap();
     let selected: BTreeMap<FieldName, String> = [
         (FieldName::new("first").unwrap(), "report".to_owned()),
         (FieldName::new("second").unwrap(), "report".to_owned()),
     ]
     .into_iter()
     .collect();
-    let (_sender, signal) = tokio::sync::watch::channel(false);
-    let cancellation = DriverCancellation::new(signal);
     let owner = FilePublicationOwner::Final {
         run_id: pin().run_id,
     };
-    assert_eq!(
-        disk.capture_publication(
-            &access,
-            temp.path(),
-            &crate::native_v2_files::publication::FilePublication {
-                owner: owner.clone(),
-                paths: selected.clone(),
-                now: now(1),
-                cancellation: cancellation.clone(),
-                preflight: Arc::new(|_| Ok(())),
-            }
-        )
-        .unwrap_err()
-        .kind(),
-        std::io::ErrorKind::ConnectionReset
-    );
+    for _ in 0..2 {
+        assert_eq!(
+            disk.capture_publication(
+                &access,
+                temp.path(),
+                &crate::native_v2_files::publication::FilePublication {
+                    owner: owner.clone(),
+                    paths: selected.clone(),
+                    now: now(1),
+                    cancellation: cancellation.clone(),
+                    preflight: Arc::new(|_| Ok(())),
+                }
+            )
+            .unwrap_err()
+            .kind(),
+            std::io::ErrorKind::ConnectionReset
+        );
+        assert_eq!(objects(), retained_objects);
+        assert_eq!(
+            std::fs::read(temp.path().join("store/catalog.json")).unwrap(),
+            committed
+        );
+    }
     assert!(
         disk.list(
             &access,
@@ -781,8 +820,36 @@ fn interrupted_second_tree_never_exposes_the_first_and_the_same_identity_can_ret
         .is_empty()
     );
     authorization
-        .0
+        .fail
         .store(false, std::sync::atomic::Ordering::SeqCst);
+    authorization
+        .cancel
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(
+        disk.capture_publication(
+            &access,
+            temp.path(),
+            &crate::native_v2_files::publication::FilePublication {
+                owner: owner.clone(),
+                paths: selected.clone(),
+                now: now(2),
+                cancellation: cancellation.clone(),
+                preflight: Arc::new(|_| Ok(())),
+            }
+        )
+        .unwrap_err()
+        .kind(),
+        std::io::ErrorKind::Interrupted
+    );
+    assert_eq!(objects(), retained_objects);
+    assert_eq!(
+        std::fs::read(temp.path().join("store/catalog.json")).unwrap(),
+        committed
+    );
+    authorization
+        .cancel
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    authorization.cancellation.send_replace(false);
     assert_eq!(
         disk.capture_publication(
             &access,
@@ -799,6 +866,10 @@ fn interrupted_second_tree_never_exposes_the_first_and_the_same_identity_can_ret
         .len(),
         2
     );
+    assert_eq!(objects().len(), 3);
+    let mut pinned = Vec::new();
+    disk.read_pin(&access, &pin(), &mut pinned).unwrap();
+    assert_eq!(pinned, retained);
     // All paths passed the initial set check. Removing the second source just before packing
     // still identifies its authored field/path and cannot expose the already transferred first.
     let disk = DiskFileStore::open(
@@ -823,6 +894,12 @@ fn interrupted_second_tree_never_exposes_the_first_and_the_same_identity_can_ret
         )
         .unwrap_err();
     assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    assert_eq!(
+        std::fs::read_dir(temp.path().join("race-store/objects"))
+            .unwrap()
+            .count(),
+        0
+    );
     assert!(
         error
             .to_string()

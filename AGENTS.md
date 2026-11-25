@@ -2461,6 +2461,8 @@ python -m mkdocs build --strict
   Publication hosts must preflight the complete receipt through the caller's record/response
   validator before importing bytes or committing names, and on replay. Reuse ledger limits for
   final, request-vector and suspension envelopes; never substitute an artifact-count quota.
+  Failed managed captures reload the committed catalog under the same lock and reclaim unreferenced
+  objects, preserving pins and receipts even when catalog replacement has an ambiguous sync result.
 - Local in-place `PublishedFile::Local` references retain the recorded working root and relative
   live path and recheck confinement on open. They never enter managed storage or its cleanup scope.
   Resolve against the frozen canonical root without rebasing it during publication or opening;
