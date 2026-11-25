@@ -46,13 +46,17 @@ pub struct TemporaryDirectory(PathBuf);
 
 impl TemporaryDirectory {
     pub fn new(prefix: &str) -> io::Result<Self> {
+        Self::new_in(prefix, &std::env::temp_dir())
+    }
+
+    pub fn new_in(prefix: &str, directory: &Path) -> io::Result<Self> {
         let mut random = [0_u8; 8];
         getrandom::fill(&mut random).map_err(io::Error::other)?;
         let suffix = random
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
-        let path = std::env::temp_dir().join(format!("{prefix}-{}-{suffix}", std::process::id()));
+        let path = directory.join(format!("{prefix}-{}-{suffix}", std::process::id()));
         std::fs::create_dir(&path)?;
         Ok(Self(path))
     }
