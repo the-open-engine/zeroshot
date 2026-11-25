@@ -1,0 +1,138 @@
+{
+  "initialInput": {
+    "fields": {
+      "file": {
+        "required": true,
+        "type": {
+          "kind": "filepath"
+        }
+      },
+      "text": {
+        "required": true,
+        "type": {
+          "kind": "string"
+        }
+      }
+    },
+    "kind": "record"
+  },
+  "policy": {
+    "default": "deny",
+    "policy": "policy.native-v2@1"
+  },
+  "profile": "openengine.graph.full/v1",
+  "root": {
+    "children": [
+      {
+        "artifacts": {
+          "file": {
+            "kind": "binding",
+            "value": {
+              "path": [
+                "file"
+              ],
+              "source": "state"
+            }
+          },
+          "folder": {
+            "kind": "literal",
+            "path": "report"
+          }
+        },
+        "attempts": 1,
+        "diagnostic": {
+          "fields": {
+            "message": {
+              "required": true,
+              "type": {
+                "kind": "string"
+              }
+            }
+          },
+          "kind": "record"
+        },
+        "input": {
+          "fields": {
+            "text": {
+              "required": true,
+              "type": {
+                "kind": "string"
+              }
+            }
+          },
+          "kind": "record"
+        },
+        "inputBindings": [
+          {
+            "target": [
+              "text"
+            ],
+            "value": {
+              "path": [
+                "text"
+              ],
+              "source": "state"
+            }
+          }
+        ],
+        "kind": "verifier",
+        "name": "approval",
+        "output": {
+          "fields": {},
+          "kind": "record"
+        },
+        "signals": {
+          "decision": [
+            "approved",
+            "rejected"
+          ]
+        },
+        "worker": "builtin.request.ask@1",
+        "writeBindings": []
+      },
+      {
+        "artifacts": {
+          "file": {
+            "kind": "binding",
+            "value": {
+              "path": [
+                "file"
+              ],
+              "source": "state"
+            }
+          },
+          "folder": {
+            "kind": "literal",
+            "path": "report"
+          }
+        },
+        "bindings": [],
+        "kind": "succeed",
+        "name": "done",
+        "output": {
+          "kind": "null"
+        }
+      }
+    ],
+    "kind": "seq",
+    "name": "root",
+    "promotedStatePaths": [],
+    "state": {
+      "fields": {
+        "file": {
+          "required": true,
+          "type": {
+            "kind": "filepath"
+          }
+        },
+        "text": {
+          "required": true,
+          "type": {
+            "kind": "string"
+          }
+        }
+      },
+      "kind": "record"
+    }
+  }
+}

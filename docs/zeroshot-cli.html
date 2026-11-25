@@ -22,6 +22,7 @@ section { margin-block: 2.5rem; }
 <p class="generated">Generated from the typed Clap command model and its Rust doc comments. Regenerate with <code>cargo run -p zeroshot --example generate_cli_docs -- --write</code>.</p>
 <nav aria-label="Command index"><h2>Commands</h2><ul>
 <li><a href="#zeroshot"><code>zeroshot</code></a></li>
+<li><a href="#zeroshot-cleanup"><code>zeroshot cleanup</code></a></li>
 <li><a href="#zeroshot-file"><code>zeroshot file</code></a></li>
 <li><a href="#zeroshot-file-list"><code>zeroshot file list</code></a></li>
 <li><a href="#zeroshot-file-upload"><code>zeroshot file upload</code></a></li>
@@ -108,6 +109,7 @@ Single-result commands write JSON. Foreground `run`, `watch`, `logs`, and `attac
 Usage: zeroshot [COMMAND]
 
 Commands:
+  cleanup            Explicitly remove managed publications and discardable checkpoint lineages retained for at least 60 days. Logs, ledgers, library files and live local outputs are kept
   file               Manage files and named directory trees on the selected target. Bytes stream outside graph JSON
   memory             Initialize local Active Memory through the canonical skill
   acp                Serve one local Zeroshot profile as an experimental ACP agent over stdio
@@ -144,6 +146,20 @@ Options:
 
   -h, --help
           Print help (see a summary with &#39;-h&#39;)</code></pre></section>
+<section id="zeroshot-cleanup"><h3><code>zeroshot cleanup</code></h3>
+<pre><code>Explicitly remove managed publications and discardable checkpoint lineages retained for at least 60 days. Logs, ledgers, library files and live local outputs are kept
+
+Usage: zeroshot cleanup [OPTIONS]
+
+Options:
+      --target &lt;TARGET&gt;
+
+
+      --all
+          Remove every eligible publication and checkpoint lineage regardless of age
+
+  -h, --help
+          Print help</code></pre></section>
 <section id="zeroshot-file"><h3><code>zeroshot file</code></h3>
 <pre><code>Manage files and named directory trees on the selected target. Bytes stream outside graph JSON
 
@@ -1829,6 +1845,7 @@ Options:
 Usage: zeroshot help [COMMAND]
 
 Commands:
+  cleanup            Explicitly remove managed publications and discardable checkpoint lineages retained for at least 60 days. Logs, ledgers, library files and live local outputs are kept
   file               Manage files and named directory trees on the selected target. Bytes stream outside graph JSON
   memory             Initialize local Active Memory through the canonical skill
   acp                Serve one local Zeroshot profile as an experimental ACP agent over stdio

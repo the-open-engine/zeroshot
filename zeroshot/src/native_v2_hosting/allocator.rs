@@ -409,6 +409,7 @@ impl ProductionCapsuleAllocator {
             git_identity: _,
         } = pending;
         let PreparedCapsule {
+            paths,
             filesystem,
             hosted_workspace,
             ..
@@ -495,6 +496,13 @@ impl ProductionCapsuleAllocator {
             }
         }
         Ok(AllocatedCapsule {
+            file_publisher: self.config.file_store.as_ref().map(|(store, identity)| {
+                Arc::new(crate::native_v2_files::publication::ManagedFilePublisher {
+                    workspace: paths.workspace.clone(),
+                    store: store.clone(),
+                    identity: identity.clone(),
+                }) as Arc<dyn crate::native_v2_files::publication::RunFilePublisher>
+            }),
             node_instance_floor: Default::default(),
             runner,
             cleanup,
@@ -776,6 +784,85 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
             }
         }
         Ok(CapsuleDestroyed::confirmed())
+    }
+
+    async fn recover_file_publication(
+        &self,
+        stored: &crate::v2_run_ledger::StoredRun,
+        request: &crate::native_v2_files::publication::FilePublication,
+    ) -> Result<
+        Option<crate::native_v2_platform::RecoveredFilePublication>,
+        CapsuleAllocationUnavailable,
+    > {
+        let Some((store, identity)) = &self.config.file_store else {
+            return Ok(None);
+        };
+        let files = {
+            let store = store.clone();
+            let identity = identity.clone();
+            let request = request.clone();
+            tokio::task::spawn_blocking(move || {
+                store.publication_receipt(
+                    &crate::native_v2_files::FileAccess {
+                        target: store.target(),
+                        identity: &identity,
+                    },
+                    &request,
+                )
+            })
+            .await
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?
+        };
+        let Some(files) = files else {
+            return Ok(None);
+        };
+        let run_id = &stored.snapshot.run_id;
+        // Quiesce the original allocation before reusing its checkpoint authority. Suspension
+        // cleanup retains the workspace; the replayed breakpoint owns its final disposition.
+        self.destroy_or_confirm_absent(run_id, RunRuntimeExit::Suspended)
+            .await
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+        let workspace = CapsuleBuildPaths::new(&self.config.storage_root, run_id).workspace;
+        let directory = checkpoint_directory(&self.config.storage_root, run_id);
+        let checkpoints = if let Some(storage) = &self.config.workspace_storage {
+            storage
+                .prepare(super::HostedWorkspaceRequest {
+                    run_id,
+                    workspace: &workspace,
+                    checkpoint_directory: &directory,
+                    workspace_checkpoints: stored.admitted.runtime.workspace_checkpoints,
+                    writers: crate::native_v2_admission::writer_nodes(&stored.admitted),
+                })
+                .await
+                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?
+                .checkpoints
+        } else {
+            let recovery = read_recovery(&recovery_path(&self.config.storage_root, run_id));
+            let delivery_run_id = recovery
+                .as_ref()
+                .and_then(|document| document.delivery_run_id.as_ref())
+                .unwrap_or(run_id);
+            Arc::new(
+                ResticCheckpointStore::new_with_fallback(
+                    checkpoints::ResticCheckpointStoreRequest {
+                        directory: directory.clone(),
+                        repository: checkpoint_repository(
+                            &self.config.storage_root,
+                            delivery_run_id,
+                        ),
+                        workspace,
+                        writers: crate::native_v2_admission::writer_nodes(&stored.admitted),
+                    },
+                    Some(&directory),
+                )
+                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,
+            )
+        };
+        Ok(Some(crate::native_v2_platform::RecoveredFilePublication {
+            files,
+            checkpoints,
+        }))
     }
 
     async fn reserve_retained_workspace(

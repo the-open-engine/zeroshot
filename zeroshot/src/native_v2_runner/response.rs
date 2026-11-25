@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt};
+use std::{collections::BTreeMap, fmt, path::Path};
 
 use openengine_cluster_protocol::{
     EnumLabel, FieldName, NodeInstructions, NonEmptyEnumSet, PayloadType, WorkerOutcome,
@@ -155,6 +155,32 @@ impl NodeResponseContract {
         Ok(outcome)
     }
 
+    pub(crate) fn validate_filepaths(
+        &self,
+        outcome: &WorkerOutcome,
+        workspace: &Path,
+    ) -> Result<(), NodeResponseError> {
+        match (self, outcome) {
+            (Self::Worker { output: schema }, WorkerOutcome::Verified { output, .. }) => {
+                validate_paths(schema, output, workspace, "$.output")
+            }
+            (
+                Self::Verifier {
+                    output: schema,
+                    diagnostic: diagnostic_schema,
+                    ..
+                },
+                WorkerOutcome::Verifier {
+                    output, diagnostic, ..
+                },
+            ) => {
+                validate_paths(schema, output, workspace, "$.output")?;
+                validate_paths(diagnostic_schema, diagnostic, workspace, "$.diagnostic")
+            }
+            _ => Ok(()),
+        }
+    }
+
     fn normalize_openai_response(&self, value: &mut Value) {
         match self {
             Self::Worker { output } => normalize_openai_payload(output, value),
@@ -308,19 +334,20 @@ fn resolve_agent_response(
     contract: &NodeResponseContract,
     response: &str,
 ) -> Result<AgentResponse, NodeRunnerError> {
-    resolve_agent_response_with_dialect(contract, response, ProviderSchemaDialect::Standard)
+    resolve_agent_response_with_dialect(contract, response, ProviderSchemaDialect::Standard, None)
 }
 
 pub(crate) fn resolve_agent_response_with_delivery(
     contract: &NodeResponseContract,
     response: &str,
     delivery: ResponseDelivery,
+    workspace: Option<&Path>,
 ) -> Result<AgentResponse, NodeRunnerError> {
     resolve_agent_response_rendering(
         contract,
         response,
-        ProviderSchemaDialect::Standard,
-        CorrectionRendering::Contract(delivery),
+        CorrectionRendering::Contract(delivery, ProviderSchemaDialect::Standard),
+        workspace,
     )
 }
 
@@ -328,12 +355,13 @@ pub(crate) fn resolve_agent_response_with_dialect(
     contract: &NodeResponseContract,
     response: &str,
     dialect: ProviderSchemaDialect,
+    workspace: Option<&Path>,
 ) -> Result<AgentResponse, NodeRunnerError> {
     resolve_agent_response_rendering(
         contract,
         response,
-        dialect,
-        CorrectionRendering::Contract(ResponseDelivery::Message),
+        CorrectionRendering::Contract(ResponseDelivery::Message, dialect),
+        workspace,
     )
 }
 
@@ -343,12 +371,13 @@ pub(crate) fn resolve_agent_response_with_schema(
     contract: &NodeResponseContract,
     response: &str,
     dialect: ProviderSchemaDialect,
+    workspace: Option<&Path>,
 ) -> Result<AgentResponse, NodeRunnerError> {
     resolve_agent_response_rendering(
         contract,
         response,
-        dialect,
         CorrectionRendering::Schema(dialect),
+        workspace,
     )
 }
 
@@ -356,22 +385,35 @@ pub(crate) fn resolve_agent_response_with_schema(
 /// correction must agree so the provider never sees the contract and the schema together.
 #[derive(Clone, Copy)]
 enum CorrectionRendering {
-    Contract(ResponseDelivery),
+    Contract(ResponseDelivery, ProviderSchemaDialect),
     Schema(ProviderSchemaDialect),
 }
 
 fn resolve_agent_response_rendering(
     contract: &NodeResponseContract,
     response: &str,
-    dialect: ProviderSchemaDialect,
     correction: CorrectionRendering,
+    workspace: Option<&Path>,
 ) -> Result<AgentResponse, NodeRunnerError> {
+    let dialect = match correction {
+        CorrectionRendering::Contract(_, dialect) | CorrectionRendering::Schema(dialect) => dialect,
+    };
     let (parsed, fault) = match parse_provider_envelope(response) {
         Ok(mut semantic_response) => {
             if dialect == ProviderSchemaDialect::OpenAiStrict {
                 contract.normalize_openai_response(&mut semantic_response);
             }
-            (contract.parse_agent_value(semantic_response), None)
+            (
+                contract
+                    .parse_agent_value(semantic_response)
+                    .and_then(|outcome| {
+                        if let Some(workspace) = workspace {
+                            contract.validate_filepaths(&outcome, workspace)?;
+                        }
+                        Ok(outcome)
+                    }),
+                None,
+            )
         }
         Err(error) => (Err(error), envelope_fault(response)),
     };
@@ -379,7 +421,7 @@ fn resolve_agent_response_rendering(
         Ok(outcome) => AgentResponse::Complete(outcome),
         Err(error) => {
             let prompt = match correction {
-                CorrectionRendering::Contract(delivery) => {
+                CorrectionRendering::Contract(delivery, _) => {
                     render_agent_correction(contract, &error, fault, delivery)?
                 }
                 CorrectionRendering::Schema(dialect) => {
@@ -513,6 +555,7 @@ fn payload_skeleton(
         PayloadType::Integer => out.push_str("<integer>"),
         PayloadType::Number => out.push_str("<number>"),
         PayloadType::String => out.push_str("<string>"),
+        PayloadType::Filepath => out.push_str("<existing workspace file or folder path>"),
         PayloadType::Record { fields } => {
             out.push('{');
             for (index, (name, field)) in fields.iter().enumerate() {
@@ -641,6 +684,9 @@ fn payload_schema(payload: &PayloadType, dialect: ProviderSchemaDialect) -> Valu
         PayloadType::Integer => json!({ "type": "integer" }),
         PayloadType::Number => json!({ "type": "number" }),
         PayloadType::String => json!({ "type": "string" }),
+        PayloadType::Filepath => {
+            json!({ "type": "string", "minLength": 1, "description": "Path to an existing file or folder in the working workspace. This validates the path and does not publish it." })
+        }
         PayloadType::Record { fields } => {
             let properties = fields
                 .iter()
@@ -668,6 +714,46 @@ fn payload_schema(payload: &PayloadType, dialect: ProviderSchemaDialect) -> Valu
             json!({ "type": "array", "items": payload_schema(items, dialect) })
         }
         PayloadType::Enum { values } => enum_schema(values.values().iter().map(EnumLabel::as_str)),
+    }
+}
+
+fn validate_paths(
+    schema: &PayloadType,
+    value: &Value,
+    workspace: &Path,
+    field: &str,
+) -> Result<(), NodeResponseError> {
+    match schema {
+        PayloadType::Filepath => {
+            let path = value
+                .as_str()
+                .ok_or_else(|| NodeResponseError::new(format!("{field} requires a filepath")))?;
+            crate::native_v2_files::workspace_path(workspace, path)
+                .map(|_| ())
+                .map_err(|error| {
+                    NodeResponseError::new(format!("{field} filepath {path:?}: {error}"))
+                })
+        }
+        PayloadType::Record { fields } => {
+            for (name, schema) in fields {
+                if let Some(value) = value.get(name.as_str()) {
+                    validate_paths(
+                        &schema.value_type,
+                        value,
+                        workspace,
+                        &format!("{field}.{}", name.as_str()),
+                    )?;
+                }
+            }
+            Ok(())
+        }
+        PayloadType::Array { items } => {
+            for (index, value) in value.as_array().into_iter().flatten().enumerate() {
+                validate_paths(items, value, workspace, &format!("{field}[{index}]"))?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
     }
 }
 

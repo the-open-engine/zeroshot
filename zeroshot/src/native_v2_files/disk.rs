@@ -11,6 +11,8 @@ use openengine_cluster_protocol::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+mod publications;
+
 use super::{
     FileAccess, FileAction, FileAuthorization, FileAuthorizer, FilePin, FilePinRequest,
     FilePublicationOwner, FilePublishRequest, FileReplaceRequest, HostFilePublication, Result,
@@ -31,6 +33,8 @@ struct Catalog {
     trees: BTreeMap<String, Tree>,
     pins: BTreeMap<String, Pin>,
     operations: BTreeMap<String, String>,
+    #[serde(default)]
+    publications: BTreeMap<String, publications::Publication>,
 }
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -38,10 +42,14 @@ struct Tree {
     partition: String,
     address: FileAddress,
     blob: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    owner: Option<FilePublicationOwner>,
 }
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Pin {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    owner: Option<FilePublicationOwner>,
     partition: String,
     source: FileSelection,
     staged: bool,
@@ -185,6 +193,17 @@ impl DiskFileStore {
         Ok(())
     }
 
+    fn authorize_owner(
+        &self,
+        request: FileAuthorization<'_>,
+        owner: Option<&FilePublicationOwner>,
+    ) -> Result<()> {
+        if let Some(owner) = owner {
+            self.authorization.authorize_publication(request, owner)?;
+        }
+        Ok(())
+    }
+
     fn load(&self) -> Result<(File, Catalog)> {
         self.root.validate_private()?;
         let lock = self
@@ -308,6 +327,14 @@ impl DiskFileStore {
             .pins
             .get(&self.pin_key(access, pin)?)
             .ok_or_else(denied)?;
+        self.authorize_owner(
+            FileAuthorization {
+                access,
+                selection: &retained.source,
+                action: FileAction::Pin,
+            },
+            retained.owner.as_ref(),
+        )?;
         if retained.blob.is_none() {
             return Err(invalid("file pin has been released"));
         }
@@ -383,6 +410,23 @@ impl TargetFileHost for DiskFileStore {
                         .as_str()
                         .starts_with(&format!("{}/", prefix.as_str())))
             {
+                let selection = FileSelection {
+                    address: tree.address.clone(),
+                    member: root_path(),
+                };
+                if self
+                    .authorize_owner(
+                        FileAuthorization {
+                            access,
+                            selection: &selection,
+                            action: FileAction::List,
+                        },
+                        tree.owner.as_ref(),
+                    )
+                    .is_err()
+                {
+                    continue;
+                }
                 if self.selection(access, &tree.address, FileAction::List)? != partition {
                     return Err(denied());
                 }
@@ -406,6 +450,14 @@ impl TargetFileHost for DiskFileStore {
             .ok_or_else(|| {
                 std::io::Error::new(std::io::ErrorKind::NotFound, "file path was not found")
             })?;
+        self.authorize_owner(
+            FileAuthorization {
+                access,
+                selection,
+                action: FileAction::List,
+            },
+            tree.owner.as_ref(),
+        )?;
         transfer::members(
             &mut self.object(&tree.blob)?,
             &selection.member,
@@ -482,6 +534,7 @@ impl TargetFileHost for DiskFileStore {
         catalog.trees.insert(
             key(&(&partition, &request.address))?,
             Tree {
+                owner: None,
                 partition,
                 address: request.address.clone(),
                 blob,
@@ -505,6 +558,14 @@ impl TargetFileHost for DiskFileStore {
             .ok_or_else(|| {
                 std::io::Error::new(std::io::ErrorKind::NotFound, "file path was not found")
             })?;
+        self.authorize_owner(
+            FileAuthorization {
+                access,
+                selection,
+                action: FileAction::Read,
+            },
+            tree.owner.as_ref(),
+        )?;
         transfer::project(
             &mut self.object(&tree.blob)?,
             &selection.member,
@@ -600,10 +661,20 @@ impl TargetFileHost for DiskFileStore {
                 )
             },
         )?;
+        self.authorize_owner(
+            FileAuthorization {
+                access,
+                selection: &request.source,
+                action: FileAction::Pin,
+            },
+            tree.owner.as_ref(),
+        )?;
+        let owner = tree.owner.clone();
         let blob = tree.blob.clone();
         catalog.pins.insert(
             identity,
             Pin {
+                owner,
                 partition,
                 source: request.source.clone(),
                 staged: false,
@@ -654,6 +725,7 @@ impl TargetFileHost for DiskFileStore {
         catalog.pins.insert(
             identity,
             Pin {
+                owner: None,
                 partition,
                 source,
                 staged: true,
@@ -743,6 +815,17 @@ impl TargetFileHost for DiskFileStore {
             path: FilePath::new(format!("{prefix}/{}", request.name.as_str())).map_err(invalid)?,
         };
         let partition = self.selection(access, &address, FileAction::Publish)?;
+        self.authorize_owner(
+            FileAuthorization {
+                access,
+                selection: &FileSelection {
+                    address: address.clone(),
+                    member: root_path(),
+                },
+                action: FileAction::Publish,
+            },
+            Some(&request.owner),
+        )?;
         let (_lock, mut catalog) = self.load()?;
         let operation =
             self.operation_key(access, "publish", &(&request.owner, &request.operation))?;
@@ -806,13 +889,36 @@ impl TargetFileHost for DiskFileStore {
         catalog.trees.insert(
             identity,
             Tree {
-                partition,
+                owner: Some(request.owner.clone()),
+                partition: partition.clone(),
                 address: address.clone(),
                 blob,
             },
         );
         catalog.operations.insert(name, fingerprint.clone());
-        catalog.operations.insert(operation, fingerprint);
+        catalog
+            .operations
+            .insert(operation.clone(), fingerprint.clone());
+        catalog.publications.insert(
+            operation,
+            publications::Publication {
+                partition,
+                owner: request.owner.clone(),
+                fingerprint,
+                published_at: crate::native_v2_runner::current_timestamp(),
+                released: false,
+                files: [(
+                    openengine_cluster_protocol::FieldName::new("file")
+                        .map_err(|_| invalid("invalid artifact name"))?,
+                    openengine_cluster_protocol::PublishedFile::Managed {
+                        target: access.target.to_owned(),
+                        address: address.clone(),
+                    },
+                )]
+                .into_iter()
+                .collect(),
+            },
+        );
         self.save(&catalog)?;
         Ok(HostFilePublication::Managed { address })
     }
@@ -825,6 +931,17 @@ impl TargetFileHost for DiskFileStore {
         let (_lock, mut catalog) = self.load()?;
         let identity = key(&(&partition, address))?;
         if let Some(tree) = catalog.trees.get(&identity) {
+            self.authorize_owner(
+                FileAuthorization {
+                    access,
+                    action: FileAction::Publish,
+                    selection: &FileSelection {
+                        address: address.clone(),
+                        member: root_path(),
+                    },
+                },
+                tree.owner.as_ref(),
+            )?;
             transfer::copy_validated(
                 &mut self.object(&tree.blob)?,
                 &mut std::io::sink(),
@@ -862,6 +979,7 @@ impl TargetFileHost for DiskFileStore {
             .pins
             .entry(self.pin_key(access, pin)?)
             .or_insert(Pin {
+                owner: None,
                 partition,
                 source,
                 staged: true,
@@ -872,6 +990,22 @@ impl TargetFileHost for DiskFileStore {
         self.save(&catalog)?;
         self.reclaim_locked(&catalog)?;
         Ok(())
+    }
+
+    fn select_publications(
+        &self,
+        access: &FileAccess<'_>,
+        now: openengine_cluster_protocol::UnixTimestampMillis,
+        all: bool,
+    ) -> Result<std::collections::BTreeSet<String>> {
+        DiskFileStore::select_publications(self, access, now, all)
+    }
+    fn cleanup_publications(
+        &self,
+        access: &FileAccess<'_>,
+        retention: &super::FileRetention<'_>,
+    ) -> Result<usize> {
+        DiskFileStore::cleanup_publications(self, access, retention)
     }
 
     fn reclaim(&self) -> Result<usize> {

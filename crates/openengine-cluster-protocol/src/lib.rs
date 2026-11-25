@@ -387,3 +387,6 @@ pub struct GenerationOutOfRange(pub u64);
 
 pub mod target_files;
 pub use target_files::*;
+
+mod published_files;
+pub use published_files::*;

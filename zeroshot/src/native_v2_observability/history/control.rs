@@ -272,7 +272,9 @@ impl ControlReplay {
 
     fn project_event(&mut self, event: RunEvent) -> Result<(), &'static str> {
         match event {
-            RunEvent::DeliveryState { .. }
+            RunEvent::RequestPrepared { .. }
+            | RunEvent::FinalArtifactsPublished { .. }
+            | RunEvent::DeliveryState { .. }
             | RunEvent::SafeLog { .. }
             | RunEvent::TokenUsageObserved { .. }
             | RunEvent::RunTokenUsageObserved { .. }

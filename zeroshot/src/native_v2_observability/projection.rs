@@ -51,10 +51,12 @@ pub(super) fn status_from_snapshot(
                 .map(|primary| primary.result.clone()),
         }),
         RunPhase::Suspended => Ok(RunStatus::Suspended {
-            suspension: snapshot
-                .suspension
-                .clone()
-                .ok_or(NativeV2ObservationError::InvalidState)?,
+            suspension: public_suspension(
+                snapshot
+                    .suspension
+                    .as_ref()
+                    .ok_or(NativeV2ObservationError::InvalidState)?,
+            ),
             metadata: run_metadata(snapshot),
         }),
         RunPhase::Finished => Ok(RunStatus::Finished {
@@ -67,8 +69,29 @@ pub(super) fn status_from_snapshot(
     }
 }
 
+/// Ordinary run observation never grants request-read authority.
+pub(crate) fn public_suspension(
+    suspension: &openengine_cluster_protocol::RunSuspension,
+) -> openengine_cluster_protocol::RunSuspension {
+    let mut suspension = suspension.clone();
+    if let openengine_cluster_protocol::RunSuspension::Request { request, .. } = &mut suspension {
+        request.artifacts.clear();
+    }
+    suspension
+}
+
 pub(super) fn run_metadata(snapshot: &RunSnapshot) -> RunMetadata {
     RunMetadata {
+        artifacts: if snapshot.primary_graph.as_ref().is_some_and(|primary| {
+            matches!(
+                primary.result,
+                openengine_cluster_protocol::TerminalResult::Succeeded { .. }
+            )
+        }) {
+            snapshot.artifacts.clone()
+        } else {
+            Default::default()
+        },
         token_usage: snapshot.token_usage.clone(),
         delivery_receipt: snapshot.delivery_receipt(),
     }
@@ -77,7 +100,9 @@ pub(super) fn run_metadata(snapshot: &RunSnapshot) -> RunMetadata {
 pub(super) fn changes_public_status(event: &RunEvent) -> bool {
     !matches!(
         event,
-        RunEvent::Vector { .. }
+        RunEvent::FinalArtifactsPublished { .. }
+            | RunEvent::RequestPrepared { .. }
+            | RunEvent::Vector { .. }
             | RunEvent::DeliveryState { .. }
             | RunEvent::SafeLog { .. }
             | RunEvent::TokenUsageObserved { .. }

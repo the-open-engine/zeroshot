@@ -71,6 +71,23 @@
           "additionalProperties": false,
           "properties": {
             "action": {
+              "const": "cleanup",
+              "type": "string"
+            },
+            "all": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "action",
+            "all"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "action": {
               "const": "list",
               "type": "string"
             },
@@ -167,6 +184,31 @@
     },
     "FileResponse": {
       "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "checkpointLineages": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "cleaned",
+              "type": "string"
+            },
+            "publications": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "publications",
+            "checkpointLineages"
+          ],
+          "type": "object"
+        },
         {
           "additionalProperties": false,
           "properties": {

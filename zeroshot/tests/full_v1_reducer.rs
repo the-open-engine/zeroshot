@@ -452,3 +452,6 @@ mod parallel_terminals;
 
 #[path = "full_v1_reducer/profiles.rs"]
 mod profiles;
+
+#[path = "full_v1_reducer/publications.rs"]
+mod publications;

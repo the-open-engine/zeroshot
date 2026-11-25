@@ -138,9 +138,13 @@ fn schema_rendering_reflects_the_selected_dialect() {
 #[test]
 fn schema_resolution_correction_carries_the_schema_instead_of_the_contract() {
     let contract = worker_contract();
-    let response =
-        resolve_agent_response_with_schema(&contract, "not json", ProviderSchemaDialect::Standard)
-            .assert_value();
+    let response = resolve_agent_response_with_schema(
+        &contract,
+        "not json",
+        ProviderSchemaDialect::Standard,
+        None,
+    )
+    .assert_value();
     match response {
         AgentResponse::Correction { prompt, .. } => {
             assert!(prompt.contains("Response schema:"));
@@ -157,6 +161,7 @@ fn dialect_resolution_keeps_the_contract_correction_for_native_schema_lanes() {
         &contract,
         "not json",
         ProviderSchemaDialect::OpenAiStrict,
+        None,
     )
     .assert_value();
     match response {
@@ -360,7 +365,7 @@ fn openai_schema_requires_every_field_and_normalizes_optional_nulls() {
             &contract,
             r#"{"response":{"required":true,"optional":null}}"#,
             ProviderSchemaDialect::OpenAiStrict,
-        )
+         None,)
         .assert_value(),
         AgentResponse::Complete(WorkerOutcome::Verified { output, .. })
             if output == json!({"required": true})
@@ -395,7 +400,7 @@ fn openai_normalizes_optional_nulls_recursively() {
             &contract,
             r#"{"response":{"items":[{"note":null},{"note":"kept"}]}}"#,
             ProviderSchemaDialect::OpenAiStrict,
-        )
+         None,)
         .assert_value(),
         AgentResponse::Complete(WorkerOutcome::Verified { output, .. })
             if output == json!({"items": [{}, {"note": "kept"}]})
@@ -435,7 +440,7 @@ fn openai_distinguishes_optional_null_values_from_omission() {
             &contract,
             r#"{"response":{"nothing":null}}"#,
             ProviderSchemaDialect::OpenAiStrict,
-        )
+         None,)
         .assert_value(),
         AgentResponse::Complete(WorkerOutcome::Verified { output, .. })
             if output == json!({"nothing": null})
@@ -450,7 +455,7 @@ fn openai_distinguishes_optional_null_values_from_omission() {
             &contract,
             &omitted,
             ProviderSchemaDialect::OpenAiStrict,
-        )
+         None,)
         .assert_value(),
         AgentResponse::Complete(WorkerOutcome::Verified { output, .. })
             if output == json!({})
@@ -619,8 +624,13 @@ fn valid_verifier_envelope() -> String {
 }
 
 fn correction_prompt(contract: &NodeResponseContract, response: &str) -> String {
-    match resolve_agent_response_with_schema(contract, response, ProviderSchemaDialect::Standard)
-        .assert_value()
+    match resolve_agent_response_with_schema(
+        contract,
+        response,
+        ProviderSchemaDialect::Standard,
+        None,
+    )
+    .assert_value()
     {
         AgentResponse::Correction { prompt, .. } => prompt,
         AgentResponse::Complete(_) => panic!("rejected response must request a correction"),
@@ -721,6 +731,7 @@ fn strict_schema_correction_shows_the_strict_shape() {
         &verifier_contract(),
         &response,
         ProviderSchemaDialect::OpenAiStrict,
+        None,
     )
     .assert_value() else {
         panic!("rejected response must request a correction");
@@ -737,6 +748,7 @@ fn contract_correction_keeps_the_standard_shape_for_strict_lanes() {
         &verifier_contract(),
         &response,
         ProviderSchemaDialect::OpenAiStrict,
+        None,
     )
     .assert_value() else {
         panic!("rejected response must request a correction");
@@ -754,7 +766,8 @@ fn skeleton_with_placeholders_is_not_accepted() {
         resolve_agent_response_with_schema(
             &verifier_contract(),
             &skeleton,
-            ProviderSchemaDialect::Standard
+            ProviderSchemaDialect::Standard,
+            None
         )
         .assert_value(),
         AgentResponse::Correction { .. }
@@ -816,6 +829,7 @@ fn correction_guidance_stays_out_of_the_diagnostic() {
         &verifier_contract(),
         &response,
         ProviderSchemaDialect::Standard,
+        None,
     )
     .assert_value() else {
         panic!("rejected response must request a correction");
@@ -907,6 +921,7 @@ fn tool_delivery_preserves_worker_null_and_verifier_contracts() {
                     &contract,
                     invalid,
                     ResponseDelivery::StructuredOutput,
+                    None,
                 )
                 .assert_value()
             else {
@@ -934,6 +949,7 @@ fn tool_delivery_preserves_worker_null_and_verifier_contracts() {
             &contract,
             &envelope,
             ResponseDelivery::StructuredOutput,
+            None,
         )
         .assert_value() else {
             panic!("valid response must complete");
@@ -950,4 +966,36 @@ fn tool_delivery_preserves_worker_null_and_verifier_contracts() {
             message
         );
     }
+}
+
+#[test]
+fn nested_worker_and_verifier_filepaths_validate_without_publishing_plain_strings() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(temp.path().join("tree")).unwrap();
+    std::fs::write(temp.path().join("tree/file"), "current").unwrap();
+    let output: PayloadType = serde_json::from_value(json!({"kind":"record","fields":{
+        "paths":{"required":true,"type":{"kind":"array","items":{"kind":"filepath"}}},
+        "text":{"required":true,"type":{"kind":"string"}}
+    }}))
+    .unwrap();
+    let worker = NodeResponseContract::Worker {
+        output: output.clone(),
+    };
+    let value = json!({"paths":["tree","tree/file"],"text":"missing"});
+    let outcome = worker.parse_agent_value(value).unwrap();
+    worker.validate_filepaths(&outcome, temp.path()).unwrap();
+    let verifier = NodeResponseContract::Verifier {
+        output,
+        signals: Default::default(),
+        diagnostic: PayloadType::Filepath,
+    };
+    let value =
+        json!({"output":{"paths":["tree/file"],"text":"missing"},"signals":{},"diagnostic":"tree"});
+    let outcome = verifier.parse_agent_value(value).unwrap();
+    verifier.validate_filepaths(&outcome, temp.path()).unwrap();
+    std::fs::remove_file(temp.path().join("tree/file")).unwrap();
+    let error = verifier
+        .validate_filepaths(&outcome, temp.path())
+        .unwrap_err();
+    assert!(error.to_string().contains("paths[0]"));
 }

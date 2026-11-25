@@ -157,6 +157,7 @@ fn agent(
             .collect(),
     )?;
     Ok(GraphNode::Verifier(VerifierNode {
+        artifacts: Default::default(),
         name: node_name(name)?,
         worker: worker_ref(&format!(
             "builtin.agent.code-review-{}@1",

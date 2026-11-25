@@ -217,3 +217,18 @@ async fn request_under_parallel_or_map_is_rejected_at_both_boundaries() {
         assert!(error.to_string().contains("approval"), "{error}");
     }
 }
+
+#[tokio::test]
+async fn artifact_declarations_accept_literals_and_reject_strings_and_missing_bindings() {
+    let mut request = ask();
+    request["artifacts"] = json!({"report":{"kind":"literal","path":"report"}});
+    check(request.clone(), true).await.assert_value();
+    for declaration in [
+        json!({"kind":"literal","path":""}),
+        json!({"kind":"binding","value":{"source":"state","path":["text"]}}),
+        json!({"kind":"binding","value":{"source":"state","path":["missing"]}}),
+    ] {
+        request["artifacts"]["report"] = declaration;
+        assert!(check(request.clone(), true).await.is_err());
+    }
+}

@@ -74,6 +74,7 @@ pub(super) struct ExecutableVisit<'history> {
 
 pub(super) fn attempts_exhausted() -> Result<Status, ReducerError> {
     Ok(Status::Terminal {
+        artifacts: BTreeMap::new(),
         position: HistoryPosition::ZERO,
         projection: TerminalProjection::Failed {
             context: None,

@@ -96,6 +96,7 @@ pub(super) fn apply(request: Request) -> Result<Document, ApiError> {
                     };
                     let mut children = sequence.children.clone().into_vec();
                     children.push(GraphNode::Succeed(SucceedNode {
+                        artifacts: Default::default(),
                         name: name.clone(),
                         output: PayloadType::Null,
                         bindings: Vec::new(),

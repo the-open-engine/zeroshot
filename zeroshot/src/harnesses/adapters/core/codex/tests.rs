@@ -7,6 +7,8 @@ mod cancellation;
 mod correction;
 #[path = "tests/environment.rs"]
 mod environment;
+#[path = "tests/filepath.rs"]
+mod filepath;
 #[path = "tests/large_output.rs"]
 mod large_output;
 #[path = "tests/large_prompt.rs"]
@@ -253,13 +255,21 @@ fn binding_with_model(
 }
 
 async fn admitted(binding: NodeRuntimeBinding, provider: CodexProvider) -> AdmittedRun {
+    admitted_with_output(binding, provider, json!({"kind":"integer"})).await
+}
+
+async fn admitted_with_output(
+    binding: NodeRuntimeBinding,
+    provider: CodexProvider,
+    output: Value,
+) -> AdmittedRun {
     let graph = full_graph(vec![
         json!({
             "kind":"step","name":"work","worker":"agent.work@1",
             "instructions":"Exercise the Codex adapter.",
             "input":{"kind":"null"},
             "output":{"kind":"record","fields":{
-                "answer":{"type":{"kind":"integer"},"required":true}
+                "answer":{"type":output,"required":true}
             }},
             "inputBindings":[],"writeBindings":[],"timeoutMs":1000,"attempts":1
         }),

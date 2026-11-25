@@ -99,3 +99,14 @@ cargo test --locked --package zeroshot --lib --features ui -- \
   native_v2_target_authority::tests::resume_refusals native_v2_target_authority::tests::checkpoint_opt_out
 cargo test --locked --package zeroshot --features ui --test native_v2_cli_local \
   networks_cleared_agent_labels_cannot_use_human_cli_or_rpc_across_runs
+
+# Explicit request/final publications and filepath response correction
+cargo test --locked --package zeroshot --features ui --lib -- \
+  native_v2_supervisor::tests::artifacts native_v2_codex::tests::filepath \
+  native_v2_platform::tests::cleanup v2_run_ledger::sqlite::readonly::tests::timing \
+  native_v2_runner::response native_v2_request::tests \
+  native_v2_observability::tests::publications \
+  profile_ui::runs::tests::status::request_attachments \
+  native_v2_admission::tests::requests::artifact \
+  native_v2_admission::profile_expansion::wire_contract::profile_linking
+cargo test --locked --package openengine-cluster-protocol --test payload_subtyping --test canonical

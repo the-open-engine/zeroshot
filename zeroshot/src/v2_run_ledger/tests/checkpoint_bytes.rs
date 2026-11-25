@@ -2,7 +2,7 @@ use super::*;
 use crate::native_v2_supervisor::durable_history;
 use crate::v2_run_ledger::{
     MAX_EVENT_BYTES, MAX_PRIOR_EXECUTION_BYTES, MAX_REPLAY_BYTES, MAX_REPLAY_EVENTS, RunSnapshot,
-    apply_event, cursor_sequence,
+    apply_stored_event,
 };
 use crate::v2_run_ledger::state::validate_event;
 
@@ -142,12 +142,7 @@ async fn assert_bounded_replay(ledger: &dyn RunLedger, expected: &RunSnapshot) {
             page_bytes += serde_json::to_vec(&stored.event).assert_value().len();
             count += 1;
             assert_eq!(stored.cursor, cursor_for(count));
-            apply_event(
-                &mut replay,
-                &stored.event,
-                cursor_sequence(&stored.cursor).assert_value(),
-            )
-            .assert_value();
+            apply_stored_event(&mut replay, &stored).assert_value();
         }
         assert!(page_bytes <= MAX_REPLAY_BYTES);
         pages += 1;

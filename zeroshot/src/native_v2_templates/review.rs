@@ -115,6 +115,7 @@ pub(super) fn issue_review_graph(
 pub(super) fn comment_node() -> Result<GraphNode, BuiltinTemplateError> {
     let output = static_value(comment_result_schema())?;
     Ok(GraphNode::Verifier(VerifierNode {
+        artifacts: Default::default(),
         name: node_name(DELIVERY_NODE)?,
         worker: worker_ref(COMMENT_DELIVERY_WORKER_REF)?,
         instructions: None,
@@ -146,6 +147,7 @@ pub(super) fn comment_node() -> Result<GraphNode, BuiltinTemplateError> {
 
 fn success(output: &PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
     Ok(GraphNode::Succeed(SucceedNode {
+        artifacts: Default::default(),
         name: node_name("done")?,
         output: output.clone(),
         bindings: output_fields(output)?

@@ -433,6 +433,7 @@ async fn resolve_claude_attempt(
         &turn.invocation.response,
         &result.message,
         ResponseDelivery::StructuredOutput,
+        Some(turn.execution.workspace()),
     )?;
     state
         .retry

@@ -16,6 +16,7 @@ use crate::native_v2_supervisor::{RunEnvironment, RunRuntimeExit};
 use crate::v2_run_ledger::RunLedger;
 
 pub struct PortableRuntime {
+    pub file_publisher: Option<Arc<dyn crate::native_v2_files::publication::RunFilePublisher>>,
     pub vector_seed: Vec<openengine_cluster_protocol::RunVector>,
     pub checkpoints: Option<Arc<dyn crate::native_v2_supervisor::checkpoints::RunCheckpointStore>>,
     pub execution_seed: Vec<crate::full_v1_reducer::DurableExecution>,
@@ -71,6 +72,7 @@ impl PortableRunEngine {
             .with_wait_threshold(wait_policy.in_place_threshold)
             .with_wall_clock(wait_policy.wall_clock)
             .with_postmortem(postmortem)
+            .with_file_publisher(runtime.file_publisher)
             .with_checkpoints(runtime.checkpoints)
             .with_delivery_policy(delivery_policy)
             .with_live_output(Arc::new(observability.clone()))
@@ -253,6 +255,7 @@ impl PortableRuntime {
     pub fn new(runner: Arc<dyn NodeRunner>) -> Self {
         Self {
             runner,
+            file_publisher: None,
             checkpoints: None,
             execution_seed: Vec::new(),
             node_instance_floor: Default::default(),
@@ -265,6 +268,7 @@ impl PortableRuntime {
     pub fn with_cleanup(runner: Arc<dyn NodeRunner>, cleanup: Arc<dyn CapsuleCleanup>) -> Self {
         Self {
             runner,
+            file_publisher: None,
             cleanup,
             checkpoints: None,
             execution_seed: Vec::new(),

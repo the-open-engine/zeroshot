@@ -205,6 +205,7 @@ impl<'a> CopilotRpc<'a> {
         &mut self,
         turn: CopilotRpcTurn<'_>,
     ) -> Result<WorkerOutcome, NodeRunnerError> {
+        self.workspace = turn.files.workspace.clone();
         self.connect().await?;
         let resume = turn.session.id.lock().await.clone();
         self.session_id = resume
@@ -309,6 +310,7 @@ impl<'a> CopilotRpc<'a> {
             &self.invocation.response,
             text,
             ProviderSchemaDialect::OpenAiStrict,
+            Some(&self.workspace),
         )?;
         if let Some(error) = response.correction_error() {
             if let Some(mut output) = provider_error_output("Copilot", &error, &self.redactions)? {

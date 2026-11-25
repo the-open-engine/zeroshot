@@ -354,7 +354,15 @@ async fn harness_with_options(
             } else {
                 json!({})
             };
-            if name == "wait" {
+            if name == "wait"
+                || crate::native_v2_request::find(
+                    &graph.root,
+                    &NodeName::new(name.clone()).assert_value(),
+                )
+                .is_some_and(|node| {
+                    node.worker.as_str() == crate::native_v2_request::ASK_WORKER_REF
+                })
+            {
                 return (name, json!({"kind":"request"}));
             }
             (
@@ -491,3 +499,6 @@ mod concurrency;
 
 #[path = "tests/input_sizes.rs"]
 mod input_sizes;
+
+#[path = "tests/artifacts.rs"]
+mod artifacts;

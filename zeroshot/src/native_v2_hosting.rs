@@ -101,6 +101,10 @@ pub async fn build_production_target_authority(
 /// Host-owned non-secret capabilities used to compose one installed target.
 #[derive(Clone)]
 pub struct ProductionHostingConfig {
+    pub file_store: Option<(
+        Arc<crate::native_v2_files::DiskFileStore>,
+        openengine_cluster_server::identity::ConnectionIdentity,
+    )>,
     /// User-facing size choices. Private capsules retain sizes already admitted by their host.
     pub run_sizes: Option<TargetRunSizesDiscovery>,
     /// Optional host facts sampled for each agent execution, including resumed attempts.
@@ -520,6 +524,7 @@ fn set_traversable_directory(_path: &std::path::Path) -> Result<(), std::io::Err
 impl Default for ProductionHostingConfig {
     fn default() -> Self {
         Self {
+            file_store: None,
             run_sizes: None,
             agent_context: None,
             memory_storage: None,

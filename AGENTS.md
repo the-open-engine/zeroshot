@@ -2425,6 +2425,40 @@ cd ../..
 python -m mkdocs build --strict
 ```
 
+## Explicit file publication
+
+- `PayloadType::Filepath` validates regular files/folders under the execution workspace through the
+  shared response correction path. Plain strings have no filesystem effect; ordinary results never
+  publish files. Request verifiers and `succeed` nodes own optional literal/typed-binding `artifacts`.
+  Only executed requests and outer graph success publish; profile success only continues its caller.
+  Keep the local provider-response regression separate from its Linux `root_` contained regression;
+  native and coverage CI select `root_` through their privileged runners. Assert the contained
+  worker identity on initial and correction turns so an unprivileged pass cannot stand in for it.
+- Allocators inject `RunFilePublisher`. Managed capture commits the complete set and stable owner
+  receipt atomically before visibility/runner closure; request intent durably freezes its request ID
+  before capture. Production controller startup reconciles committed request/final receipts before
+  generic runtime-loss settlement, using existing checkpoint authority and no replacement agents
+  or credential resolution. Recovery reuses that receipt even after workspace loss. The catalog retains
+  request-vs-final access context for reads and pins. Final references live in result metadata;
+  request attachments are omitted from ordinary status/vector views and retained in the inbox.
+  Generic history definitions, pages, SSE and run lists use the same suspension redaction;
+  private request-preparation payloads stay hidden while their event cursors remain contiguous.
+  Publication hosts must preflight the complete receipt through the caller's record/response
+  validator before importing bytes or committing names, and on replay. Reuse ledger limits for
+  final, request-vector and suspension envelopes; never substitute an artifact-count quota.
+- Local in-place `PublishedFile::Local` references retain the recorded working root and relative
+  live path and recheck confinement on open. They never enter managed storage or its cleanup scope.
+  Resolve against the frozen canonical root without rebasing it during publication or opening;
+  refuse redirected roots and keep the existing no-follow transfer open.
+  `HostFilePublication` remains the private low-level file-host publication API.
+- `zeroshot cleanup` is explicit local/direct-target retention: publication age and the latest
+  terminal checkpoint attempt must reach 60 days unless `--all`. Freeze eligible publication IDs
+  before reading run liveness; deletion is restricted to that frozen set under the catalog lock,
+  so a publication committed during cleanup cannot enter its selection. Pending work stays protected;
+  checkpoint removal reuses discard/resume locks and file pins preserve accepted inputs. Reads,
+  elapsed time and startup never release retained disk data. Libraries, local outputs and ledgers
+  remain outside selection. `terminal_recorded_at` is ledger-owned replay state, not wire metadata.
+
 ## Release convention
 
 - Build-time GitHub Release assets use `scripts/distribution/github-release-asset.js` and the
@@ -2517,7 +2551,7 @@ python -m mkdocs build --strict
   Pins retain whole selections across replacement/deletion. Stable operations distinguish reusable
   replacements, staged run inputs, request publications and final publications; released pins cannot
   be revived, and released publication names cannot be reused. Managed publications alone populate the host-written runs namespace. Live local
-  references stay host-only. Do not resolve missing target paths against a checkout or another target.
+  output references are placement-specific result metadata; their bytes stay outside that namespace. Do not resolve missing target paths against a checkout or another target.
 - Local file commands use local state. Direct targets mount the same adapter under their persistent
   storage root; custom/hosted servers explicitly opt in with `TargetFilesMount`. Older hosts omit
   the extension. Streaming uses bounded buffers, complete framing/digests, private staging and

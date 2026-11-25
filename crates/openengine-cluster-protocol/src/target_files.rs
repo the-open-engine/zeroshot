@@ -171,6 +171,9 @@ impl From<FileEntry> for FileEntryWire {
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum FileRequest {
+    Cleanup {
+        all: bool,
+    },
     List {
         scope: FileScope,
         path: FilePath,
@@ -193,6 +196,11 @@ pub enum FileRequest {
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum FileResponse {
+    Cleaned {
+        publications: u64,
+        #[serde(rename = "checkpointLineages")]
+        checkpoint_lineages: u64,
+    },
     List {
         paths: Vec<FileAddress>,
     },

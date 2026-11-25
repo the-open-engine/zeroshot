@@ -463,3 +463,18 @@ fn compiled_node_diff_is_sorted_and_rejects_duplicate_names() {
         Err(CanonicalError::DuplicateNodeName(name)) if name.as_str() == "one"
     ));
 }
+
+#[test]
+fn artifact_literals_and_bindings_participate_in_graph_identity() {
+    let base = ir(&["a"], &["one"]);
+    let initial = base.identity().assert_value();
+    for declaration in [
+        json!({"kind":"literal","path":"report"}),
+        json!({"kind":"binding","value":{"source":"state","path":["file"]}}),
+    ] {
+        let mut value = serde_json::to_value(&base).assert_value();
+        value["root"]["children"][1]["children"][0]["artifacts"] = json!({"report":declaration});
+        let changed: CompiledGraphIr = serde_json::from_value(value).assert_value();
+        assert_ne!(initial, changed.identity().assert_value());
+    }
+}

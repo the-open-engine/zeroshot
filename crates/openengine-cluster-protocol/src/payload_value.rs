@@ -45,6 +45,13 @@ impl PayloadType {
             Self::Integer => expect_type(is_json_integer(value), path, "integer"),
             Self::Number => expect_type(value.as_f64().is_some_and(f64::is_finite), path, "number"),
             Self::String => expect_type(value.is_string(), path, "string"),
+            Self::Filepath => expect_type(
+                value
+                    .as_str()
+                    .is_some_and(|path| !path.is_empty() && !path.chars().any(char::is_control)),
+                path,
+                "filepath",
+            ),
             Self::Enum { values } => validate_enum(values, value, path),
             Self::Array { items } => validate_array(items, value, path),
             Self::Record { fields } => validate_record(fields, value, path),
@@ -112,7 +119,8 @@ fn implicit_empty_value(payload: &PayloadType) -> Option<Value> {
             }
             Some(Value::Object(object))
         }
-        PayloadType::Boolean
+        PayloadType::Filepath
+        | PayloadType::Boolean
         | PayloadType::Integer
         | PayloadType::Number
         | PayloadType::Enum { .. } => None,

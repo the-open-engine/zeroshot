@@ -194,3 +194,50 @@ fn imported_bytes_nodes_and_depth_remain_bounded() {
     assert!(bounded.to_string().len() <= 4096);
     assert!(!bounded.to_string().contains('\n'));
 }
+
+#[tokio::test]
+async fn profile_linking_preserves_both_artifact_forms() {
+    let mut leaf = done("done");
+    leaf["artifacts"] = json!({"literal":{"kind":"literal","path":"report"},
+        "bound":{"kind":"binding","value":{"source":"state","path":["file"]}}});
+    let input: openengine_cluster_protocol::PayloadType = serde_json::from_value(
+        json!({"kind":"record","fields":{"file":{"required":true,"type":{"kind":"filepath"}}}}),
+    )
+    .assert_value();
+    let mut parent = definition(import("call", "leaf"));
+    parent.0.initial_input = input.clone();
+    if let openengine_cluster_protocol::GraphNode::Seq(root) = &mut parent.0.root {
+        root.state = input.clone();
+    }
+    let mut leaf = definition(leaf);
+    leaf.0.initial_input = input;
+    let catalog = [(RunProfileName::new("leaf").assert_value(), leaf)]
+        .into_iter()
+        .collect();
+    let (expanded, runtime) = expand(parent, &catalog).assert_value();
+    crate::native_v2_admission::NativeV2Admission
+        .validate_profile(
+            &expanded,
+            &runtime,
+            crate::native_v2_admission::DeliveryPolicy::Optional,
+        )
+        .await
+        .assert_value();
+    let value = serde_json::to_value(&expanded).assert_value();
+    assert!(value.to_string().contains("\"literal\""));
+    assert!(value.to_string().contains("\"binding\""));
+    let first = openengine_cluster_protocol::canonical_value_bytes(
+        &serde_json::to_value(&expanded).assert_value(),
+    )
+    .assert_value();
+    let mut changed = value;
+    changed["root"]["children"][0]["body"]["artifacts"]["literal"]["path"] = json!("other");
+    let changed: GraphSpec = serde_json::from_value(changed).assert_value();
+    assert_ne!(
+        first,
+        openengine_cluster_protocol::canonical_value_bytes(
+            &serde_json::to_value(changed).assert_value()
+        )
+        .assert_value()
+    );
+}

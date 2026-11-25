@@ -64,7 +64,36 @@ pub async fn execute(
                 target: "local",
                 identity: &identity,
             };
-            local_file_request(&store, &access, command.request, staged)?
+            if let FileRequest::Cleanup { all } = command.request {
+                let now = openengine_cluster_protocol::UnixTimestampMillis::new(
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_err(std::io::Error::other)?
+                        .as_millis()
+                        .try_into()
+                        .map_err(std::io::Error::other)?,
+                )
+                .map_err(std::io::Error::other)?;
+                let backend = zeroshot_engine::native_v2_cli::local::LocalCliBackend::production()?;
+                let candidates = store.select_publications(&access, now, all)?;
+                let protected = backend.protected_file_runs().await?;
+                let checkpoint_lineages = backend.cleanup_checkpoints(all, now).await?;
+                let publications = store.cleanup_publications(
+                    &access,
+                    &zeroshot_engine::native_v2_files::FileRetention {
+                        candidates: &candidates,
+                        now,
+                        all,
+                        protected: &protected,
+                    },
+                )?;
+                FileReply::Json(FileResponse::Cleaned {
+                    publications: publications as u64,
+                    checkpoint_lineages: checkpoint_lineages as u64,
+                })
+            } else {
+                local_file_request(&store, &access, command.request, staged)?
+            }
         }
         _ => {
             return Err(NativeV2CliError::Target(
@@ -82,6 +111,11 @@ fn local_file_request(
     mut staged: FileTransfer,
 ) -> Result<FileReply, NativeV2CliError> {
     Ok(match request {
+        FileRequest::Cleanup { .. } => {
+            return Err(NativeV2CliError::Usage(
+                "cleanup requires the owning host".to_owned(),
+            ));
+        }
         FileRequest::List { scope, path } => FileReply::Json(FileResponse::List {
             paths: store.list(access, scope, &path)?,
         }),

@@ -379,3 +379,120 @@ mod regressions;
 
 #[path = "native_v2_files/failures.rs"]
 mod failures;
+
+#[tokio::test]
+async fn cleanup_cli_retains_libraries_and_live_outputs_on_local_and_direct_disk_hosts() {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use openengine_cluster_protocol::{FieldName, RunId, UnixTimestampMillis};
+    use openengine_cluster_server::identity::{
+        BindingAttributes, ConnectionIdentity, ConnectionIdentityConfig, PrincipalId, TenantId,
+    };
+    use zeroshot_engine::execution::driver::DriverCancellation;
+    use zeroshot_engine::native_v2_files::{
+        DiskFileStore, FileAccess, FilePublicationOwner, SingleAccountFiles,
+    };
+    use zeroshot_engine::native_v2_files::publication::FilePublication;
+    for direct in [false, true] {
+        let fixture = Fixture::new();
+        let source = fixture.source();
+        let principal = if direct { "direct-target" } else { "local" };
+        let mut child = None;
+        if direct {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let listen = listener.local_addr().unwrap();
+            drop(listener);
+            child = Some(fixture.serve(listen).await);
+            let added = fixture
+                .command()
+                .args([
+                    "target",
+                    "add",
+                    "disk",
+                    "--url",
+                    &format!("http://{listen}"),
+                    "--direct",
+                ])
+                .output()
+                .await
+                .unwrap();
+            assert!(
+                added.status.success(),
+                "{}",
+                String::from_utf8_lossy(&added.stderr)
+            );
+        }
+        let target_args: &[&str] = if direct { &["--target", "disk"] } else { &[] };
+        let mut upload = vec![
+            "file",
+            "upload",
+            source.to_str().unwrap(),
+            "library",
+            "--operation",
+            "retained-library",
+        ];
+        upload.extend_from_slice(target_args);
+        fixture.cli(&upload).await;
+        let store_root = fixture.root.path().join(if direct {
+            "volume/files"
+        } else {
+            "state/files"
+        });
+        let store = DiskFileStore::open(
+            store_root,
+            principal.to_owned(),
+            Arc::new(SingleAccountFiles {
+                principal: principal.to_owned(),
+                tenant: principal.to_owned(),
+            }),
+        )
+        .unwrap();
+        let identity = ConnectionIdentity::new(ConnectionIdentityConfig {
+            principal: PrincipalId::new(principal),
+            tenant: TenantId::new(principal),
+            issued_at_ms: None,
+            expires_at_ms: u64::MAX,
+            binding_attributes: BindingAttributes::default(),
+        });
+        let (_sender, cancellation) = tokio::sync::watch::channel(false);
+        let selected = BTreeMap::from([(FieldName::new("tree").unwrap(), "source".to_owned())]);
+        store
+            .capture_publication(
+                &FileAccess {
+                    target: principal,
+                    identity: &identity,
+                },
+                fixture.root.path(),
+                &FilePublication {
+                    owner: FilePublicationOwner::Final {
+                        run_id: RunId::new("retained-publication"),
+                    },
+                    paths: selected,
+                    now: UnixTimestampMillis::new(1).unwrap(),
+                    cancellation: DriverCancellation::new(cancellation),
+                    preflight: Arc::new(|_| Ok(())),
+                },
+            )
+            .unwrap();
+        drop(store);
+        let mut cleanup = vec!["cleanup"];
+        cleanup.extend_from_slice(target_args);
+        let first = fixture.cli(&cleanup).await;
+        assert_eq!(first["publications"], 1);
+        assert_eq!(first["checkpointLineages"], 0);
+        assert_eq!(fixture.cli(&cleanup).await["publications"], 0);
+        cleanup.push("--all");
+        assert_eq!(fixture.cli(&cleanup).await["publications"], 0);
+        let mut list = vec!["file", "list"];
+        list.extend_from_slice(target_args);
+        assert_eq!(
+            fixture.cli(&list).await["paths"].as_array().unwrap().len(),
+            1
+        );
+        assert_tree(&source); // The user's working files are never a cleanup selection.
+        if let Some(child) = &mut child {
+            child.kill().await.unwrap();
+            child.wait().await.unwrap();
+        }
+    }
+}
