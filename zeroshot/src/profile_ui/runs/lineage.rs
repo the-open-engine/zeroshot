@@ -186,7 +186,7 @@ impl NativeRunHistory {
         }
         merge_usage(&mut total, detail.metadata.token_usage.as_ref()).map_err(ledger_error)?;
         detail.metadata.token_usage = total;
-        grouped_definition(family.parts(), detail).ok_or_else(unavailable)
+        grouped_definition(family.parts(), json!(detail)).ok_or_else(unavailable)
     }
 
     async fn browser_page(

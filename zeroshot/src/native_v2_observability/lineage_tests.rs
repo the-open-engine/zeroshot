@@ -2,6 +2,26 @@ use super::*;
 use std::{collections::HashMap, convert::Infallible, future::ready};
 
 #[test]
+fn grouped_history_preserves_worker_owned_definition_documents() {
+    use crate::native_v2_observability::history::parts::grouped_definition;
+    use serde_json::json;
+
+    let parts = [RunId::new("original"), RunId::new("resumed")];
+    let graph = json!({"version": 1, "nodes": []});
+    let runtime = json!({"workerSettings": {"provider": "archived"}});
+    let saved = json!({
+        "runId": "resumed", "phase": "suspended", "cursor": "v2:4",
+        "history": {"complete": true}, "graph": graph, "runtime": runtime,
+    });
+    let grouped = grouped_definition(&parts, saved).expect("validated history envelope");
+    assert_eq!(grouped["graph"], graph);
+    assert_eq!(grouped["runtime"], runtime);
+    assert_eq!(grouped["runId"], "original");
+    assert_eq!(grouped["history"]["cursor"], "resumed@v2:4");
+    assert_eq!(grouped["history"]["complete"], false);
+}
+
+#[test]
 fn provisional_failure_diagnostics_link_to_logical_logs_once() {
     let mut status: RunStatus = serde_json::from_value(serde_json::json!({
         "phase":"running", "activeExecutions":[], "graphResult":{

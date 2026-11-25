@@ -4,11 +4,9 @@ use std::collections::HashSet;
 use openengine_cluster_protocol::{Cursor, RunId};
 use serde_json::{json, Value};
 
-use super::{
-    created_at, HistoryPage, ObservationState, RunDefinition, RunHistorySummary, RunHistoryPhase,
-};
+use super::{created_at, HistoryPage, ObservationState, RunHistorySummary, RunHistoryPhase};
 pub use crate::native_v2_observability::lineage::{part_cursor, scope_diagnostic_cursors, split_cursor};
-use crate::v2_run_ledger::{initial_cursor, RunPhase};
+use crate::v2_run_ledger::initial_cursor;
 
 /// Project the current part's menu entry under the original submission.
 pub fn grouped_summary(root: &RunId, count: usize, entry: RunHistorySummary) -> Value {
@@ -26,21 +24,27 @@ pub fn grouped_summary(root: &RunId, count: usize, entry: RunHistorySummary) -> 
     row
 }
 
-/// Qualify the current definition for the supplied ordered, authorized run parts.
-/// The host supplies aggregate usage and owns the lifecycle of the current part.
-pub fn grouped_definition(parts: &[RunId], mut detail: RunDefinition) -> Option<Value> {
+/// Group an authorized, validated history envelope. Graph and runtime documents stay
+/// in their original form, including definitions written by earlier workers.
+pub fn grouped_definition(parts: &[RunId], mut body: Value) -> Option<Value> {
     let root = parts.first()?;
     let head = parts.last()?;
-    if &detail.run_id != head {
+    if body["runId"].as_str()? != head.as_str() {
         return None;
     }
-    detail.cursor = part_cursor(head, &detail.cursor);
-    detail.history.cursor = detail.cursor.clone();
-    detail.history.initial_cursor = part_cursor(root, &initial_cursor());
-    detail.history.complete = detail.phase == RunPhase::Finished && detail.history.complete;
-    detail.created_at = created_at(root);
-    detail.run_id = root.clone();
-    let mut body = json!(detail);
+    let cursor = json!(part_cursor(head, &Cursor::new(body["cursor"].as_str()?)));
+    let finished = body["phase"].as_str()? == "finished";
+    let history = body["history"].as_object_mut()?;
+    let complete = history.get("complete")?.as_bool()?;
+    history.insert("complete".into(), json!(finished && complete));
+    history.insert(
+        "initialCursor".into(),
+        json!(part_cursor(root, &initial_cursor())),
+    );
+    history.insert("cursor".into(), cursor.clone());
+    body["cursor"] = cursor;
+    body["createdAt"] = json!(created_at(root));
+    body["runId"] = json!(root);
     body["currentPartId"] = json!(head);
     body["partId"] = json!(head);
     body["parts"] = json!(parts);
