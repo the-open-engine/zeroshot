@@ -1,7 +1,6 @@
 use super::*;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use rustls::pki_types::PrivateKeyDer;
 
 pub(super) struct TlsFixture {
     pub inner: Fixture,
@@ -107,24 +106,7 @@ impl TlsFixture {
 
     pub async fn new() -> Self {
         let root = tempfile::tempdir().unwrap();
-        let mut ca_params = rcgen::CertificateParams::new(vec![]).unwrap();
-        ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
-        let ca_key = rcgen::KeyPair::generate().unwrap();
-        let ca = ca_params.self_signed(&ca_key).unwrap();
-        let key = rcgen::KeyPair::generate().unwrap();
-        let params = rcgen::CertificateParams::new(vec!["127.0.0.1".into()]).unwrap();
-        let cert = params.signed_by(&key, &ca, &ca_key).unwrap();
-        let config = rustls::ServerConfig::builder_with_provider(Arc::new(
-            rustls::crypto::ring::default_provider(),
-        ))
-        .with_safe_default_protocol_versions()
-        .unwrap()
-        .with_no_client_auth()
-        .with_single_cert(
-            vec![cert.der().clone(), ca.der().clone()],
-            PrivateKeyDer::try_from(key.serialize_der()).unwrap(),
-        )
-        .unwrap();
+        let ca_file = root.path().join("private-ca.pem");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let base = SourceForgeBaseUrl::new(format!("https://{address}/service")).unwrap();
@@ -133,10 +115,13 @@ impl TlsFixture {
         let origin = base.to_string();
         let server = tokio::spawn(http_fixture::serve_tls(
             listener,
-            tokio_rustls::TlsAcceptor::from(Arc::new(config)),
+            http_fixture::loopback_tls(&ca_file),
             move |request| {
                 if request.uri.path() == "/api/v3/repos/acme/project" {
-                    assert_eq!(request.headers["authorization"], "token test-private-token");
+                    assert_eq!(
+                        request.headers["authorization"],
+                        "Bearer test-private-token"
+                    );
                     return Json(json!({"full_name":"acme/project"}))
                         .into_response()
                         .header("X-GitHub-Enterprise-Version", "enterprise-server@3.22.2");
@@ -151,11 +136,9 @@ impl TlsFixture {
                         return access_response(&state, request, &origin);
                     }
                 }
-                handler(&state, request).replace_origin(&origin)
+                handler(&state, request).replace_origin(ORIGIN, &origin)
             },
         ));
-        let ca_file = root.path().join("private-ca.pem");
-        std::fs::write(&ca_file, ca.pem()).unwrap();
         Self {
             inner,
             address,

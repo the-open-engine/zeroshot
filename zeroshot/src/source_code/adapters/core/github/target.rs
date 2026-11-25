@@ -2,7 +2,7 @@
 use super::*;
 use serde::Deserialize;
 use crate::source_code_provider::DeliveryTarget;
-use super::wire::{GitReferenceWire, reference_revision};
+use super::wire::reference_revision;
 
 pub(super) async fn reconcile(
     authority: &GhCliDeliveryAuthority,
@@ -64,29 +64,10 @@ async fn queue_owns_integration(
         .split_once('/')
         .filter(|(owner, name)| !owner.is_empty() && !name.is_empty() && !name.contains('/'))
         .ok_or(SourceDeliveryError::Rejected)?;
+    let variables = json!({"owner": owner, "name": name, "branch": target.target_branch});
     let value = authority
-        .api(
-            &[
-                "graphql".to_owned(),
-                "-f".to_owned(),
-                format!("query={TARGET_QUEUE_QUERY}"),
-                "-f".to_owned(),
-                format!("owner={owner}"),
-                "-f".to_owned(),
-                format!("name={name}"),
-                "-f".to_owned(),
-                format!("branch={}", target.target_branch),
-            ],
-            credential,
-        )
+        .graphql(TARGET_QUEUE_QUERY, &variables, credential)
         .await?;
-    // GraphQL may supply data alongside errors. Partial authority never confirms a queue.
-    if value.get("errors").is_some() {
-        return Err(SourceDeliveryError::api(
-            None,
-            "GitHub returned incomplete target queue policy",
-        ));
-    }
     let response: TargetQueueResponse = authority.decode_response(value, credential)?;
     if response.data.repository.name_with_owner != target.repository {
         return Err(SourceDeliveryError::Rejected);
@@ -107,16 +88,9 @@ async fn observe_target(
     target: &DeliveryTarget,
     credential: SourceDeliveryCredential<'_>,
 ) -> Result<String, SourceDeliveryError> {
-    let value = authority
-        .api(
-            &[format!(
-                "repos/{}/git/ref/heads/{}",
-                target.repository, target.target_branch
-            )],
-            credential,
-        )
+    let reference = authority
+        .read_reference(&target.repository, &target.target_branch, credential)
         .await?;
-    let reference: GitReferenceWire = authority.decode_response(value, credential)?;
     reference_revision(reference, &target.target_branch)
 }
 

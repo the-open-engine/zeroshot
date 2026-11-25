@@ -178,7 +178,6 @@ impl ProductionCapsuleAllocator {
             || config.claude_executable.is_empty()
             || config.pi_executable.is_empty()
             || config.git_program.as_os_str().is_empty()
-            || config.gh_program.as_os_str().is_empty()
         {
             return Err(ProductionHostingError::CapsuleConfiguration);
         }

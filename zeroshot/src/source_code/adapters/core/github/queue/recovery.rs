@@ -80,21 +80,15 @@ pub(super) async fn recover(
     removed: (QueueAdmission, String),
 ) -> Result<(), SourceDeliveryError> {
     let (admission, removal_id) = removed;
-    let mut effects = authority.queue_effects.0.lock().await;
+    let mut effects = authority.merge_effects.0.lock().await;
     let Some(effect) = effects.get_mut(&identity(review)) else {
         return pending(snapshot);
     };
-    if effect
-        .settled
-        .as_ref()
-        .and_then(|result| result.as_ref().ok())
-        != Some(&admission)
-        || effect.recovered_removals.contains(&removal_id)
-    {
+    if effect.admission() != Some(&admission) || effect.recovered_removals.contains(&removal_id) {
         return pending(snapshot);
     }
     effect.recoverable = None;
-    if effect.uncertain {
+    if effect.queue_uncertain || effect.direct_confirmation_required {
         return Err(SourceDeliveryError::api(
             None,
             "Merge queue conflict cannot release an earlier unconfirmed submission",

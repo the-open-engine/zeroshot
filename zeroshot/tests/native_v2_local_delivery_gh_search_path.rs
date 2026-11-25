@@ -1,24 +1,34 @@
 #![cfg(unix)]
 
-//! Local PR and ship delivery must run the GitHub CLI that the user's PATH finds.
-//!
-//! A local `zeroshot run --pr` or `--ship` captures the invoking shell's PATH. Delivery must start
-//! the `gh` that this PATH resolves, including directories outside the system's default search
-//! path, such as Homebrew's `/opt/homebrew/bin` or `~/.local/bin`. When that PATH has no `gh`, the
-//! change cannot be delivered, so the run must be rejected before any agent starts.
+//! Local delivery captures the caller's Git and native HTTPS settings.
 
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command as StdCommand, Output};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use openengine_cluster_testkit::TemporaryDirectory;
 use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::{Value, json};
+use reqwest::{Method, StatusCode};
+use tokio::net::TcpListener;
 use tokio::process::Command;
+use tokio::sync::Notify;
+use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
+#[allow(dead_code)]
+#[path = "../src/source_code/adapters/core/tests/http_fixture.rs"]
+mod http_fixture;
+use http_fixture::{IntoResponse, Json, Request, Response};
+
+const TOKEN: &str = "fixture-github-token";
+const REJECTED_TOKEN: &str = "rejected-checkpoint-token";
+const PROXY: &str = "http://caller:checkpoint-proxy-secret@127.0.0.1:9";
+const NO_PROXY: &str = "127.0.0.1,caller-bypass.invalid";
 const CLI_TIMEOUT: Duration = Duration::from_secs(90);
 const DELIVERY_FLAGS: [&str; 2] = ["--pr", "--ship"];
 
@@ -26,86 +36,61 @@ const DELIVERY_FLAGS: [&str; 2] = ["--pr", "--ship"];
 mod checkpoint_tests;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn local_delivery_starts_the_gh_that_the_users_path_finds() {
+async fn local_delivery_starts_the_git_that_the_users_path_finds() {
     for flag in DELIVERY_FLAGS {
-        let fixture = DeliveryFixture::new();
+        let fixture = DeliveryFixture::new().await;
         let homebrew = fixture.root.path("opt-homebrew-bin");
         fs::create_dir_all(&homebrew).assert_value_with("create Homebrew-style directory");
-        fixture.write_fake_gh(&homebrew.join("gh"));
+        fs::rename(fixture.bin.join("git"), homebrew.join("git")).assert_value();
+        openengine_cluster_testkit::fixture::write_executable(
+            &homebrew.join("gh"),
+            format!(
+                "#!/bin/sh
+printf '%s\n' used > '{}'
+exit 1
+",
+                fixture.root.path("gh.log").display()
+            ),
+            0o755,
+        )
+        .assert_value();
         let search_path = search_path(&[
             fixture.bin.clone(),
             homebrew.clone(),
             PathBuf::from("/usr/bin"),
             PathBuf::from("/bin"),
         ]);
-        assert_eq!(
-            find_on(&search_path, "gh"),
-            Some(homebrew.join("gh")),
-            "precondition: the user's PATH must resolve gh to the Homebrew-style directory"
-        );
+        assert_eq!(find_on(&search_path, "git"), Some(homebrew.join("git")));
 
         let run = fixture.run(flag, &search_path).await;
-        let report = fixture.report(flag, &run);
-        assert!(
-            String::from_utf8_lossy(&run.stdout).contains(r#""node":"deliver""#)
-                || String::from_utf8_lossy(&run.stderr).contains("Node deliver"),
-            "precondition: the agents must accept the change and start delivery\n{report}"
-        );
-        let invocation = fs::read_to_string(&fixture.gh_log).ok();
+        fixture.assert_delivery_started(flag, &run);
+        let invocation = fs::read_to_string(&fixture.git_log).assert_value();
         assert!(
             invocation
-                .as_deref()
-                .is_some_and(|log| log.lines().next() == Some("arg=api")),
-            "local {flag} delivery never started the gh at {} that the user's PATH finds; \
-             delivery must resolve gh through the captured PATH\n{report}",
-            homebrew.join("gh").display()
+                .lines()
+                .any(|line| Path::new(line) == homebrew.join("git"))
         );
+        assert!(!fixture.root.path("gh.log").exists());
     }
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn local_delivery_without_gh_on_the_users_path_is_rejected_before_agents_start() {
+async fn local_delivery_without_gh_on_the_users_path_reaches_native_forge() {
     for flag in DELIVERY_FLAGS {
-        let fixture = DeliveryFixture::new();
-        // Only the fake harness and the host tools this run needs, so no system gh is reachable.
-        let tools = fixture.root.path("tools");
-        fs::create_dir_all(&tools).assert_value_with("create host tool directory");
-        for tool in ["git", "cat", "grep"] {
-            std::os::unix::fs::symlink(host_executable(tool), tools.join(tool))
-                .assert_value_with("link host tool");
-        }
+        let fixture = DeliveryFixture::new().await;
+        let tools = fixture.link_host_tools();
         let search_path = search_path(&[fixture.bin.clone(), tools]);
-        assert_eq!(
-            find_on(&search_path, "gh"),
-            None,
-            "precondition: the user's PATH must not contain gh"
-        );
+        assert_eq!(find_on(&search_path, "gh"), None);
 
         let run = fixture.run(flag, &search_path).await;
-        let report = fixture.report(flag, &run);
-        assert!(
-            !fixture.codex_log.exists(),
-            "local {flag} run was admitted and its agents ran although the user's PATH has no gh, \
-             so the change could never be delivered; admission must reject it first\n{report}"
-        );
-        assert!(
-            !run.status.success(),
-            "local {flag} run without gh must fail\n{report}"
-        );
-        assert!(
-            String::from_utf8_lossy(&run.stderr)
-                .split(|character: char| !character.is_ascii_alphanumeric())
-                .any(|word| word == "gh"),
-            "the local {flag} rejection must name the missing gh executable\n{report}"
-        );
+        fixture.assert_delivery_started(flag, &run);
     }
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn local_delivery_rejects_preexisting_changes_before_agents_start() {
     for flag in ["--push", "--pr", "--ship"] {
-        let fixture = DeliveryFixture::new();
-        fixture.write_fake_gh(&fixture.bin.join("gh"));
+        let fixture = DeliveryFixture::new().await;
         git(
             &fixture.repository,
             &["config", "core.excludesFile", "../excludes"],
@@ -149,12 +134,17 @@ struct DeliveryFixture {
     repository: PathBuf,
     state: PathBuf,
     codex_log: PathBuf,
-    gh_log: PathBuf,
+    git_log: PathBuf,
+    forge_host: String,
+    root_ca: PathBuf,
+    ca_file: PathBuf,
+    forge: Arc<Forge>,
+    server: JoinHandle<()>,
 }
 
 impl DeliveryFixture {
-    fn new() -> Self {
-        let root = TemporaryDirectory::for_test("zv2gh");
+    async fn new() -> Self {
+        let root = TemporaryDirectory::for_test("zv2forge");
         assert!(
             !root.as_path().to_string_lossy().contains('\''),
             "fixture paths must not need shell quoting"
@@ -173,16 +163,29 @@ impl DeliveryFixture {
             .assert_value_with("write run input");
         fs::write(
             root.path("runtime.json"),
-            // The delivery stand-in changes files on every invocation; this test isolates gh lookup.
             br#"{"harness":"codex","provider":"openai","model":"gpt-5.6","effort":"high","activeMemory":{"repository":false,"graph":false},"connections":{"openai":["OPENAI_API_KEY"]}}"#,
         )
         .assert_value_with("write uniform runtime");
+        let listener = TcpListener::bind("127.0.0.1:0").await.assert_value();
+        let forge_host = listener.local_addr().assert_value().to_string();
+        let root_ca = root.path("forge-ca.pem");
+        let tls = http_fixture::loopback_tls(&root_ca);
+        let forge = Arc::new(Forge::default());
+        let server = tokio::spawn(http_fixture::serve_tls(listener, tls, {
+            let forge = forge.clone();
+            move |request| forge.reply(request)
+        }));
         let fixture = Self {
             bin,
             state: root.path("state"),
             codex_log: root.path("codex.log"),
-            gh_log: root.path("gh.log"),
+            git_log: root.path("git.log"),
             repository,
+            forge_host,
+            ca_file: root_ca.clone(),
+            root_ca,
+            forge,
+            server,
             root,
         };
         fixture.write_fake_codex();
@@ -199,13 +202,24 @@ impl DeliveryFixture {
         let path = |name: &str| self.root.path(name);
         let mut command = self.command(search_path);
         command
-            .args(["run", "--title", "Local delivery gh lookup", "--template"])
+            .args(["run", "--title", "Local delivery HTTPS", "--template"])
             .arg("software-change")
             .args(flags)
             .arg("--input")
             .arg(path("input.json"))
             .arg("--uniform-runtime-config")
             .arg(path("runtime.json"));
+        if flags
+            .iter()
+            .any(|flag| matches!(*flag, "--push" | "--pr" | "--ship"))
+        {
+            command.args([
+                "--source-provider",
+                "source.github",
+                "--source-base-url",
+                &format!("https://{}", self.forge_host),
+            ]);
+        }
         timeout(CLI_TIMEOUT, command.output())
             .await
             .assert_value_with("local run deadline")
@@ -223,25 +237,48 @@ impl DeliveryFixture {
             .env("ZEROSHOT_STATE_DIR", &self.state)
             .env("ZEROSHOT_CONFIG_DIR", path("config-blocker"))
             .env("OPENAI_API_KEY", "fixture-openai-key")
-            .env("GH_TOKEN", "fixture-github-token")
+            .env("GH_HOST", &self.forge_host)
+            .env("GH_ENTERPRISE_TOKEN", TOKEN)
+            .env("GH_TOKEN", TOKEN)
+            .env("SSL_CERT_FILE", &self.ca_file)
             .kill_on_drop(true);
+        if let Some(restic) = std::env::var_os("ZEROSHOT_RESTIC") {
+            command.env("ZEROSHOT_RESTIC", restic);
+        }
         command
     }
 
-    fn report(&self, flag: &str, run: &Output) -> String {
-        let read =
-            |path: &Path| fs::read_to_string(path).unwrap_or_else(|_| "<never started>".to_owned());
-        format!(
-            "--- zeroshot run --template software-change {flag} exit ---\n{}\n\
-             --- stderr ---\n{}\n--- stdout ---\n{}\n--- fake gh invocations ---\n{}\n\
-             --- fake codex turns ---\n{}",
+    fn assert_delivery_started(&self, flag: &str, run: &Output) {
+        let report = format!(
+            "delivery {flag} exit {}\n--- stderr ---\n{}\n--- stdout ---\n{}",
             run.status,
             String::from_utf8_lossy(&run.stderr),
             String::from_utf8_lossy(&run.stdout),
-            read(&self.gh_log),
-            read(&self.codex_log)
-        )
+        );
+        assert!(self.codex_log.exists(), "{report}");
+        assert_eq!(
+            self.forge.project_reads.load(Ordering::SeqCst),
+            1,
+            "{report}"
+        );
+        assert!(
+            String::from_utf8_lossy(&run.stdout).contains(r#""node":"deliver""#)
+                || String::from_utf8_lossy(&run.stderr).contains("Node deliver"),
+            "{report}",
+        );
     }
+
+    fn link_host_tools(&self) -> PathBuf {
+        let tools = self.root.path("host-tools");
+        fs::create_dir(&tools).assert_value();
+        let cleanup = cfg!(not(target_os = "linux")).then_some("ps");
+        for program in ["cat", "grep"].into_iter().chain(cleanup) {
+            std::os::unix::fs::symlink(host_executable(program), tools.join(program))
+                .assert_value();
+        }
+        tools
+    }
+
     fn write_fake_git(&self) {
         let real_git = host_executable("git");
 
@@ -262,6 +299,7 @@ impl DeliveryFixture {
     done
 
     if [ "$is_ls_remote" = true ] && [ -n "$requested_ref" ]; then
+        printf '%s\n' "$0" >> '{log}'
         printf '%s\t%s\n' '0123456789abcdef0123456789abcdef01234567' "$requested_ref"
         exit 0
     fi
@@ -269,31 +307,11 @@ impl DeliveryFixture {
     exec '{real_git}' "$@"
     "#,
                 real_git = real_git.display(),
+                log = self.git_log.display(),
             ),
             0o755,
         )
         .assert_value_with("write fake Git");
-    }
-
-    /// A GitHub CLI stand-in. Delivery clears its environment, so it logs to a fixed path.
-    fn write_fake_gh(&self, path: &Path) {
-        let log = self.gh_log.display();
-        openengine_cluster_testkit::fixture::write_executable(
-            path,
-            format!(
-                r#"#!/bin/sh
-for argument in "$@"; do printf 'arg=%s\n' "$argument"; done >> '{log}'
-printf '%s\n' '---' >> '{log}'
-if [ "$1" = api ] && [ "$2" = repos/acme/local-fixture ]; then
-    printf 'HTTP/2 200 OK\r\n\r\n{{"full_name":"acme/local-fixture"}}'
-    exit 0
-fi
-printf '%s\n' 'fixture gh returns no GitHub data'
-"#
-            ),
-            0o755,
-        )
-        .assert_value_with("write fake gh");
     }
 
     /// A Codex stand-in that changes the workspace and accepts every review it is asked for.
@@ -386,7 +404,7 @@ printf '%s\n' '{{"type":"turn.completed"}}'
                 "remote",
                 "add",
                 "origin",
-                "https://github.com/acme/local-fixture.git",
+                &format!("https://{}/acme/local-fixture.git", self.forge_host),
             ],
         );
     }
@@ -394,6 +412,7 @@ printf '%s\n' '{{"type":"turn.completed"}}'
 
 impl Drop for DeliveryFixture {
     fn drop(&mut self) {
+        self.server.abort();
         let Ok(runs) = fs::read_dir(self.state.join("runs")) else {
             return;
         };
@@ -412,6 +431,41 @@ impl Drop for DeliveryFixture {
                 }
             }
         }
+    }
+}
+
+#[derive(Default)]
+struct Forge {
+    project_reads: AtomicUsize,
+    stall: AtomicBool,
+    disconnected: Arc<Notify>,
+}
+
+impl Forge {
+    fn reply(&self, request: Request) -> Response {
+        if request.method != Method::GET || request.uri.path() != "/api/v3/repos/acme/local-fixture"
+        {
+            return StatusCode::NOT_FOUND.into_response();
+        }
+        self.project_reads.fetch_add(1, Ordering::SeqCst);
+        if self.stall.load(Ordering::SeqCst) {
+            return Response::stall_until_disconnect(self.disconnected.clone());
+        }
+        if request
+            .headers
+            .get("authorization")
+            .and_then(|value| value.to_str().ok())
+            != Some(&format!("Bearer {TOKEN}"))
+        {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"message": format!("rejected {REJECTED_TOKEN} at {PROXY}")})),
+            )
+                .into_response();
+        }
+        Json(json!({"full_name":"acme/local-fixture"}))
+            .into_response()
+            .header("x-github-enterprise-version", "enterprise-server@3.22.2")
     }
 }
 

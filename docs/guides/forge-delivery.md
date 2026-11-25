@@ -16,15 +16,11 @@ and issue or review comments.
 Instances must be reachable over HTTPS with certificate verification enabled. Local delivery honors
 the invoking shell's `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY`, their lower-case forms,
 `SSL_CERT_FILE` and `SSL_CERT_DIR`. Git transport, the early forge check and delivery use the same
-captured settings, including after `resume`; no stored network configuration is needed. GitLab
-accepts private CA certificates from the named PEM file or certificate directories. On Linux the
-GitHub CLI also honors those CA paths. On macOS and Windows that depends on the installed GitHub
-CLI: a release built with Go 1.27 or newer honors them, and an older release uses only the system
-certificate store. If the early check reports an untrusted certificate there, update the GitHub
-CLI or install your forge's CA in the system store. An unreadable certificate file is reported by
-name. Proxy credentials are kept private.
-Relative CA paths are anchored to the invoking directory before a delivery worktree is created.
-GitLab also supports `socks5://` and `socks5h://` proxy URLs through these same variables.
+captured settings, including after resume. GitHub and GitLab API requests use the captured proxy
+and CA settings. Both accept private CA certificates from the named PEM file or certificate
+directories and support `socks5://` and `socks5h://` proxy URLs. An unreadable certificate file
+is reported by name. Proxy credentials stay private. Relative CA paths are anchored to the invoking
+directory before a delivery worktree is created.
 
 Older or unidentifiable servers fail version checks. Use a web base without a trailing slash, including any GitLab installation
 prefix (such as `https://gitlab.example/install`). GitHub uses a root web URL.
@@ -85,7 +81,7 @@ Worktrees remain after success and failure; inspect and remove them explicitly
 with `git worktree remove PATH`. Use `git worktree list` from the invoking repository to find its
 path. Hosted and named-target delivery keep their managed run branches.
 
-GitHub delivery requires `gh`. GitLab needs `glab` only to reuse its native login. Sign in to the host you use:
+GitHub and GitLab delivery use native HTTPS clients. To reuse a CLI login, sign in to the selected host with `gh` or `glab`.
 
 ```console
 gh auth login --hostname github.com

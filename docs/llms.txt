@@ -33,7 +33,7 @@ deliver
 
 ## Also included
 
-- Delivery: `software-change` opens a pull request by default and addresses visible review feedback and required CI without merging. That needs a committed Git checkout with an HTTPS or SSH remote and, for GitHub, the `gh` CLI. `--delivery none` keeps the change local, `--push` pushes the run branch without a pull request, and `--ship` follows the repository's merge policy through to a merged revision.
+- Delivery: `software-change` opens a pull request by default and addresses visible review feedback and required CI without merging. That needs a committed Git checkout with an HTTPS or SSH remote and authenticated forge access. `--delivery none` keeps the change local, `--push` pushes the run branch without a pull request, and `--ship` follows the repository's merge policy through to a merged revision.
 - Execution targets: local, a self-hosted Docker target, or Zeroshot Platform (shared team queue, durable run history). Failed runs with a recoverable workspace can resume from a checkpoint.
 - Every run records its events in a durable SQLite ledger.
 - An `auto-research` graph runs ten bounded experiment iterations with independent review of evidence, method, and progress.

@@ -530,40 +530,23 @@ fn delivery_submission(source: &ResolvedSource) -> RunSubmission {
 
 #[cfg(unix)]
 #[test]
-fn delivery_pins_git_and_the_github_cli_that_the_captured_search_path_finds() {
+fn delivery_pins_git_from_the_captured_search_path() {
     let root = TestDirectory::new("delivery-programs-pinned");
     let (bin, environment) = search_directory(&root);
     install_executable(&bin, "git");
-    install_executable(&bin, "gh");
 
-    let required = crate::native_v2_delivery::DeliveryMode::PullRequest.required_capabilities();
-    let programs = local_delivery_programs(&github_source(), required, &environment, root.path())
-        .assert_value();
-    assert_eq!(programs.git, bin.join("git"));
-    assert_eq!(programs.gh, bin.join("gh"));
+    let program = local_delivery_git(&environment, root.path()).assert_value();
+    assert_eq!(program, bin.join("git"));
 }
 
 // Only Unix restricts lookup to the captured PATH; Windows retains native fallback searches.
 #[cfg(unix)]
 #[test]
-fn github_delivery_without_gh_or_git_on_the_captured_search_path_names_the_missing_program() {
+fn github_delivery_only_requires_git_on_the_captured_search_path() {
     let root = TestDirectory::new("delivery-programs-missing");
     let (bin, environment) = search_directory(&root);
     let submission = delivery_submission(&github_source());
 
-    install_executable(&bin, "git");
-    let error = check_delivery_executables(&submission, &environment, root.path()).assert_error();
-    assert!(matches!(
-        error,
-        LocalCompositionError::MissingDeliveryExecutable { executable: "gh" }
-    ));
-    assert_eq!(
-        error.to_string(),
-        "Git delivery needs the `gh` executable on PATH"
-    );
-
-    std::fs::remove_file(bin.join("git")).assert_value();
-    install_executable(&bin, "gh");
     let error = check_delivery_executables(&submission, &environment, root.path()).assert_error();
     assert_eq!(
         error.to_string(),
@@ -572,34 +555,10 @@ fn github_delivery_without_gh_or_git_on_the_captured_search_path_names_the_missi
 
     install_executable(&bin, "git");
     check_delivery_executables(&submission, &environment, root.path()).assert_value();
-}
-
-#[test]
-fn only_github_forge_delivery_needs_the_github_cli() {
-    use crate::native_v2_delivery::DeliveryMode;
-    use crate::source_code_provider::adapters::contributed::registration_tests::{
-        HTTPS_REMOTE, PROVIDER,
-    };
-
-    let root = TestDirectory::new("delivery-programs-forge");
-    let (bin, environment) = search_directory(&root);
-    install_executable(&bin, "git");
-
-    for (source, required) in [
-        (github_source(), DeliveryMode::Push.required_capabilities()),
-        (
-            forge_source(HTTPS_REMOTE, PROVIDER),
-            DeliveryMode::Merge.required_capabilities(),
-        ),
-    ] {
-        let programs =
-            local_delivery_programs(&source, required, &environment, root.path()).assert_value();
-        assert_eq!(programs.gh, Path::new("gh"));
-    }
 
     let without_delivery = RunSubmission {
         graph: full_graph(vec![success_node()]),
-        ..delivery_submission(&github_source())
+        ..submission
     };
     check_delivery_executables(&without_delivery, &BTreeMap::new(), root.path()).assert_value();
 }

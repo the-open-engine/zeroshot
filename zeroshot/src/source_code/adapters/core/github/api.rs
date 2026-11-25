@@ -1,146 +1,52 @@
 use serde_json::Value;
-#[cfg(test)]
-use crate::native_v2_delivery::git_auth::encode_basic_credential;
-use tokio::io::{AsyncRead, AsyncReadExt};
-use tokio::time::{Instant, timeout_at};
 
+use super::http::FailureKind;
 use super::wire::{GitReferenceWire, reference_revision, require_review_head};
 use super::*;
-use super::super::ci_diagnostics::{
-    JobLog, MAX_JOB_LOG_BYTES, diagnostic_secrets as api_secrets, job_log_tail, redact_log,
-};
+use super::super::ci_diagnostics::{JobLog, MAX_JOB_LOG_BYTES, diagnostic_secrets, job_log_tail};
 
-const MAX_API_OUTPUT_BYTES: usize = MAX_JOB_LOG_BYTES;
-const MAX_API_ERROR_BYTES: usize = 64 * 1024;
-const MAX_API_DIAGNOSTIC_STREAM_BYTES: usize = 8 * 1024;
-
-mod policy_read;
-
-enum ApiCapture {
-    Standard,
-    BranchRules,
-    Policy(Instant),
-}
+const MAX_API_DIAGNOSTIC_BYTES: usize = 8 * 1024;
 
 impl GhCliDeliveryAuthority {
-    pub(super) async fn api(
-        &self,
-        arguments: &[String],
-        credential: SourceDeliveryCredential<'_>,
-    ) -> Result<Value, SourceDeliveryError> {
-        let output = self.api_output(arguments, credential).await?;
-        self.decode_api_output(output, credential)
-    }
-
-    pub(super) async fn branch_rules(
-        &self,
-        review: &SourceReviewReceipt,
-        credential: SourceDeliveryCredential<'_>,
-    ) -> Result<Value, SourceDeliveryError> {
-        let arguments = policy::branch_rules_arguments(review)?;
-        self.ensure_instance(credential).await?;
-        let output = self
-            .request_api_output(&arguments, credential, ApiCapture::BranchRules)
-            .await
-            .map_err(|failure| failure.error)?;
-        self.decode_api_output(output, credential)
-    }
-
-    fn decode_api_output(
-        &self,
-        output: Vec<u8>,
-        credential: SourceDeliveryCredential<'_>,
-    ) -> Result<Value, SourceDeliveryError> {
-        serde_json::from_slice(&output).map_err(|error| {
-            let secrets = api_secrets(self.network.secrets(), credential);
-            let (text, truncated) =
-                api_diagnostic_text(output, false, MAX_API_OUTPUT_BYTES, &secrets);
-            redacted_api_error(None, self.network.redact(&format!(
-                "GitHub returned invalid JSON: {error}\nresponse (truncated={truncated}):\n{text}"
-            )), credential)
-        })
-    }
-
-    pub(super) async fn api_output(
-        &self,
-        arguments: &[String],
-        credential: SourceDeliveryCredential<'_>,
-    ) -> Result<Vec<u8>, SourceDeliveryError> {
-        self.ensure_instance(credential).await?;
-        self.raw_api_output(arguments, credential).await
-    }
-
-    pub(super) async fn raw_api_output(
-        &self,
-        arguments: &[String],
-        credential: SourceDeliveryCredential<'_>,
-    ) -> Result<Vec<u8>, SourceDeliveryError> {
-        self.request_api_output(arguments, credential, ApiCapture::Standard)
-            .await
-            .map_err(|failure| failure.error)
-    }
-
-    async fn request_api_output(
-        &self,
-        arguments: &[String],
-        credential: SourceDeliveryCredential<'_>,
-        capture: ApiCapture,
-    ) -> Result<Vec<u8>, ApiFailure> {
-        let mut command = self.api_command(credential);
-        command
-            .arg("api")
-            .args(arguments)
-            .args(["--header", "X-GitHub-Api-Version: 2026-03-10"])
-            .stdout(Stdio::piped());
-        let context = self.network.redact(&format!(
-            "command: {:?} api {arguments:?}",
-            self.config.gh_program
-        ));
-        bounded_output(command, self, credential, capture)
-            .await
-            .map_err(|mut failure| {
-                let retryable = failure.error.retryable_operation();
-                let wrapped = redacted_api_error(
-                    failure.error.api_status(),
-                    format!("{context}\n{}", failure.error),
-                    credential,
-                );
-                failure.error = if retryable {
-                    wrapped.temporary()
-                } else {
-                    wrapped
-                };
-                failure
-            })
-    }
-
     pub(super) async fn job_log_output(
         &self,
         repository: &str,
         job: u64,
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<JobLog, SourceDeliveryError> {
-        let mut arguments = vec![
-            format!("repos/{repository}/actions/jobs/{job}/logs"),
-            "--method".to_owned(),
-            "GET".to_owned(),
-            "--allow-escape-sequences".to_owned(),
-        ];
         self.ensure_instance(credential).await?;
-        let mut output = self
-            .request_api_output(&arguments, credential, ApiCapture::Standard)
-            .await;
-        if matches!(&output, Err(failure) if failure.unsupported_escape_sequences) {
-            // Older gh rejects this flag before sending the request.
-            arguments.pop();
-            output = self
-                .request_api_output(&arguments, credential, ApiCapture::Standard)
-                .await;
+        let http = self.http().await?;
+        let (reply, download_secrets) = http
+            .job_log(
+                (repository, job),
+                credential,
+                (self.api_deadline(), MAX_JOB_LOG_BYTES),
+            )
+            .await
+            .map_err(|failure| {
+                let timed_out = failure.kind == FailureKind::Timeout;
+                let error = self.http_failure(failure, credential);
+                if timed_out { error.temporary() } else { error }
+            })?;
+        if !reply.head.status.is_success() {
+            return Err(if download_secrets.is_empty() {
+                self.status_error(&reply, credential, &[])
+            } else {
+                let error = self.body_error(
+                    &reply,
+                    ("GitHub Actions log download failed", None),
+                    (credential, &download_secrets),
+                );
+                if super::http_api::transient_status(&reply) {
+                    error.temporary()
+                } else {
+                    error
+                }
+            });
         }
-        // Redact complete credentials before excerpt selection can split one.
-        output
-            .map(|bytes| check_log_tail(&bytes, credential, &self.network.secrets()))
-            .map_err(|failure| failure.error)
+        let mut secrets = self.network.secrets();
+        secrets.extend(download_secrets);
+        Ok(check_log_tail(&reply.body, credential, &secrets))
     }
 
     pub(super) async fn confirm_review_head(
@@ -164,18 +70,16 @@ impl GhCliDeliveryAuthority {
             .await?;
         reference_revision(reference, &review.target_branch)
     }
-    async fn read_reference(
+
+    pub(super) async fn read_reference(
         &self,
         repository: &str,
         branch: &str,
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<GitReferenceWire, SourceDeliveryError> {
-        let value = self
-            .api(
-                &[format!("repos/{repository}/git/ref/heads/{branch}")],
-                credential,
-            )
-            .await?;
+        let mut path = repository_path(repository, &["git", "ref", "heads"])?;
+        path.extend(branch.split('/'));
+        let value = self.rest(Request::get(&path), credential).await?;
         self.decode_response(value, credential)
     }
 
@@ -185,534 +89,55 @@ impl GhCliDeliveryAuthority {
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<T, SourceDeliveryError> {
         T::deserialize(&value).map_err(|error| {
-        let secrets = api_secrets(self.network.secrets(), credential);
-        let (text, truncated) = api_diagnostic_text(
-            value.to_string().into_bytes(),
-            false,
-            MAX_API_OUTPUT_BYTES,
-            &secrets,
-        );
-        redacted_api_error(
-            None,
-            self.network.redact(&format!(
+            use crate::native_v2_delivery::command::{diagnostic_text_with_secrets, redact};
+
+            let secrets = diagnostic_secrets(self.network.secrets(), credential);
+            let bytes = value.to_string().into_bytes();
+            let truncated = bytes.len() > MAX_JOB_LOG_BYTES;
+            let (mut text, truncated) = diagnostic_text_with_secrets(bytes, truncated, &secrets);
+            let truncated = truncated || text.len() > MAX_API_DIAGNOSTIC_BYTES;
+            // Redact before truncating so a credential cannot be exposed as a partial suffix.
+            let mut boundary = text.len().min(MAX_API_DIAGNOSTIC_BYTES);
+            while !text.is_char_boundary(boundary) {
+                boundary = boundary.saturating_sub(1);
+            }
+            text.truncate(boundary);
+            let diagnostic = format!(
                 "GitHub returned an invalid response: {error}\nresponse (truncated={truncated}):\n{text}"
-            )),
-            credential,
-        )
+            );
+            SourceDeliveryError::api(None, redact(&diagnostic, &secrets))
         })
     }
 }
 
-pub(super) async fn command_status(
-    mut command: Command,
-    deadline: Duration,
-    credential: SourceDeliveryCredential<'_>,
-) -> Result<(), CommandFailure> {
-    let output = crate::native_v2_delivery::command::capture_sensitive(&mut command, deadline, &[])
-        .await
-        .map_err(|failure| CommandFailure::unknown(command_failure(failure, credential)))?;
-    let rejection = native_merge_rejection(&output);
-    output
-        .require_success()
-        .map(|_| ())
-        .map_err(|failure| CommandFailure {
-            error: command_failure(failure, credential),
-            rejection,
-        })
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum MutationRejection {
+    NotSent,
     Policy,
     Conversation,
     RequiredCheckQueued,
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct CommandFailure {
+pub(super) struct MutationFailure {
     pub error: SourceDeliveryError,
     pub rejection: Option<MutationRejection>,
 }
 
-impl CommandFailure {
+impl MutationFailure {
+    pub(super) fn not_sent(error: SourceDeliveryError) -> Self {
+        Self {
+            error,
+            rejection: Some(MutationRejection::NotSent),
+        }
+    }
+
     pub(super) fn unknown(error: SourceDeliveryError) -> Self {
         Self {
             error,
             rejection: None,
         }
     }
-}
-
-pub(super) async fn command_json(
-    mut command: Command,
-    deadline: Duration,
-    credential: SourceDeliveryCredential<'_>,
-    mutation: Option<&str>,
-) -> Result<Value, CommandFailure> {
-    let output = crate::native_v2_delivery::command::capture_sensitive(&mut command, deadline, &[])
-        .await
-        .map_err(|failure| CommandFailure::unknown(command_failure(failure, credential)))?;
-    // Inspect protocol bytes before converting the failed output to redacted diagnostics.
-    let rejection = mutation.and_then(|mutation| rejected_mutation(&output, mutation));
-    let output = output.require_success().map_err(|failure| CommandFailure {
-        error: command_failure(failure, credential),
-        rejection,
-    })?;
-    if output.stdout_truncated() {
-        return Err(CommandFailure::unknown(redacted_api_error(
-            None,
-            "GitHub command response exceeded its byte bound",
-            credential,
-        )));
-    }
-    serde_json::from_str(output.stdout()).map_err(|error| {
-        CommandFailure::unknown(redacted_api_error(
-            None,
-            format!("GitHub returned invalid JSON: {error}\n{output}"),
-            credential,
-        ))
-    })
-}
-
-fn complete_rejection(output: &crate::native_v2_delivery::command::GitCommandOutput) -> bool {
-    let diagnostic = output.diagnostic();
-    output.stdout_valid_utf8()
-        && !output.stdout_truncated()
-        && output.stderr().is_some()
-        && !diagnostic.cleanup_unconfirmed
-        && !diagnostic.timed_out
-        && diagnostic.exit_status.is_some_and(|status| status > 0)
-}
-
-fn conversation_message(message: &str) -> bool {
-    message.starts_with("A conversation must be resolved")
-}
-
-fn native_merge_rejection(
-    output: &crate::native_v2_delivery::command::GitCommandOutput,
-) -> Option<MutationRejection> {
-    if !complete_rejection(output) {
-        return None;
-    }
-    // gh pr merge wraps GitHub's mutation error in this native GraphQL response line.
-    let message = output
-        .stderr()?
-        .trim()
-        .strip_prefix("GraphQL: ")?
-        .strip_suffix(" (mergePullRequest)")?;
-    (!message.contains(['\r', '\n']) && conversation_message(message))
-        .then_some(MutationRejection::Conversation)
-}
-
-fn rejected_mutation(
-    output: &crate::native_v2_delivery::command::GitCommandOutput,
-    mutation: &str,
-) -> Option<MutationRejection> {
-    if !complete_rejection(output) {
-        return None;
-    }
-    let Ok(value) = serde_json::from_str::<Value>(output.stdout()) else {
-        return None;
-    };
-    let path = serde_json::json!([mutation]);
-    let rejected = value
-        .get("data")
-        .and_then(Value::as_object)
-        .is_some_and(|data| data.len() == 1 && data.get(mutation).is_some_and(Value::is_null))
-        && value
-            .get("errors")
-            .and_then(Value::as_array)
-            .is_some_and(|errors| {
-                !errors.is_empty()
-                    && errors.iter().all(|error| {
-                        error.get("type").and_then(Value::as_str) == Some("UNPROCESSABLE")
-                            && error.get("path") == Some(&path)
-                    })
-            });
-    if !rejected {
-        return None;
-    }
-    let conversations = value["errors"]
-        .as_array()?
-        .iter()
-        .all(|error| error["message"].as_str().is_some_and(conversation_message));
-    Some(if conversations {
-        MutationRejection::Conversation
-    } else if mutation == "enqueuePullRequest"
-        && value["errors"].as_array()?.iter().all(|error| {
-            error["message"].as_str().is_some_and(|message| {
-                message
-                    .strip_prefix("Required status check \"")
-                    .and_then(|name| name.strip_suffix("\" is queued."))
-                    .is_some_and(|name| !name.is_empty())
-            })
-        })
-    {
-        MutationRejection::RequiredCheckQueued
-    } else {
-        MutationRejection::Policy
-    })
-}
-
-pub(super) fn command_failure(
-    failure: crate::native_v2_delivery::command::GitCommandFailure,
-    credential: SourceDeliveryCredential<'_>,
-) -> SourceDeliveryError {
-    if failure.cleanup_unconfirmed {
-        return SourceDeliveryError::Command(Box::new(failure));
-    }
-    // Capture owns the process tree; only a completed command supplies an HTTP status.
-    let response = failure
-        .exit_status
-        .filter(|_| !failure.stderr_truncated)
-        .map(|_| github_api_error(failure.stderr.as_bytes()));
-    let status = response.as_ref().and_then(SourceDeliveryError::api_status);
-    let retryable = failure.retryable_transport()
-        || response
-            .as_ref()
-            .is_some_and(SourceDeliveryError::retryable_operation)
-        || status.is_none() && github_transport_error(&failure.stderr);
-    let error = redacted_api_error(status, failure.to_string(), credential);
-    if retryable { error.temporary() } else { error }
-}
-
-struct ApiFailure {
-    error: SourceDeliveryError,
-    unsupported_escape_sequences: bool,
-    policy_read_transient: bool,
-    timed_out: bool,
-}
-
-impl From<SourceDeliveryError> for ApiFailure {
-    fn from(error: SourceDeliveryError) -> Self {
-        Self {
-            error,
-            unsupported_escape_sequences: false,
-            policy_read_transient: false,
-            timed_out: false,
-        }
-    }
-}
-
-async fn bounded_output(
-    mut command: Command,
-    authority: &GhCliDeliveryAuthority,
-    credential: SourceDeliveryCredential<'_>,
-    capture: ApiCapture,
-) -> Result<Vec<u8>, ApiFailure> {
-    let deadline = match capture {
-        ApiCapture::Policy(deadline) => Some(deadline),
-        _ => None,
-    };
-    command
-        .kill_on_drop(true)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|error| {
-        redacted_api_error(
-            None,
-            format!("could not start command: {error}"),
-            credential,
-        )
-    })?;
-    let stdout = child.stdout.take().ok_or_else(|| {
-        redacted_api_error(None, "command stdout pipe is unavailable", credential)
-    })?;
-    let stderr = child.stderr.take().ok_or_else(|| {
-        redacted_api_error(None, "command stderr pipe is unavailable", credential)
-    })?;
-    let mut output = ApiOutput {
-        secrets: authority.network.secrets(),
-        ..Default::default()
-    };
-    let result = timeout_at(
-        deadline.unwrap_or_else(|| Instant::now() + authority.config.api_deadline),
-        async {
-            tokio::try_join!(
-                async {
-                    child
-                        .wait()
-                        .await
-                        .map_err(|error| format!("could not wait for command: {error}"))
-                },
-                collect_bounded(stdout, &mut output.stdout, MAX_API_OUTPUT_BYTES, "stdout"),
-                collect_bounded(stderr, &mut output.stderr, MAX_API_ERROR_BYTES, "stderr"),
-            )
-        },
-    )
-    .await;
-    match result {
-        Ok(Ok((status, (), ()))) if status.success() => {
-            validate_api_output(output.stdout).map_err(Into::into)
-        }
-        Ok(Ok((status, (), ())))
-            if matches!(capture, ApiCapture::BranchRules)
-                && status.code() == Some(1)
-                && output.branch_rules_unavailable() =>
-        {
-            Ok(b"[[]]".to_vec())
-        }
-        Ok(Ok((status, (), ()))) => {
-            // Classify complete native stderr before credential redaction or bounds.
-            let unsupported_escape_sequences = output.unsupported_escape_sequences();
-            let policy_read_transient = status.code() == Some(1) && policy_read::transient(&output);
-            let error = output.failure(
-                Some(status),
-                &format!("command exited unsuccessfully: {status}"),
-                credential,
-            );
-            Err(ApiFailure {
-                unsupported_escape_sequences: unsupported_escape_sequences
-                    && error.api_status().is_none(),
-                policy_read_transient,
-                timed_out: false,
-                error,
-            })
-        }
-        Ok(Err(error)) => Err(output.failure(None, &error, credential).into()),
-        Err(_) => {
-            let context = match deadline {
-                Some(_) => "command timed out at the API deadline".to_owned(),
-                None => format!(
-                    "command timed out after {} milliseconds",
-                    authority.config.api_deadline.as_millis()
-                ),
-            };
-            Err(ApiFailure {
-                timed_out: true,
-                ..output
-                    .failure(None, &context, credential)
-                    .temporary()
-                    .into()
-            })
-        }
-    }
-}
-
-#[derive(Default)]
-struct ApiOutput {
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
-    secrets: Vec<String>,
-}
-
-impl ApiOutput {
-    fn unsupported_escape_sequences(&self) -> bool {
-        std::str::from_utf8(&self.stderr).ok().is_some_and(|text| {
-            text.lines()
-                .any(|line| line == "unknown flag: --allow-escape-sequences")
-        })
-    }
-
-    fn branch_rules_unavailable(&self) -> bool {
-        const MESSAGE: &str =
-            "Upgrade to GitHub Pro or make this repository public to enable this feature.";
-        if self.stdout.len() > MAX_API_OUTPUT_BYTES || self.stderr.len() > MAX_API_ERROR_BYTES {
-            return false;
-        }
-        let expected = format!("gh: {MESSAGE} (HTTP 403)");
-        if std::str::from_utf8(&self.stderr).ok().map(str::trim) != Some(expected.as_str()) {
-            return false;
-        }
-        // Inspect complete raw protocol bytes before diagnostics or secret redaction. Slurp
-        // wraps even a first-request error; earlier successful pages must never be discarded.
-        let Ok(Value::Array(pages)) = serde_json::from_slice(&self.stdout) else {
-            return false;
-        };
-        matches!(pages.as_slice(), [error]
-            if github_api_status(error) == Some(403)
-                && error.get("message").and_then(Value::as_str) == Some(MESSAGE))
-    }
-
-    fn failure(
-        self,
-        status: Option<std::process::ExitStatus>,
-        context: &str,
-        credential: SourceDeliveryCredential<'_>,
-    ) -> SourceDeliveryError {
-        // Incomplete stderr is not an authoritative HTTP response.
-        let api_error = status.map(|_| github_api_error(&self.stderr));
-        let api_status = api_error.as_ref().and_then(SourceDeliveryError::api_status);
-        let transport_error = github_transport_error(&String::from_utf8_lossy(&self.stderr));
-        let secrets = api_secrets(self.secrets, credential);
-        let (stdout, stdout_truncated) = api_diagnostic_text(
-            self.stdout,
-            status.is_none(),
-            MAX_API_OUTPUT_BYTES,
-            &secrets,
-        );
-        let (stderr, stderr_truncated) =
-            api_diagnostic_text(self.stderr, status.is_none(), MAX_API_ERROR_BYTES, &secrets);
-        let rate_limited = api_error
-            .as_ref()
-            .is_some_and(|error| error.api_status() == Some(403) && error.retryable_operation());
-        let transient = rate_limited || api_status.is_none() && transport_error;
-        let failure = redacted_api_error(
-            api_status,
-            format!(
-                "exitStatus: {:?}\n{context}\nstderr (truncated={stderr_truncated}):\n{stderr}\n\
-                stdout (truncated={stdout_truncated}):\n{stdout}",
-                status.and_then(|status| status.code())
-            ),
-            credential,
-        );
-        if transient {
-            failure.temporary()
-        } else {
-            failure
-        }
-    }
-}
-
-fn redacted_api_error(
-    status: Option<u16>,
-    diagnostic: impl Into<String>,
-    credential: SourceDeliveryCredential<'_>,
-) -> SourceDeliveryError {
-    let diagnostic = redact_log(&diagnostic.into(), credential, &[]);
-    SourceDeliveryError::api(status, diagnostic)
-}
-
-fn api_diagnostic_text(
-    bytes: Vec<u8>,
-    incomplete: bool,
-    capture_limit: usize,
-    secrets: &[String],
-) -> (String, bool) {
-    let truncated = incomplete || bytes.len() > capture_limit;
-    let (mut text, truncated) =
-        crate::native_v2_delivery::command::diagnostic_text_with_secrets(bytes, truncated, secrets);
-    // Reserve space for both streams inside the combined API diagnostic budget.
-    // Redact before truncating so a credential cannot be exposed as a partial suffix.
-    let truncated = truncated || text.len() > MAX_API_DIAGNOSTIC_STREAM_BYTES;
-    let mut boundary = text.len().min(MAX_API_DIAGNOSTIC_STREAM_BYTES);
-    while !text.is_char_boundary(boundary) {
-        boundary = boundary.saturating_sub(1);
-    }
-    text.truncate(boundary);
-    (text, truncated)
-}
-
-async fn collect_bounded<R>(
-    mut reader: R,
-    output: &mut Vec<u8>,
-    maximum_bytes: usize,
-    stream: &str,
-) -> Result<(), String>
-where
-    R: AsyncRead + Unpin,
-{
-    let mut buffer = [0_u8; 8 * 1024];
-    loop {
-        let read = reader
-            .read(&mut buffer)
-            .await
-            .map_err(|error| format!("could not read command {stream}: {error}"))?;
-        if read == 0 {
-            return Ok(());
-        }
-        let remaining = maximum_bytes.saturating_add(1).saturating_sub(output.len());
-        let retained = remaining.min(read);
-        output.extend_from_slice(buffer.get(..retained).unwrap_or_default());
-    }
-}
-
-fn github_api_error(output: &[u8]) -> SourceDeliveryError {
-    let text = String::from_utf8_lossy(output);
-    let value = github_api_error_value(&text);
-    let status = value
-        .as_ref()
-        .and_then(github_api_status)
-        .or_else(|| github_api_status_from_text(&text));
-    let rate_limited = status == Some(403)
-        && (value
-            .as_ref()
-            .and_then(|value| value.get("message"))
-            .and_then(Value::as_str)
-            .is_some_and(github_rate_limit_message)
-            || text.lines().any(|line| {
-                line.strip_prefix("HTTP 403: ")
-                    .or_else(|| {
-                        line.strip_prefix("gh: ")
-                            .and_then(|line| line.strip_suffix(" (HTTP 403)"))
-                    })
-                    .is_some_and(github_rate_limit_message)
-            }));
-    let failure = SourceDeliveryError::api(status, text.into_owned());
-    if rate_limited {
-        failure.temporary()
-    } else {
-        failure
-    }
-}
-
-fn github_transport_error(text: &str) -> bool {
-    text.lines().any(|line| {
-        line.starts_with("error connecting to ") || line.contains(": TLS handshake timeout")
-    })
-}
-
-fn github_rate_limit_message(message: &str) -> bool {
-    message.starts_with("API rate limit exceeded")
-        || message.starts_with("You have exceeded a secondary rate limit")
-}
-
-fn github_api_error_value(text: &str) -> Option<Value> {
-    text.lines()
-        .rev()
-        .find_map(|line| serde_json::from_str(line).ok())
-        .or_else(|| {
-            text.char_indices()
-                .filter(|(_, character)| *character == '{')
-                .find_map(|(index, _)| {
-                    text.get(index..)
-                        .and_then(|suffix| serde_json::from_str(suffix).ok())
-                })
-        })
-}
-
-fn github_api_status(value: &Value) -> Option<u16> {
-    value.get("status").and_then(|status| {
-        status
-            .as_u64()
-            .and_then(|status| u16::try_from(status).ok())
-            .or_else(|| status.as_str()?.parse().ok())
-    })
-}
-
-fn github_api_status_from_text(text: &str) -> Option<u16> {
-    if let Some(status) = text.lines().find_map(|line| {
-        // gh api reports an error response without a message as a bare `gh: HTTP NNN` line;
-        // gh's GraphQL client, used by `gh pr merge`, reports `non-200 OK status code: NNN …`.
-        let status = line
-            .strip_prefix("gh: HTTP ")
-            .or_else(|| {
-                line.strip_prefix("non-200 OK status code: ")?
-                    .split(' ')
-                    .next()
-            })
-            .or_else(|| {
-                let response = line.strip_prefix("HTTP ")?;
-                let (status, _) = response
-                    .split_once(": ")
-                    .or_else(|| response.split_once(" ("))?;
-                Some(status)
-            })?;
-        status.parse().ok()
-    }) {
-        return Some(status);
-    }
-    let marker = "(HTTP ";
-    let start = text.rfind(marker)? + marker.len();
-    let digits = text.get(start..)?.split(')').next()?;
-    digits.parse().ok()
-}
-
-fn validate_api_output(output: Vec<u8>) -> Result<Vec<u8>, SourceDeliveryError> {
-    if output.is_empty() || output.len() > MAX_API_OUTPUT_BYTES {
-        return Err(SourceDeliveryError::Rejected);
-    }
-    Ok(output)
 }
 
 pub(super) fn check_log_tail(
@@ -742,7 +167,3 @@ pub(super) fn check_log_tail(
 #[cfg(test)]
 #[path = "api/tests.rs"]
 mod tests;
-
-#[cfg(all(test, unix))]
-#[path = "api/command_status_tests.rs"]
-mod command_status_tests;

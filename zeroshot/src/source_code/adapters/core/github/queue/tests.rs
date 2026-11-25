@@ -1,6 +1,8 @@
 use crate::source_code_provider::TestReviewCheckpoint;
 use super::*;
 
+#[path = "http_effect_tests.rs"]
+mod http_effect_tests;
 #[path = "pagination_tests.rs"]
 mod pagination_tests;
 #[path = "recovery_tests.rs"]
@@ -13,6 +15,14 @@ pub(super) fn enqueue_response() -> Value {
             "baseRefName":"main","headRefName":"zeroshot/v2-run","headRefOid":review().head_revision
         }
     }}}})
+}
+
+pub(super) fn direct_merge_response(merge_revision: &str) -> Value {
+    let mut queued = enqueue_response();
+    let mut pull = queued["data"]["enqueuePullRequest"]["mergeQueueEntry"]["pullRequest"].take();
+    pull["merged"] = json!(true);
+    pull["mergeCommit"] = json!({"oid": merge_revision});
+    json!({"data":{"mergePullRequest":{"pullRequest":pull}}})
 }
 
 fn queued(in_queue: bool, auto: bool) -> Value {
@@ -295,7 +305,7 @@ async fn permanent_or_mixed_enqueue_refusals_remain_errors_when_checks_are_pendi
 async fn queued_check_rejections_retain_prior_submission_uncertainty_across_retries() {
     let root = tempfile::tempdir().assert_value();
     let action = format!(
-        "if [ ! -f \"$HOME/attempted\" ]; then printf seen > \"$HOME/attempted\"; printf 'error connecting to api.github.com\\n' >&2; exit 1; fi; {}; exit 1",
+        "if [ ! -f \"$HOME/attempted\" ]; then printf seen > \"$HOME/attempted\"; printf 'HTTP 503: Unavailable\\n' >&2; exit 1; fi; {}; exit 1",
         response(&queued_check_rejection("semantic"))
     );
     let provider = admission(root.path(), &action);
@@ -602,7 +612,14 @@ async fn malformed_queue_receipts_never_become_accepted_requests() {
             .await
             .assert_error();
         assert!(matches!(error, SourceDeliveryError::Api(_)), "{error}");
-        assert!(error.to_string().contains("invalid merge queue"));
+        assert_eq!(error.api_status(), None);
+        assert!(!error.retryable_operation(), "{error}");
+        let diagnostic = error.to_string();
+        assert!(
+            diagnostic.contains("invalid merge queue")
+                || diagnostic.contains("GraphQL mutation failed"),
+            "{diagnostic}"
+        );
     }
 }
 
@@ -613,13 +630,24 @@ async fn queue_auth_policy_and_transport_failures_keep_the_native_error_boundary
         ("HTTP 403: Resource not accessible", Some(403), false),
         ("HTTP 422: Validation Failed", Some(422), false),
         ("HTTP 503: Unavailable", Some(503), true),
-        ("GraphQL: expectedHeadOid does not match", None, false),
+        ("expectedHeadOid does not match", None, false),
     ] {
         let root = tempfile::tempdir().assert_value();
-        let action = format!(
-            "printf '%s\n' {} \"$GH_TOKEN\" >&2; exit 1",
-            shell_literal(message)
-        );
+        let action = if status.is_some() {
+            format!(
+                "printf '%s\n' {} \"$GH_TOKEN\" >&2; exit 1",
+                shell_literal(message)
+            )
+        } else {
+            format!(
+                "{}; exit 1",
+                response(&json!({
+                    "data": {"enqueuePullRequest": null},
+                    "errors": [{"path": ["enqueuePullRequest"], "type":"UNPROCESSABLE",
+                        "message": format!("{message} test-token")}],
+                }))
+            )
+        };
         let provider = admission(root.path(), &action);
         let error = provider
             .request_merge(
@@ -1009,11 +1037,7 @@ async fn changing_auto_merge_across_policy_pages_cannot_authorize_withdrawal() {
 
 #[tokio::test]
 async fn completed_transient_enqueues_retry_without_discarding_withdrawal_uncertainty() {
-    for (message, accepted) in [
-        ("HTTP 503: Unavailable", true),
-        ("error connecting to api.github.com", true),
-        ("error connecting to api.github.com", false),
-    ] {
+    for accepted in [true, false] {
         let root = tempfile::tempdir().assert_value();
         let recovered = if accepted {
             response(&enqueue_response())
@@ -1021,8 +1045,7 @@ async fn completed_transient_enqueues_retry_without_discarding_withdrawal_uncert
             "printf 'HTTP 403: Resource not accessible\\n' >&2; exit 1".to_owned()
         };
         let action = format!(
-            "if [ ! -f \"$HOME/attempted\" ]; then printf seen > \"$HOME/attempted\"; printf '%s\\n' {} >&2; exit 1; fi; {recovered}",
-            shell_literal(message)
+            "if [ ! -f \"$HOME/attempted\" ]; then printf seen > \"$HOME/attempted\"; printf 'HTTP 503: Unavailable\\n' >&2; exit 1; fi; {recovered}",
         );
         let states = if accepted {
             vec![
@@ -1082,39 +1105,6 @@ async fn completed_transient_enqueues_retry_without_discarding_withdrawal_uncert
         let args = std::fs::read_to_string(root.path().join("mutations")).assert_value();
         assert_eq!(args.matches("expectedHeadOid=").count(), 2);
         assert_eq!(args.contains("dequeuePullRequest"), accepted);
-    }
-}
-
-#[tokio::test]
-async fn malformed_or_truncated_queue_output_is_redacted_and_never_resubmitted() {
-    for (action, diagnostic) in [
-        ("printf 'not-json test-token'", "invalid JSON"),
-        (
-            "/bin/dd if=/dev/zero bs=65536 count=32 2>/dev/null",
-            "byte bound",
-        ),
-    ] {
-        let root = tempfile::tempdir().assert_value();
-        let provider = admission(root.path(), action);
-        for _ in 0..2 {
-            let error = provider
-                .request_merge(
-                    &review(),
-                    SourceDeliveryCredential::token("test-token"),
-                    &TestReviewCheckpoint,
-                )
-                .await
-                .assert_error();
-            assert!(error.to_string().contains(diagnostic), "{error}");
-            assert!(!error.to_string().contains("test-token"));
-            assert!(!error.retryable_operation());
-        }
-        let args = std::fs::read_to_string(root.path().join("mutations")).assert_value();
-        assert_eq!(args.matches("expectedHeadOid=").count(), 1);
-        provider
-            .withdraw_merge_request(&review(), SourceDeliveryCredential::token("test-token"))
-            .await
-            .assert_error();
     }
 }
 

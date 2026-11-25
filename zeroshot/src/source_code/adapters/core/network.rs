@@ -65,6 +65,7 @@ impl ForgeNetwork {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn apply_command(&self, command: &mut tokio::process::Command) {
         command.envs(&self.values);
     }
@@ -117,14 +118,6 @@ impl ForgeNetwork {
             }
         }
         Ok(builder)
-    }
-
-    /// Validate a named file even where an older gh uses only the system trust store.
-    pub(crate) fn validate_certificate_file(&self) -> Result<(), SourceDeliveryError> {
-        if let Some(file) = self.values.get("SSL_CERT_FILE").filter(|v| !v.is_empty()) {
-            std::fs::read(file).map_err(|error| certificate_error(Path::new(file), error))?;
-        }
-        Ok(())
     }
 
     fn value(&self, upper: &str, lower: &str) -> Option<&str> {

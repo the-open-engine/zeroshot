@@ -38,6 +38,7 @@ impl GitCommandOutput {
         self.raw_stdout_truncated
     }
 
+    #[cfg(test)]
     pub(crate) fn stderr(&self) -> Option<&str> {
         self.raw_stderr.as_deref()
     }
@@ -133,26 +134,6 @@ pub(crate) async fn capture_sensitive_until_stopped(
         deadline,
         private_secrets,
         CaptureOptions {
-            stopping,
-            ..Default::default()
-        },
-    )
-    .await
-}
-
-/// Stop-aware capture of one bounded forge response, which can exceed printable diagnostics.
-pub(crate) async fn capture_sensitive_response_until_stopped(
-    command: &mut Command,
-    deadline: Duration,
-    private_secrets: &[String],
-    stopping: Option<tokio::sync::watch::Receiver<bool>>,
-) -> Result<GitCommandOutput, GitCommandFailure> {
-    capture_exchange(
-        command,
-        deadline,
-        private_secrets,
-        CaptureOptions {
-            stdout_limit: Some(8 * 1024 * 1024),
             stopping,
             ..Default::default()
         },

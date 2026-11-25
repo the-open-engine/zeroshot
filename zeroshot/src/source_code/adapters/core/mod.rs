@@ -12,6 +12,9 @@ mod ci_diagnostics;
 mod git;
 pub(crate) mod github;
 pub(crate) mod gitlab;
+#[cfg(test)]
+#[path = "tests/http_fixture.rs"]
+pub(crate) mod http_fixture;
 pub(crate) mod instance;
 pub(crate) mod network;
 mod provider;
@@ -302,11 +305,8 @@ pub fn validate_delivery_source_with_registry(
     Ok(())
 }
 
-/// Whether [`delivery_authority`] selects the GitHub adapter, which runs the GitHub CLI.
-pub(crate) fn delivery_uses_github_cli(
-    source: &ResolvedSource,
-    required: &[SourceCapability],
-) -> bool {
+/// Whether [`delivery_authority`] selects the GitHub adapter.
+pub(crate) fn delivery_uses_github(source: &ResolvedSource, required: &[SourceCapability]) -> bool {
     provider_ref(source, required)
         .is_ok_and(|selected| selected.id().as_str() == GITHUB_PROVIDER_ID)
 }

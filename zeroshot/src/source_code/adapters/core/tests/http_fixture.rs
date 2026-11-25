@@ -3,68 +3,114 @@ use std::sync::Arc;
 use reqwest::{Method, StatusCode, Url, header::HeaderMap};
 use serde::Serialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 
-pub(super) struct Request {
+pub(crate) async fn loopback() -> (TcpListener, String) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}/", listener.local_addr().unwrap());
+    (listener, origin)
+}
+
+pub(crate) fn loopback_tls(ca_file: &std::path::Path) -> tokio_rustls::TlsAcceptor {
+    let mut ca_params = rcgen::CertificateParams::new(vec![]).unwrap();
+    ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+    let ca_key = rcgen::KeyPair::generate().unwrap();
+    let ca = ca_params.self_signed(&ca_key).unwrap();
+    let key = rcgen::KeyPair::generate().unwrap();
+    let params = rcgen::CertificateParams::new(vec!["127.0.0.1".into()]).unwrap();
+    let cert = params.signed_by(&key, &ca, &ca_key).unwrap();
+    let config = rustls::ServerConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .unwrap()
+    .with_no_client_auth()
+    .with_single_cert(
+        vec![cert.der().clone(), ca.der().clone()],
+        rustls::pki_types::PrivateKeyDer::try_from(key.serialize_der()).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(ca_file, ca.pem()).unwrap();
+    tokio_rustls::TlsAcceptor::from(Arc::new(config))
+}
+
+pub(crate) struct Request {
     pub method: Method,
     pub uri: Url,
     pub headers: HeaderMap,
     pub body: Vec<u8>,
 }
 
-pub(super) struct Response {
+pub(crate) struct Response {
     status: StatusCode,
     body: Vec<u8>,
     headers: Vec<(String, String)>,
+    content_length: Option<usize>,
     disconnect: bool,
+    await_disconnect: Option<Arc<tokio::sync::Notify>>,
 }
 
 impl Response {
-    pub(super) fn replace_origin(mut self, origin: &str) -> Self {
+    pub(crate) fn replace_origin(mut self, previous: &str, origin: &str) -> Self {
         self.body = String::from_utf8(self.body)
             .unwrap()
-            .replace(super::ORIGIN, origin)
+            .replace(previous, origin)
             .into_bytes();
         self
     }
-    pub(super) fn raw(body: Vec<u8>) -> Self {
+    pub(crate) fn raw(body: Vec<u8>) -> Self {
         Self {
             status: StatusCode::OK,
             body,
             headers: Vec::new(),
+            content_length: None,
             disconnect: false,
+            await_disconnect: None,
         }
     }
 
-    pub(super) fn disconnected() -> Self {
+    pub(crate) fn disconnected() -> Self {
         Self {
-            status: StatusCode::OK,
-            body: Vec::new(),
-            headers: Vec::new(),
             disconnect: true,
+            ..Self::raw(Vec::new())
         }
     }
 
-    pub(super) fn header(mut self, name: &str, value: &str) -> Self {
+    pub(crate) fn stall_until_disconnect(disconnected: Arc<tokio::sync::Notify>) -> Self {
+        Self {
+            await_disconnect: Some(disconnected),
+            ..Self::raw(Vec::new())
+        }
+    }
+
+    pub(crate) fn header(mut self, name: &str, value: &str) -> Self {
         assert!(!name.contains(['\r', '\n']) && !value.contains(['\r', '\n']));
         self.headers.push((name.to_owned(), value.to_owned()));
         self
     }
+
+    pub(crate) fn status(mut self, status: StatusCode) -> Self {
+        self.status = status;
+        self
+    }
+
+    /// Advertise a length larger than the body to simulate a dropped response mid-frame.
+    pub(crate) fn content_length(mut self, length: usize) -> Self {
+        assert!(length > self.body.len());
+        self.content_length = Some(length);
+        self
+    }
 }
 
-pub(super) trait IntoResponse {
+pub(crate) trait IntoResponse {
     fn into_response(self) -> Response;
 }
 
-pub(super) struct Json<T>(pub T);
+pub(crate) struct Json<T>(pub T);
 
 impl<T: Serialize> IntoResponse for Json<T> {
     fn into_response(self) -> Response {
-        Response {
-            status: StatusCode::OK,
-            disconnect: false,
-            headers: Vec::new(),
-            body: serde_json::to_vec(&self.0).unwrap(),
-        }
+        Response::raw(serde_json::to_vec(&self.0).unwrap())
     }
 }
 
@@ -72,9 +118,7 @@ impl IntoResponse for StatusCode {
     fn into_response(self) -> Response {
         Response {
             status: self,
-            disconnect: false,
-            headers: Vec::new(),
-            body: Vec::new(),
+            ..Response::raw(Vec::new())
         }
     }
 }
@@ -83,17 +127,27 @@ impl<T: Serialize> IntoResponse for (StatusCode, Json<T>) {
     fn into_response(self) -> Response {
         Response {
             status: self.0,
-            disconnect: false,
-            headers: Vec::new(),
-            body: serde_json::to_vec(&self.1.0).unwrap(),
+            ..self.1.into_response()
         }
     }
 }
 
-pub(super) async fn serve(
+pub(crate) async fn serve(
     listener: tokio::net::TcpListener,
     handler: impl Fn(Request) -> Response + Send + Sync + 'static,
 ) {
+    serve_async(listener, move |request| {
+        std::future::ready(handler(request))
+    })
+    .await;
+}
+
+pub(crate) async fn serve_async<Fut>(
+    listener: tokio::net::TcpListener,
+    handler: impl Fn(Request) -> Fut + Send + Sync + 'static,
+) where
+    Fut: Future<Output = Response> + Send + 'static,
+{
     let handler = Arc::new(handler);
     loop {
         let Ok((stream, _)) = listener.accept().await else {
@@ -106,12 +160,12 @@ pub(super) async fn serve(
     }
 }
 
-pub(super) async fn serve_tls(
+pub(crate) async fn serve_tls(
     listener: tokio::net::TcpListener,
     acceptor: tokio_rustls::TlsAcceptor,
     handler: impl Fn(Request) -> Response + Send + Sync + 'static,
 ) {
-    let handler = Arc::new(handler);
+    let handler = Arc::new(move |request| std::future::ready(handler(request)));
     loop {
         let Ok((stream, _)) = listener.accept().await else {
             return;
@@ -126,15 +180,22 @@ pub(super) async fn serve_tls(
     }
 }
 
-async fn respond<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
-    mut stream: S,
-    handler: Arc<impl Fn(Request) -> Response>,
-) {
+async fn respond<S, Fut>(mut stream: S, handler: Arc<impl Fn(Request) -> Fut>)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    Fut: Future<Output = Response>,
+{
     let response = match read(&mut stream).await {
-        Some(request) => handler(request),
+        Some(request) => handler(request).await,
         None => StatusCode::BAD_REQUEST.into_response(),
     };
     if response.disconnect {
+        return;
+    }
+    if let Some(disconnected) = response.await_disconnect {
+        let result = stream.read(&mut [0]).await;
+        assert!(!matches!(result, Ok(1)), "client sent an unexpected byte");
+        disconnected.notify_one();
         return;
     }
     let extras = response
@@ -145,7 +206,7 @@ async fn respond<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
     let header = format!(
         "HTTP/1.1 {} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{extras}\r\n",
         response.status.as_u16(),
-        response.body.len()
+        response.content_length.unwrap_or(response.body.len())
     );
     if stream.write_all(header.as_bytes()).await.is_ok() {
         // A bounded client may intentionally stop reading an oversized fixture response.

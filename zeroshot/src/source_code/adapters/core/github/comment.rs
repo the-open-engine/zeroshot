@@ -2,10 +2,11 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::native_v2_delivery::command::capture_sensitive_with_input;
 use crate::source_code_provider::*;
 
-use super::GhCliDeliveryAuthority;
+use super::{GhCliDeliveryAuthority, Method, Request, repository_path};
+
+const MAX_COMMENT_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 
 #[cfg(test)]
 mod tests;
@@ -213,58 +214,6 @@ fn decode_comment(
     })
 }
 
-impl GhCliDeliveryAuthority {
-    async fn comment_json_input(
-        &self,
-        endpoint: String,
-        body: &str,
-        credential: SourceDeliveryCredential<'_>,
-    ) -> Result<Value, SourceDeliveryError> {
-        let bytes =
-            serde_json::to_vec(&json!({"body":body})).map_err(|_| SourceDeliveryError::Rejected)?;
-        self.comment_api(
-            &[
-                endpoint,
-                "--method".into(),
-                "POST".into(),
-                "--input".into(),
-                "-".into(),
-            ],
-            &bytes,
-            credential,
-        )
-        .await
-    }
-
-    async fn comment_api(
-        &self,
-        arguments: &[String],
-        bytes: &[u8],
-        credential: SourceDeliveryCredential<'_>,
-    ) -> Result<Value, SourceDeliveryError> {
-        self.ensure_instance(credential).await?;
-        let mut command = self.api_command(credential);
-        command
-            .arg("api")
-            .args(arguments)
-            .args(["--header", "X-GitHub-Api-Version: 2026-03-10"]);
-        let secrets = vec![credential.expose().to_owned()];
-        let output =
-            capture_sensitive_with_input(&mut command, self.config.api_deadline, &secrets, bytes)
-                .await
-                .and_then(|output| output.require_success())
-                .map_err(|failure| super::api::command_failure(failure, credential))?;
-        if output.stdout_truncated() {
-            return Err(SourceDeliveryError::api(
-                None,
-                "comment response exceeded its bound",
-            ));
-        }
-        serde_json::from_str(output.stdout())
-            .map_err(|_| SourceDeliveryError::api(None, "comment response was not valid JSON"))
-    }
-}
-
 #[async_trait]
 impl SourceCommentAuthority for GhCliDeliveryAuthority {
     fn validate_comment(
@@ -286,14 +235,13 @@ impl SourceCommentAuthority for GhCliDeliveryAuthority {
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<String, SourceDeliveryError> {
         let value = self
-            .comment_api(
-                &[
-                    "graphql".to_owned(),
-                    "-f".to_owned(),
-                    "query=query { viewer { id } }".to_owned(),
-                ],
-                &[],
+            .bounded_json(
+                Request::Graphql {
+                    document: "query { viewer { id } }",
+                    variables: &json!({}),
+                },
                 credential,
+                MAX_COMMENT_RESPONSE_BYTES,
             )
             .await?;
         let id = value
@@ -318,14 +266,21 @@ impl SourceCommentAuthority for GhCliDeliveryAuthority {
         if page == 0 {
             return Err(SourceDeliveryError::Rejected);
         }
+        let page = page.to_string();
+        let path = repository_path(
+            &destination.repository,
+            &["issues", &destination.discussion_id, "comments"],
+        )?;
         let value = self
-            .comment_api(
-                &[format!(
-                    "repos/{}/issues/{}/comments?per_page=100&page={page}",
-                    destination.repository, destination.discussion_id
-                )],
-                &[],
+            .bounded_json(
+                Request::Rest {
+                    method: Method::GET,
+                    path: &path,
+                    query: &[("per_page", "100"), ("page", &page)],
+                    body: None,
+                },
                 credential,
+                MAX_COMMENT_RESPONSE_BYTES,
             )
             .await?;
         let values = value
@@ -348,14 +303,20 @@ impl SourceCommentAuthority for GhCliDeliveryAuthority {
         body: &str,
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceComment, SourceDeliveryError> {
+        let path = repository_path(
+            &destination.repository,
+            &["issues", &destination.discussion_id, "comments"],
+        )?;
         let value = self
-            .comment_json_input(
-                format!(
-                    "repos/{}/issues/{}/comments",
-                    destination.repository, destination.discussion_id
-                ),
-                body,
+            .bounded_json(
+                Request::Rest {
+                    method: Method::POST,
+                    path: &path,
+                    query: &[],
+                    body: Some(&json!({"body": body})),
+                },
                 credential,
+                MAX_COMMENT_RESPONSE_BYTES,
             )
             .await?;
         decode_comment(value, destination)
@@ -370,15 +331,9 @@ impl SourceCommentAuthority for GhCliDeliveryAuthority {
         if id.is_empty() || !id.bytes().all(|byte| byte.is_ascii_digit()) {
             return Err(SourceDeliveryError::Rejected);
         }
+        let path = repository_path(&destination.repository, &["issues", "comments", id])?;
         let value = self
-            .comment_api(
-                &[format!(
-                    "repos/{}/issues/comments/{id}",
-                    destination.repository
-                )],
-                &[],
-                credential,
-            )
+            .bounded_json(Request::get(&path), credential, MAX_COMMENT_RESPONSE_BYTES)
             .await?;
         decode_comment(value, destination)
     }
@@ -394,15 +349,12 @@ impl SourceCommentAuthority for GhCliDeliveryAuthority {
         if fields.is_empty() {
             return Ok(());
         }
+        let path = repository_path(
+            &destination.repository,
+            &["pulls", &destination.discussion_id],
+        )?;
         let value = self
-            .comment_api(
-                &[format!(
-                    "repos/{}/pulls/{}",
-                    destination.repository, destination.discussion_id
-                )],
-                &[],
-                credential,
-            )
+            .bounded_json(Request::get(&path), credential, MAX_COMMENT_RESPONSE_BYTES)
             .await?;
         for (field, pointer) in [
             ("baseRepository", "/base/repo/full_name"),

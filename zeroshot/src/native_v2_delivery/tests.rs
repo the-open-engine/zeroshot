@@ -66,8 +66,7 @@ mod token_file;
 mod trusted_validation;
 
 use github_fixture::{
-    FakeGitHub, GH_MISMATCH_SCRIPT, GH_SCRIPT, GIT_SCRIPT, Script, argument_lines,
-    delivery_harness, write_executable,
+    FakeGitHub, GH_SCRIPT, GIT_SCRIPT, Script, argument_lines, delivery_harness, write_executable,
 };
 use routing::assert_ci_failure_routes_an_authored_worker_loop;
 

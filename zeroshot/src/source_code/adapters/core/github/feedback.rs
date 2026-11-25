@@ -80,28 +80,25 @@ pub(super) async fn inspect(
 
     let issue_comments = pages::<IssueCommentWire>(
         authority,
-        format!(
-            "repos/{}/issues/{}/comments?per_page=100",
-            review.repository, review.review_id
-        ),
+        &repository_path(
+            &review.repository,
+            &["issues", &review.review_id, "comments"],
+        )?,
         credential,
     )
     .await?;
     let reviews = pages::<ReviewWire>(
         authority,
-        format!(
-            "repos/{}/pulls/{}/reviews?per_page=100",
-            review.repository, review.review_id
-        ),
+        &repository_path(&review.repository, &["pulls", &review.review_id, "reviews"])?,
         credential,
     )
     .await?;
     let review_comments = pages::<ReviewCommentWire>(
         authority,
-        format!(
-            "repos/{}/pulls/{}/comments?per_page=100",
-            review.repository, review.review_id
-        ),
+        &repository_path(
+            &review.repository,
+            &["pulls", &review.review_id, "comments"],
+        )?,
         credential,
     )
     .await?;
@@ -161,21 +158,11 @@ pub(super) async fn can_repair(
     if author.kind.as_deref() == Some("Bot") {
         return Ok(true);
     }
-    let username: String = url::form_urlencoded::byte_serialize(author.login.as_bytes()).collect();
-    let value = match authority
-        .api(
-            &[
-                format!(
-                    "repos/{}/collaborators/{username}/permission",
-                    review.repository
-                ),
-                "--method".to_owned(),
-                "GET".to_owned(),
-            ],
-            credential,
-        )
-        .await
-    {
+    let path = repository_path(
+        &review.repository,
+        &["collaborators", &author.login, "permission"],
+    )?;
+    let value = match authority.rest(Request::get(&path), credential).await {
         Ok(value) => value,
         Err(error) if error.api_status() == Some(404) => return Ok(false),
         Err(error) => return Err(error),
@@ -287,21 +274,10 @@ fn review_comment_item(comment: ReviewCommentWire) -> Option<SourceReviewFeedbac
 
 pub(super) async fn pages<T: serde::de::DeserializeOwned>(
     authority: &GhCliDeliveryAuthority,
-    endpoint: String,
+    path: &[&str],
     credential: SourceDeliveryCredential<'_>,
 ) -> Result<Vec<T>, SourceDeliveryError> {
-    let value = authority
-        .api(
-            &[
-                endpoint,
-                "--method".to_owned(),
-                "GET".to_owned(),
-                "--paginate".to_owned(),
-                "--slurp".to_owned(),
-            ],
-            credential,
-        )
-        .await?;
+    let value = authority.rest_pages(path, credential, false).await?;
     let pages: Vec<Vec<T>> = authority.decode_response(value, credential)?;
     let count = pages
         .iter()
