@@ -21,6 +21,7 @@ struct RequestBackend {
     successor: Option<&'static str>,
     head_parts: Vec<RunId>,
     status_reads: Mutex<Vec<RunStatusParams>>,
+    rejected_answers: Mutex<Vec<(RunSelector, serde_json::Value)>>,
 }
 
 impl RequestBackend {
@@ -47,6 +48,7 @@ impl RequestBackend {
             successor: None,
             head_parts: Default::default(),
             status_reads: Mutex::default(),
+            rejected_answers: Mutex::default(),
         }
     }
 }
@@ -165,6 +167,18 @@ impl NativeV2CliBackend for RequestBackend {
             run_id: params.run_id,
             resumed_from: params.part_id,
         })
+    }
+
+    async fn release_rejected_answer_uploads(
+        &self,
+        run: &RunSelector,
+        output: &serde_json::Value,
+    ) -> Result<(), NativeV2CliError> {
+        self.rejected_answers
+            .lock()
+            .expect("rejected answers")
+            .push((run.clone(), output.clone()));
+        Ok(())
     }
 }
 
@@ -360,13 +374,26 @@ async fn default_resume_of_a_request_names_the_successor_before_answer() {
 #[tokio::test]
 async fn answer_keeps_the_observed_question_part_if_the_head_changes_before_resume() {
     let file = tempfile::NamedTempFile::new().expect("answer file");
-    std::fs::write(
-        file.path(),
-        r#"{"signals":{"decision":"approved"},"output":{}}"#,
-    )
-    .expect("write answer");
     for next_head in ["question-part", "new-part"] {
         let mut backend = RequestBackend::new(false, false);
+        let RunSuspension::Request { request, .. } = &mut backend.suspension else {
+            panic!("request");
+        };
+        request.output = serde_json::from_value(json!({"kind":"record","fields":{
+            "file":{"required":false,"type":{"kind":"filepath"}}
+        }}))
+        .expect("file schema");
+        let answer_output = if next_head == "question-part" {
+            json!({})
+        } else {
+            json!({"file":{"kind":"staged","runId":"private-upload","operation":"answer"}})
+        };
+        std::fs::write(
+            file.path(),
+            serde_json::to_vec(&json!({"signals":{"decision":"approved"},"output":answer_output}))
+                .expect("answer JSON"),
+        )
+        .expect("write answer");
         backend.head_parts = [RunId::new("question-part"), RunId::new(next_head)].into();
         let command = crate::native_v2_cli::parse_native_v2_args(
             ["answer", "original", "--target", "remote", "--input"]
@@ -408,6 +435,13 @@ async fn answer_keeps_the_observed_question_part_if_the_head_changes_before_resu
                 resumes[0].successor_run_id.as_str()
             );
             assert_eq!(receipt["resumedFromPartId"], "question-part");
+            assert!(
+                backend
+                    .rejected_answers
+                    .lock()
+                    .expect("rejected answers")
+                    .is_empty()
+            );
         } else {
             assert!(
                 matches!(result.expect_err("part changed"), NativeV2CliError::Remote {code,details,..}
@@ -416,6 +450,14 @@ async fn answer_keeps_the_observed_question_part_if_the_head_changes_before_resu
             assert!(output.is_empty());
             assert!(resumes.is_empty());
             assert!(backend.resolution.lock().expect("resolution").is_none());
+            let rejected = backend.rejected_answers.lock().expect("rejected answers");
+            assert_eq!(rejected.len(), 1);
+            assert_eq!(rejected[0].0.run_id.as_str(), "original");
+            assert_eq!(
+                rejected[0].0.part_id.as_ref().map(RunId::as_str),
+                Some("question-part")
+            );
+            assert_eq!(rejected[0].1, answer_output);
         }
     }
 }

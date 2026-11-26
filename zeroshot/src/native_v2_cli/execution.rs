@@ -1210,6 +1210,13 @@ async fn execute_answer<B: NativeV2CliBackend, S: DetachSignal, W: Write>(
             Some(error),
         ),
     };
+    // Resume has its own preflight. Keep the observed request's identity and selections if
+    // the head changes or preparation refuses before the owning backend receives the answer.
+    let answer_run = run.clone();
+    let answer_output = match &from {
+        openengine_cluster_protocol::RunResumeFrom::Answer { output, .. } => Some(output.clone()),
+        _ => None,
+    };
     let mut result = execute_resume(
         RunResumeCommand {
             runtime: None,
@@ -1235,6 +1242,14 @@ async fn execute_answer<B: NativeV2CliBackend, S: DetachSignal, W: Write>(
             message.push_str("; answer file: ");
             message.push_str(&input_error);
         }
+    }
+    if result.is_err()
+        && let Some(answer_output) = answer_output
+    {
+        let _ = context
+            .backend
+            .release_rejected_answer_uploads(&answer_run, &answer_output)
+            .await;
     }
     result
 }
