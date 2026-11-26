@@ -177,6 +177,12 @@ pub enum FileRequest {
         run_id: crate::RunId,
         operation: crate::IdempotencyKey,
     },
+    /// Release only the authenticated caller's temporary upload, preserving accepted pins.
+    ReleaseStaged {
+        #[serde(rename = "runId")]
+        run_id: crate::RunId,
+        operation: crate::IdempotencyKey,
+    },
     Cleanup {
         all: bool,
     },
@@ -202,6 +208,7 @@ pub enum FileRequest {
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum FileResponse {
+    Released {},
     Staged {
         #[serde(rename = "runId")]
         run_id: crate::RunId,

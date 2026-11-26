@@ -35,6 +35,21 @@ pub struct FrozenFileInputs {
     pub claim: Option<FileInputClaim>,
 }
 
+/// Only declared filepath fields can select temporary uploads for reclamation.
+pub fn staged_uploads(schema: &PayloadType, value: &Value) -> io::Result<Vec<FilePin>> {
+    let mut uploads = Vec::new();
+    visit(schema, &mut value.clone(), "", &mut |_, value| {
+        if let Ok(RunFileInput::Staged { run_id, operation }) =
+            serde_json::from_value(value.clone())
+        {
+            uploads.push(FilePin { run_id, operation });
+        }
+        Ok(())
+    })
+    .map_err(io::Error::other)?;
+    Ok(uploads)
+}
+
 #[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Source {
@@ -545,17 +560,7 @@ impl WorkspaceFiles {
 
     /// Upload handles are temporary. Accepted inputs have their own immutable private pins.
     pub fn release_staged_inputs(&self, schema: &PayloadType, value: &Value) -> io::Result<()> {
-        let mut uploads = Vec::new();
-        visit(schema, &mut value.clone(), "", &mut |_, value| {
-            if let Ok(RunFileInput::Staged { run_id, operation }) =
-                serde_json::from_value(value.clone())
-            {
-                uploads.push(FilePin { run_id, operation });
-            }
-            Ok(())
-        })
-        .map_err(io::Error::other)?;
-        for upload in uploads {
+        for upload in staged_uploads(schema, value)? {
             self.host.release_upload(&self.input_access(), &upload)?;
         }
         Ok(())

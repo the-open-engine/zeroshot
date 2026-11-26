@@ -145,6 +145,7 @@ fn outage_backend(
             transport: transport.clone(),
             hosted_status: None,
             status_reads: Mutex::default(),
+            answer_files: None,
         }),
         transport,
     )

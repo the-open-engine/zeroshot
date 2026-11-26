@@ -142,6 +142,13 @@ fn local_file_request(
             )?;
             FileReply::Json(FileResponse::Staged { run_id, operation })
         }
+        FileRequest::ReleaseStaged { run_id, operation } => {
+            store.release_upload(
+                access,
+                &zeroshot_engine::native_v2_files::FilePin { run_id, operation },
+            )?;
+            FileReply::Json(FileResponse::Released {})
+        }
         FileRequest::Replace { address, operation } => {
             store.replace(
                 access,

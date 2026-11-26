@@ -595,6 +595,29 @@ where
             .validate_request_ask(require_named_target(target)?)
             .await
     }
+    async fn release_rejected_answer_uploads(
+        &self,
+        run: &super::RunSelector,
+        output: &serde_json::Value,
+    ) -> Result<(), NativeV2CliError> {
+        let request = self
+            .inbox_show(
+                run.target.as_deref(),
+                RunStatusParams {
+                    run_id: run.run_id.clone(),
+                    part_id: run.part_id.clone(),
+                },
+            )
+            .await?;
+        let uploads =
+            crate::native_v2_files::inputs::staged_uploads(&request.request.output, output)?;
+        if !uploads.is_empty() {
+            self.connector
+                .release_staged_uploads(require_named_target(run.target.as_deref())?, &uploads)
+                .await?;
+        }
+        Ok(())
+    }
     async fn run_vectors(
         &self,
         target: Option<&str>,

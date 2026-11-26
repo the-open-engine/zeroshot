@@ -27,6 +27,16 @@ use super::{TargetAuthorityError, TargetOecpAccess, TargetRecord};
 /// The external contract which hosting must implement before the native-v2 CLI can reach Platform.
 #[async_trait]
 pub trait TargetControlAuthority: Send + Sync {
+    async fn release_staged_uploads(
+        &self,
+        _target: &TargetRecord,
+        _uploads: &[zeroshot_engine::native_v2_files::FilePin],
+    ) -> Result<(), TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target upload release is unavailable",
+        ))
+    }
+
     fn redact_error(&self, error: TargetAuthorityError) -> TargetAuthorityError {
         error
     }

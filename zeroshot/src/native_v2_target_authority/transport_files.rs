@@ -194,6 +194,13 @@ impl NativeV2TargetServer {
                     )?;
                     Ok(FileReply::Json(FileResponse::Staged { run_id, operation }))
                 }
+                FileRequest::ReleaseStaged { run_id, operation } => {
+                    mount.host.release_upload(
+                        &access,
+                        &crate::native_v2_files::FilePin { run_id, operation },
+                    )?;
+                    Ok(FileReply::Json(FileResponse::Released {}))
+                }
                 FileRequest::Replace { address, operation } => {
                     mount.host.replace(
                         &access,

@@ -124,7 +124,9 @@ marker means unsupported; existing targets keep serving their other operations.
 All file HTTP operations POST to `/native-v2/files` on the selected target's authenticated origin.
 They use `application/vnd.openengine.file-tree.v1`, explicit `Content-Length`, no redirects and
 `Cache-Control: no-store` responses. A request starts with a big-endian u32 metadata length and
-that many JSON bytes (`FileRequest`). Only `replace` and private `stage` append a binary tree. List/remove/replace/cleanup
+that many JSON bytes (`FileRequest`). Only `replace` and private `stage` append a binary tree. `release_staged` reclaims the authenticated
+caller's temporary upload by `runId` and `operation`, returning `{"kind":"released"}`. It is idempotent
+and never releases accepted input pins. List/remove/replace/cleanup
 responses use `FileResponse` JSON; download responses contain a binary tree directly.
 
 A tree starts with the eight bytes `OEFILES1`. Each entry has a big-endian u32 JSON header length

@@ -94,6 +94,31 @@
         },
         {
           "additionalProperties": false,
+          "description": "Release only the authenticated caller's temporary upload, preserving accepted pins.",
+          "properties": {
+            "action": {
+              "const": "release_staged",
+              "type": "string"
+            },
+            "operation": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+              "type": "string"
+            },
+            "runId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "runId",
+            "operation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "properties": {
             "action": {
               "const": "cleanup",
@@ -209,6 +234,19 @@
     },
     "FileResponse": {
       "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "released",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
         {
           "additionalProperties": false,
           "properties": {

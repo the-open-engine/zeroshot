@@ -2691,7 +2691,9 @@ python -m mkdocs build --strict
   follows declared filepath fields using the admission schema traversal, including on refusals
   and replays; ordinary scalar records never grant upload-release authority. Answers use the
   stored request's output schema, including CLI refusals before resume dispatch, and unavailable
-  request metadata grants no cleanup authority.
+  request metadata grants no cleanup authority. Named-target preflight refusals use the same schema
+  traversal and the authenticated file route to release only caller-owned temporary uploads; accepted
+  pins remain independently owned.
 - Mutable input trees live outside the checkout under a recovery-lineage location exposed as
   `ZEROSHOT_INPUTS` to startup and executions. Project/export absolute input locations even when target
   storage is relative. Apply the host input location after authored preparation variables/connections;
