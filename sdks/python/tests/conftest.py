@@ -269,6 +269,9 @@ elif args and args[0] == "watch":
         previous["partId"] = os.environ["FAKE_HISTORY_PART"]
         previous["cursor"] = previous.pop("atCursor")
         print(json.dumps(previous), flush=True)
+        queued = projection(args[1], {"phase": "queued"}, "current@cloud:0")
+        queued["cursor"] = queued.pop("atCursor")
+        print(json.dumps(queued), flush=True)
     running = projection(
         args[1],
         {
