@@ -719,19 +719,16 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   claim with the shared submission lock released, then rechecks the retained workspace record
   under that lock before it publishes the successor. Checkpoint resumes defer that single check
   until restoration under the controller's workspace lease, before runtime construction and agents.
-  The deferred check observes the controller's stop request: the GitHub project read runs in the
-  shared stop-aware capture, which ends the `gh` process tree with confirmed cleanup, the GitLab
-  request is dropped, and a stopped check never admits the run.
+  The deferred check observes the controller's stop request. Dropping the read-only forge
+  request ends preflight, and a stopped check never admits the run.
   The source adapter factory shares the ten
   proxy/CA fields in `source_code/adapters/core/network` between that check and delivery, filtering
   the same private caller snapshot used by Git; the controller OS environment remains minimal.
   Capture anchors relative CA paths to the invoking directory once, so worktree creation and resume
   cannot reinterpret them. Empty uppercase proxy/bypass values fall back to populated lowercase values.
   Preflight reuses delivery's `source_target` repository selection; caller source IDs may differ
-  from forge repository IDs. GitLab applies captured HTTP/HTTPS/SOCKS proxies, bypasses and PEM trust paths explicitly without changing the
-  process environment. GitHub forwards only those network fields to its isolated `gh` child;
-  on macOS and Windows `gh` honors the CA paths only when built with Go 1.27 or newer and
-  otherwise uses system certificate trust. Proxy URL credentials are redacted
+  from forge repository IDs. GitHub and GitLab apply captured HTTP/HTTPS/SOCKS proxies, bypasses
+  and PEM trust paths to their clients without changing the process environment. Proxy URL credentials are redacted
   before diagnostic bounds and remain private in Git, forge and final delivery feedback.
   Fresh review delivery reconciles the target and returns changed candidates through review before
   its first publication, including when the local feature branch already exists on the remote.
@@ -1574,11 +1571,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   for conflict repair never name it. It flows beside `commitIdentity` from source credentials to
   `NativeV2DeliveryConfig`, the shared transport, and workspace Git. Local resume rejects it, and
   requests without it are byte-identical.
-- Delivery clears the environment of its Git and GitHub CLI processes, so local composition pins
-  delivery Git and, when the GitHub adapter is selected, `gh` to the files `find_executable` finds
-  on the captured search path. Local `run`/`resume` reject a missing one as a usage error with the
-  lane executable check; checkpoint resumes resolve them when the controller composes the restored
-  run, before any agent starts. Hosted composition keeps its fixed `/usr/bin` programs.
+- Delivery pins Git from the captured search path before clearing its process environment.
+  Local run and resume check Git before starting agents. Checkpoint resume resolves Git when the
+  controller composes the restored run. GitHub API calls use the native client; native CLI login
+  resolution remains available for missing forge connections. Hosted Git uses its configured binary.
 - Local controllers may use `ZEROSHOT_GITHUB_TOKEN_FILE` for renewable trusted GitHub delivery
   authority. The private file stays outside the checkout and is reopened at delivery entry and after
   authentication rejection. Explicit `GH_TOKEN` wins and invalid explicit values fail closed. The
@@ -1648,7 +1644,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Local workspace inspection, staging, commits, and reconciliation share transport's private caller
   snapshot and native Git configuration; hosted Git retains isolated global/system configuration.
   Forge target integration, head adoption, and conflict commands reuse that configured transport;
-  forge API subprocesses retain their separate isolated environment.
+  forge API requests use the captured private network configuration.
   Workspace Git and forge reconciliation parse private protocol stdout separately from printable
   diagnostics, including when native credentials collide with object IDs or Git-directory paths;
   parsing and failure classification must preserve raw evidence before credential redaction. Final delivery feedback
@@ -1674,11 +1670,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   repair before staging or reconciliation. Delivery does not inspect or filter user-installed tooling.
 - GitHub delivery treats aggregate merge policy and required contexts as authority, waits through
   merge queues/deferrals, and succeeds only after observing the exact merged result. Merge-method
-  and policy-snapshot queries alone use the same read-only retry mechanism for GitHub's complete
-  native slurped generic query-execution error: three attempts per read, waiting one then two seconds
-  within one API deadline, restarting pagination from page one. Native capture owns that deadline so
-  timeouts retain bounded, redacted partial streams and command context. Classification precedes diagnostic redaction;
-  unknown/mixed/incomplete responses keep existing handling and no HTTP status is invented.
+  and policy-snapshot queries use three read-only attempts for GitHub's recognized generic query
+  execution error or an interrupted response. Wait one then two seconds within one API deadline and
+  restart pagination from page one. All pages share the aggregate response limit. Raw HTTP status
+  and request IDs inform diagnostics even on a broken body. Response-based write outcomes and
+  credential refreshes require a complete reply. Classify protocol evidence before redaction.
   Exhaustion stays terminal through merge reconciliation, retaining the mutation's diagnostic and
   submission uncertainty, and cannot restart through delivery polling;
   ordinary pending CI/queue polling still waits until cancellation by default. Fresh complete policy
@@ -1698,8 +1694,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   retrieval so superseded failures stay pending. A confirmed `merge_conflict` removal without failed required checks is the narrow exception: complete,
   stable queue evidence for the configured repository/base keeps predecessors pending, then fresh
   exact-head policy permits readmission of a clean PR or authenticated materialization of a base
-  conflict. The queue view uses an aliased page-info field to keep `gh` pagination on required checks
-  and is independently bounded to 100 entries; incomplete or changing evidence
+  conflict. Explicit cursor paths keep required-check pagination independent from the queue view,
+  which is bounded to 100 entries; incomplete or changing evidence
   cannot authorize recovery. Missing, stale, superseded or already recovered removal evidence keeps an admission
   pending, including when the PR reports a base conflict. Three readmissions per reviewed head exhaust this exception independently
   of ordinary polling. Retain prior submission uncertainty, ignore already recovered removal events,
@@ -1715,13 +1711,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   delivery returns repair, refusal, error, or cancellation, trusted authority confirms withdrawal
   of queued/auto-merge effects or the exact already-merged revision. Failed withdrawal never
   authorizes agent repair. Authorities that schedule deferred merges must override
-  `withdraw_merge_request`; its default is valid only when no autonomous merge effects exist. Merge commands retain contained process cleanup and use the GitHub API error boundary,
-  never Git repair; changed gates cannot mask a permanent rejection. Configured
-  branch-protection and active branch-ruleset contexts remain pending until they appear as required
+  `withdraw_merge_request`; its default is valid only when no autonomous merge effects exist.
+  Direct merge and enqueue own their bounded HTTP submission across local cancellation. Settle
+  either submission before reconciling withdrawal. Changed gates cannot mask a permanent rejection.
+  Configured branch-protection and active branch-ruleset contexts remain pending until they appear as required
   on the exact PR head. Supplement otherwise-ready observations with all pages of GitHub's effective
   branch-rules API, so a newly opened PR cannot look ready before its required workflow registers.
   Only the known HTTP 403 GitHub Free private-repository plan refusal from that endpoint means no
-  additional rules. Recognize its complete standalone slurped response before diagnostic formatting
+  additional rules. Recognize its complete first response with no pagination before diagnostic formatting
   or credential redaction; permission/unknown errors, partial pagination, malformed, oversized and
   timed-out responses retain their existing error handling.
   Ruleset App bindings require matching check-suite App identity. Legacy status contexts satisfy
@@ -1747,15 +1744,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   credentials without node connections, into successful log reads and bounded API failure diagnostics.
   Classify raw failures before redaction and carry their positions with redacted log text through
   capture, control removal and feedback aggregation; never infer failure positions from redacted text.
-  Classify raw GitHub annotations and unsupported log options before redaction; preserve full-secret
+  Classify raw GitHub annotations before redaction; preserve full-secret
   lookahead when excluding cleanup.
   Supporting checks never acquire merge authority, and unavailable or omitted logs are explicit.
-  Job-log reads opt into raw terminal sequences only inside bounded pipe capture, then remove
-  controls before feedback; older GitHub CLI versions retry without the unsupported opt-in flag.
+  Native Actions log capture follows the authenticated log endpoint’s HTTPS redirect with a bounded
+  tokenless request. Keep signed URLs private and strip terminal controls before feedback.
 - GitHub API permission, schema, and policy failures are delivery execution errors, never candidate
   repair. Authentication rejection remains an explicit refusal. Review synchronization retries only
-  explicitly transient failures and bounded visibility races; an ordinary statusless failure or HTTP
-  403 is not presumed transient. Only typed CI/feedback/conflict outcomes, Git command failures, or
+  explicitly transient failures and bounded visibility races. A broken reply during bound PR metadata
+  synchronization retries from an exact PR and head read. A repeated matching title and body skip the edit. Only typed CI/feedback/conflict outcomes, Git command failures, or
   verified repository/workspace reconciliation may request an agent repair.
 - The built-in `software-change` graph has one `worker` inside its ten-round loop for initial
   implementation, review repairs, and Git/CI repairs. Graph-owned `phase.after` identifies the
@@ -2469,8 +2466,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 ## Validation
 
 Run the narrowest relevant checks first, then the complete affected lane.
-The GitHub queue pagination regression requires `gh` and exercises its native paginator against a
-fake-token loopback endpoint, independently of the shell-based forge fixtures.
+GitHub queue pagination exercises the native client against a fake-token loopback endpoint. Local
+delivery and checkpoint recovery exercise the same HTTP client through a loopback HTTPS forge.
 The local CLI integration root includes its shared fixture before adding request scenarios, so
 other integration suites can reuse the fixture without duplicating those scenarios.
 Suspension and terminal-failure polling share a bounded checkpoint and cleanup budget separate from

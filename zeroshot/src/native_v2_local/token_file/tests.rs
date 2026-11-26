@@ -237,27 +237,25 @@ fn caller_network_snapshot_anchors_ca_paths_for_worktrees_and_resume() {
                 crate::source_code_provider::adapters::core::network::ForgeNetwork::from_snapshot(
                     &captured,
                 );
-            network.validate_certificate_file().unwrap();
-            let mut command = tokio::process::Command::new("gh");
-            network.apply_command(&mut command);
-            let file = command
-                .as_std()
-                .get_envs()
-                .find(|(name, _)| *name == "SSL_CERT_FILE")
-                .and_then(|(_, value)| value)
+            network
+                .client(reqwest::Client::builder())
+                .unwrap()
+                .build()
                 .unwrap();
-            assert_eq!(file, expected_file.as_os_str());
         }
         return;
     }
     let root = tempfile::tempdir().unwrap();
-    std::fs::write(
-        root.path().join("private-ca.pem"),
-        "private certificate fixture",
-    )
-    .unwrap();
-    for name in ["initial-caller", "resuming-caller", "retained-worktree"] {
-        std::fs::create_dir(root.path().join(name)).unwrap();
+    let _tls = crate::source_code_provider::adapters::core::http_fixture::loopback_tls(
+        &root.path().join("private-ca.pem"),
+    );
+    for name in [
+        "initial-caller/ca",
+        "resuming-caller/ca",
+        "retained-worktree",
+        "other-ca",
+    ] {
+        std::fs::create_dir_all(root.path().join(name)).unwrap();
     }
     let dirs = std::env::join_paths(["ca", "../other-ca"]).unwrap();
     for caller in ["initial-caller", "resuming-caller"] {

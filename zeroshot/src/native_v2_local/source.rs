@@ -167,7 +167,7 @@ pub(super) async fn local_transport(
     };
     let token_from_file = if token.is_none()
         && credentials.is_none()
-        && crate::source_code_provider::adapters::core::delivery_uses_github_cli(
+        && crate::source_code_provider::adapters::core::delivery_uses_github(
             source,
             &[crate::source_code_provider::SourceCapability::PullRequest],
         ) {

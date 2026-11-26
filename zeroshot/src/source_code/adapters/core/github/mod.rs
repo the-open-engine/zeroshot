@@ -1,7 +1,10 @@
 use super::ci_diagnostics::JobLog;
+use http::Request;
+use http_api::{GraphqlPages, GraphqlRead, repository_path};
+use reqwest::Method;
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -32,6 +35,8 @@ pub(super) use comment::valid_github_permalink as valid_comment_permalink;
 mod conflict;
 pub(crate) mod conversations;
 mod feedback;
+mod http;
+mod http_api;
 mod metadata;
 mod observation;
 mod push;
@@ -47,9 +52,10 @@ const DEFAULT_PUSH_DEADLINE: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Clone, Debug)]
 pub struct GhCliAuthorityConfig {
-    /// Pinned workspace owner for Git subprocesses; GitHub API commands retain the controller identity.
+    /// Pinned workspace owner for Git subprocesses.
     pub git_identity: Option<crate::execution::process::HostedProcessIdentity>,
     pub git_program: PathBuf,
+    /// Retained for Rust source compatibility. Production API requests use the native client.
     pub gh_program: PathBuf,
     pub home_directory: PathBuf,
     pub api_deadline: Duration,
@@ -75,11 +81,12 @@ pub struct GhCliDeliveryAuthority {
     config: GhCliAuthorityConfig,
     operator_diagnostics: Option<OperatorDiagnosticReporter>,
     transport: Option<crate::native_v2_delivery::transport::GitTransport>,
-    queue_effects: queue::QueueEffects,
+    merge_effects: queue::MergeEffects,
     resolutions: conversations::PendingResolutions,
     published_replies: super::review_responses::PublishedReplies,
     base_url: openengine_cluster_protocol::SourceForgeBaseUrl,
     instance_verified: Arc<tokio::sync::OnceCell<()>>,
+    http: Arc<tokio::sync::OnceCell<http::Http>>,
     network: super::network::ForgeNetwork,
 }
 
@@ -96,18 +103,21 @@ impl GhCliDeliveryAuthority {
             config,
             operator_diagnostics: None,
             transport: None,
-            queue_effects: queue::QueueEffects::default(),
+            merge_effects: queue::MergeEffects::default(),
             resolutions: conversations::PendingResolutions::default(),
             published_replies: super::review_responses::PublishedReplies::default(),
             base_url: openengine_cluster_protocol::SourceForgeBaseUrl::new("https://github.com")
                 .expect("static base URL"),
             instance_verified: Arc::new(tokio::sync::OnceCell::new()),
+            http: Arc::new(tokio::sync::OnceCell::new()),
             network: Default::default(),
         }
     }
 
     pub(crate) fn with_network(mut self, network: super::network::ForgeNetwork) -> Self {
         self.network = network;
+        self.http = Arc::new(tokio::sync::OnceCell::new());
+        self.instance_verified = Arc::new(tokio::sync::OnceCell::new());
         self
     }
 
@@ -169,18 +179,9 @@ impl GhCliDeliveryAuthority {
                     "known PR differs from the admitted delivery target",
                 ));
             }
+            let path = repository_path(&request.target.repository, &["pulls", &known.review_id])?;
             let value = self
-                .api(
-                    &[
-                        format!(
-                            "repos/{}/pulls/{}",
-                            request.target.repository, known.review_id
-                        ),
-                        "--method".to_owned(),
-                        "GET".to_owned(),
-                    ],
-                    credential,
-                )
+                .rest_review_sync(Request::get(&path), credential)
                 .await?;
             let wire: PullRequestWire = self.decode_response(value, credential)?;
             let receipt = review_receipt(wire, request)?;
@@ -192,12 +193,9 @@ impl GhCliDeliveryAuthority {
             return Ok(Some(receipt));
         }
         let value = self
-            .api(
-                &review_list_arguments(
-                    &request.target,
-                    &request.head_branch,
-                    request.include_terminal_reviews,
-                )?,
+            .review_list(
+                (&request.target.repository, &request.head_branch),
+                request.include_terminal_reviews,
                 credential,
             )
             .await?;
@@ -213,27 +211,47 @@ impl GhCliDeliveryAuthority {
         Ok(exact.pop())
     }
 
+    async fn review_list(
+        &self,
+        (repository, head_branch): (&str, &str),
+        include_terminal: bool,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<Value, SourceDeliveryError> {
+        let path = repository_path(repository, &["pulls"])?;
+        let head = format!("{}:{head_branch}", path[1]);
+        let state = if include_terminal { "all" } else { "open" };
+        self.rest(
+            Request::Rest {
+                method: Method::GET,
+                path: &path,
+                query: &[("state", state), ("head", &head)],
+                body: None,
+            },
+            credential,
+        )
+        .await
+    }
+
     async fn create_review(
         &self,
         request: &SourceReviewRequest,
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceReviewReceipt, SourceDeliveryError> {
         let body = pull_request_body(request)?;
+        let path = repository_path(&request.target.repository, &["pulls"])?;
         let value = self
-            .api(
-                &[
-                    format!("repos/{}/pulls", request.target.repository),
-                    "--method".to_owned(),
-                    "POST".to_owned(),
-                    "-f".to_owned(),
-                    format!("title={}", request.title),
-                    "-f".to_owned(),
-                    format!("body={body}"),
-                    "-f".to_owned(),
-                    format!("head={}", request.head_branch),
-                    "-f".to_owned(),
-                    format!("base={}", request.target.target_branch),
-                ],
+            .rest(
+                Request::Rest {
+                    method: Method::POST,
+                    path: &path,
+                    query: &[],
+                    body: Some(&json!({
+                        "title": request.title,
+                        "body": body,
+                        "head": request.head_branch,
+                        "base": request.target.target_branch,
+                    })),
+                },
                 credential,
             )
             .await?;
@@ -264,7 +282,10 @@ impl GhCliDeliveryAuthority {
         wire = self
             .patch_review(
                 review,
-                &[format!("title={}", request.title), format!("body={body}")],
+                (
+                    &json!({"title": request.title, "body": body}),
+                    request.known_review.is_some(),
+                ),
                 credential,
             )
             .await?;
@@ -279,18 +300,21 @@ impl GhCliDeliveryAuthority {
     async fn patch_review(
         &self,
         review: &SourceReviewReceipt,
-        fields: &[String],
+        (body, bound): (&Value, bool),
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<PullRequestWire, SourceDeliveryError> {
-        let mut arguments = vec![
-            format!("repos/{}/pulls/{}", review.repository, review.review_id),
-            "--method".to_owned(),
-            "PATCH".to_owned(),
-        ];
-        for field in fields {
-            arguments.extend(["-f".to_owned(), field.clone()]);
-        }
-        let value = self.api(&arguments, credential).await?;
+        let path = repository_path(&review.repository, &["pulls", &review.review_id])?;
+        let request = Request::Rest {
+            method: Method::PATCH,
+            path: &path,
+            query: &[],
+            body: Some(body),
+        };
+        let value = if bound {
+            self.rest_review_sync(request, credential).await?
+        } else {
+            self.rest(request, credential).await?
+        };
         let wire = serde_json::from_value(value).map_err(|_| SourceDeliveryError::Rejected)?;
         require_review_identity(&wire, review)?;
         Ok(wire)
@@ -301,8 +325,30 @@ impl GhCliDeliveryAuthority {
         review: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<PolicySnapshot, SourceDeliveryError> {
+        let mut variables = review_variables(review)?;
+        variables["head"] = Value::String(review.head_revision.clone());
+        variables["branch"] = Value::String(review.target_branch.clone());
         let value = self
-            .policy_api(&query_arguments(review)?, credential)
+            .graphql_pages(
+                GraphqlPages {
+                    document: policy::POLICY_QUERY,
+                    cursor_path: &[
+                        "data",
+                        "repository",
+                        "pullRequest",
+                        "commits",
+                        "nodes",
+                        "0",
+                        "commit",
+                        "statusCheckRollup",
+                        "contexts",
+                        "pageInfo",
+                    ],
+                    read: GraphqlRead::Policy,
+                },
+                variables,
+                credential,
+            )
             .await?;
         let mut snapshot = classify_policy(value, review)?;
         if matches!(
@@ -311,7 +357,14 @@ impl GhCliDeliveryAuthority {
                 checks: SourceChecks::NotRequired | SourceChecks::Passed
             }
         ) {
-            let rules = self.branch_rules(review, credential).await?;
+            if !crate::source_code_provider::valid_git_branch(&review.target_branch) {
+                return Err(SourceDeliveryError::Rejected);
+            }
+            let path = repository_path(
+                &review.repository,
+                &["rules", "branches", &review.target_branch],
+            )?;
+            let rules = self.rest_pages(&path, credential, true).await?;
             snapshot.apply_branch_rules(rules)?;
         }
         Ok(snapshot)
@@ -345,15 +398,9 @@ impl GhCliDeliveryAuthority {
         review: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<PullRequestWire, SourceDeliveryError> {
+        let path = repository_path(&review.repository, &["pulls", &review.review_id])?;
         let value = self
-            .api(
-                &[
-                    format!("repos/{}/pulls/{}", review.repository, review.review_id),
-                    "--method".to_owned(),
-                    "GET".to_owned(),
-                ],
-                credential,
-            )
+            .rest_review_sync(Request::get(&path), credential)
             .await?;
         serde_json::from_value(value).map_err(|_| SourceDeliveryError::Rejected)
     }
@@ -368,50 +415,40 @@ impl GhCliDeliveryAuthority {
             return Ok(merge_policy::MergeMethod::Queue);
         }
         let value = self
-            .policy_api(&merge_policy::query_arguments(review)?, credential)
+            .graphql_pages(
+                GraphqlPages {
+                    document: merge_policy::MERGE_POLICY_QUERY,
+                    cursor_path: &[
+                        "data",
+                        "repository",
+                        "pullRequest",
+                        "baseRef",
+                        "rules",
+                        "pageInfo",
+                    ],
+                    read: GraphqlRead::Policy,
+                },
+                review_variables(review)?,
+                credential,
+            )
             .await?;
         merge_policy::classify(value, review)
-    }
-
-    async fn submit_merge(
-        &self,
-        review: &SourceReviewReceipt,
-        selected: (merge_policy::MergeMethod, &str),
-        credential: SourceDeliveryCredential<'_>,
-    ) -> Result<(), api::CommandFailure> {
-        let (merge_method, pull_request_id) = selected;
-        if merge_method == merge_policy::MergeMethod::Queue {
-            return queue::enqueue(self, review, pull_request_id, credential).await;
-        }
-        self.ensure_instance(credential)
-            .await
-            .map_err(api::CommandFailure::unknown)?;
-        let mut command = self.api_command(credential);
-        command.args([
-            "pr",
-            "merge",
-            &review.review_id,
-            "--repo",
-            &review.repository,
-            "--match-head-commit",
-            &review.head_revision,
-        ]);
-        command.args(merge_method_argument(merge_method));
-        api::command_status(command, self.config.api_deadline, credential).await
     }
 
     async fn classify_rejected_merge(
         &self,
         review: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
-        failure: &api::CommandFailure,
+        (method, failure): (merge_policy::MergeMethod, &api::MutationFailure),
     ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
         let error = &failure.error;
         if error.cleanup_unconfirmed() {
             return Err(error.clone());
         }
         let mut snapshot = self.policy_snapshot(review, credential).await?;
-        let _ = queue::observe_removal(self, review, &mut snapshot, credential).await?;
+        if method == merge_policy::MergeMethod::Queue {
+            let _ = queue::observe_removal(self, review, &mut snapshot, credential).await?;
+        }
         if !error.authentication_failed()
             && matches!(error.api_status(), None | Some(405 | 409 | 422))
             && failure.rejection == Some(api::MutationRejection::RequiredCheckQueued)
@@ -584,17 +621,16 @@ impl SourceDeliveryAuthority for GhCliDeliveryAuthority {
             MergeAction::Submit { queued } => queued,
         };
         let merge_method = self.merge_method(review, credential, queued).await?;
-        let submitted = self
-            .submit_merge(review, (merge_method, &pull_request_id), credential)
-            .await;
+        let submitted =
+            queue::merge(self, review, (merge_method, &pull_request_id), credential).await;
         match submitted {
             Ok(()) => Ok(SourceMergeRequestOutcome::Accepted),
             Err(failure) => match self
-                .classify_rejected_merge(review, credential, &failure)
+                .classify_rejected_merge(review, credential, (merge_method, &failure))
                 .await
             {
                 Ok(outcome) => Ok(outcome),
-                Err(error) if error.retries_exhausted() => Err(self.policy_read_exhausted(
+                Err(error) if error.retries_exhausted() => Err(self.policy_exhausted(
                     error.with_context(failure.error),
                     "during merge reconciliation",
                     credential,
@@ -622,7 +658,10 @@ impl SourceDeliveryAuthority for GhCliDeliveryAuthority {
         review: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceHeadUpdateOutcome, SourceDeliveryError> {
-        let snapshot = self.policy_snapshot(review, credential).await?;
+        let mut snapshot = self.policy_snapshot(review, credential).await?;
+        if snapshot.head_update.is_some() {
+            let _ = queue::observe_removal(self, review, &mut snapshot, credential).await?;
+        }
         match snapshot.state {
             SourceReviewState::Conflict => Ok(SourceHeadUpdateOutcome::Conflict),
             SourceReviewState::Open { .. } => match snapshot.head_update {
@@ -710,6 +749,7 @@ fn merge_action(snapshot: PolicySnapshot) -> Result<MergeAction, SourceDeliveryE
     Ok(MergeAction::Complete(outcome))
 }
 
+#[cfg(test)]
 const fn merge_method_argument(method: merge_policy::MergeMethod) -> Option<&'static str> {
     match method {
         merge_policy::MergeMethod::Queue => None,
@@ -724,7 +764,9 @@ mod merge_policy;
 mod policy;
 mod source_issue;
 mod wire;
-use policy::{PolicySnapshot, classify_policy, include_check_logs, query_arguments};
+#[cfg(test)]
+use policy::query_arguments;
+use policy::{PolicySnapshot, classify_policy, include_check_logs};
 use source_issue::{connect_source_issue, pull_request_body, refresh_pull_request_body};
 use wire::{PullRequestWire, require_review_identity, review_receipt};
 
@@ -747,6 +789,19 @@ pub(super) fn test_review_request() -> SourceReviewRequest {
     }
 }
 
+fn review_variables(review: &SourceReviewReceipt) -> Result<Value, SourceDeliveryError> {
+    let (owner, name) = review
+        .repository
+        .split_once('/')
+        .ok_or(SourceDeliveryError::Rejected)?;
+    let number = review
+        .review_id
+        .parse::<std::num::NonZeroU64>()
+        .map_err(|_| SourceDeliveryError::Rejected)?;
+    Ok(json!({"owner": owner, "name": name, "number": number.get()}))
+}
+
+#[cfg(test)]
 fn review_query_arguments(
     review: &SourceReviewReceipt,
     query: &str,
@@ -775,61 +830,6 @@ fn review_query_arguments(
         "-F".to_owned(),
         format!("number={number}"),
     ])
-}
-
-fn review_list_arguments(
-    target: &super::DeliveryTarget,
-    head_branch: &str,
-    include_terminal_reviews: bool,
-) -> Result<Vec<String>, SourceDeliveryError> {
-    let owner = target
-        .repository
-        .split_once('/')
-        .map(|(owner, _)| owner)
-        .ok_or(SourceDeliveryError::Rejected)?;
-    Ok(vec![
-        format!("repos/{}/pulls", target.repository),
-        "--method".to_owned(),
-        "GET".to_owned(),
-        "-f".to_owned(),
-        format!(
-            "state={}",
-            if include_terminal_reviews {
-                "all"
-            } else {
-                "open"
-            }
-        ),
-        "-f".to_owned(),
-        format!("head={owner}:{head_branch}"),
-    ])
-}
-
-fn clean_command(
-    config: &GhCliAuthorityConfig,
-    program: &PathBuf,
-    credential: SourceDeliveryCredential<'_>,
-) -> Command {
-    let mut command = Command::new(program);
-    command
-        .kill_on_drop(true)
-        .env_clear()
-        .env("HOME", &config.home_directory)
-        .env("LANG", "C")
-        .env("GH_HOST", "github.com")
-        .env("GH_TOKEN", credential.expose())
-        .env("GH_NO_UPDATE_NOTIFIER", "1")
-        .env("GH_PROMPT_DISABLED", "1")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let mut environment = BTreeMap::from([(
-        "HOME".to_owned(),
-        config.home_directory.to_string_lossy().into_owned(),
-    )]);
-    crate::execution::platform::process_environment(&mut environment);
-    command.envs(environment);
-    command
 }
 
 fn git_command(
@@ -886,3 +886,5 @@ async fn bounded_git_output(
 #[cfg(test)]
 #[path = "tests.rs"]
 mod unit;
+#[cfg(all(test, unix))]
+pub(crate) use unit::policy_page as test_policy_page;

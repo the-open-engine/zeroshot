@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs the local delivery gh lookup regression from a clean copy of this checkout in disposable
+# Runs the local HTTPS delivery and executable lookup tests from this checkout in disposable
 # containers: the rust-toolchain.toml Rust release, CI's Go release for the pinned Restic sidecar
 # that local checkpoints require, and an init process that reaps the detached local controller.
 # Run from the repository root: bash zeroshot/tests/native_v2_local_delivery_gh_search_path/run.sh
@@ -8,7 +8,7 @@ set -euo pipefail
 readonly RUST_IMAGE='rust:1.97.0-bookworm@sha256:8fa55b2f3ddf97471ab6a767bfa3f37e6bad0986ba823e75fea57e2a2a5c3073'
 readonly GO_IMAGE='golang:1.27.1-bookworm@sha256:8d48e12ec56735e9358640898b9d9b9fcca110612ed8a5567438c0a1baa24e66'
 readonly TEST_TARGET=native_v2_local_delivery_gh_search_path
-readonly TEST_NAMES='local_delivery_starts_the_gh_that_the_users_path_finds local_delivery_without_gh_on_the_users_path_is_rejected_before_agents_start'
+readonly TEST_NAMES='local_delivery_starts_the_git_that_the_users_path_finds local_delivery_without_gh_on_the_users_path_reaches_native_forge'
 
 checkout="$PWD"
 if [[ ! -f "$checkout/rust-toolchain.toml" || ! -f "$checkout/zeroshot/tests/$TEST_TARGET.rs" ]]; then
@@ -22,9 +22,9 @@ case "$(docker version --format '{{.Server.Arch}}')" in
 esac
 
 suffix="$$-$(date +%s)-$RANDOM"
-restic_container="zeroshot-local-gh-path-restic-$suffix"
+restic_container="zeroshot-local-forge-restic-$suffix"
 source_container="${restic_container}-source"
-test_container="zeroshot-local-gh-path-test-$suffix"
+test_container="zeroshot-local-forge-test-$suffix"
 scratch="$(mktemp -d)"
 cleanup() {
   docker rm --force "$source_container" "$restic_container" "$test_container" >/dev/null 2>&1 || true

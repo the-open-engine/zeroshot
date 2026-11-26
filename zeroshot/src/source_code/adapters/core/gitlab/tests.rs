@@ -11,8 +11,6 @@ mod ci_tests;
 mod conversation_tests;
 #[path = "feedback_tests.rs"]
 mod feedback_tests;
-#[path = "tests/http_fixture.rs"]
-mod http_fixture;
 #[path = "merge_completion_tests.rs"]
 mod merge_completion_tests;
 #[path = "metadata_tests.rs"]
@@ -21,7 +19,7 @@ mod metadata_tests;
 mod network_tests;
 #[path = "review_selection_tests.rs"]
 mod review_selection_tests;
-use http_fixture::{IntoResponse, Json, Response};
+use crate::source_code_provider::adapters::core::http_fixture::{self, IntoResponse, Json, Response};
 
 const HEAD: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const BASE: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";

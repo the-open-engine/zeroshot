@@ -3,6 +3,7 @@ use crate::native_v2_contract::{ExecutionId, ExecutionRef, NodeInstanceId, NodeI
 use crate::native_v2_delivery::{DeliveryMode, contract};
 use crate::native_v2_delivery::git::test_support::{ConfigLocation, GitFixture};
 use crate::native_v2_runner::{NodeRunRequest, NodeRunner, ResolvedEnvironment};
+use crate::source_code_provider::adapters::core::http_fixture::{self, IntoResponse, Json};
 use openengine_cluster_protocol::{NodeName, WorkerOutcome, WorkerRef};
 
 #[tokio::test]
@@ -47,8 +48,6 @@ async fn local_delivery_uses_caller_snapshot_from_minimal_controller_environment
             &format!("[core]\n autocrlf = {autocrlf}\n[merge]\n log = true\n"),
             ConfigLocation::Home,
         );
-        #[cfg(unix)]
-        let mut fixture = fixture;
         let base = fixture.seed();
         let remote = fixture.root.path().join("remote.git");
         fixture.git(&[
@@ -61,21 +60,21 @@ async fn local_delivery_uses_caller_snapshot_from_minimal_controller_environment
             .assert_value()
             .to_string();
         let review = mode != DeliveryMode::Push;
-        let alias = if review {
-            "https://github.com/fixture/project.git"
+        let forge = if review {
+            Some(advance_github_target(&fixture, &remote).await)
         } else {
-            "https://git.example/project.git"
+            None
         };
+        let alias = forge.as_ref().map_or_else(
+            || "https://git.example/project.git".to_owned(),
+            |forge| format!("{}/fixture/project.git", forge.base),
+        );
         fixture.git(&[
             "config",
             "--global",
             &format!("url.{remote_url}.insteadOf"),
-            alias,
+            &alias,
         ]);
-        #[cfg(unix)]
-        if review {
-            advance_github_target(&mut fixture, &remote);
-        }
         fixture.edit();
         // Every possible object ID collides with at least one captured credential. These
         // values stay private while Git parsers still receive the original IDs and paths.
@@ -85,9 +84,24 @@ async fn local_delivery_uses_caller_snapshot_from_minimal_controller_environment
             native_environment.insert(format!("GIT_COLLISION_{digit}_TOKEN"), digit.to_string());
         }
         let mut remote_input = json!({"url": alias});
+        if let Some(forge) = &forge {
+            native_environment.insert(
+                "SSL_CERT_FILE".to_owned(),
+                forge.ca.to_str().assert_value().to_owned(),
+            );
+            remote_input["forge"] = json!({
+                "provider": "source.github", "repository": "fixture/project", "baseUrl": forge.base,
+            });
+        }
+        let mut binding = json!({"kind": "git_delivery"});
+        let mut connection_values = BTreeMap::new();
         if review {
-            remote_input["forge"] =
-                json!({"provider": "source.github", "repository": "fixture/project"});
+            binding["connections"] = json!({"delivery": ["GH_TOKEN"]});
+            connection_values.insert(
+                openengine_cluster_protocol::EnvironmentVariableName::new("GH_TOKEN")
+                    .assert_value(),
+                "fixture-github-token".to_owned(),
+            );
         }
         let node = json!({
             "kind": "verifier", "name": "deliver", "worker": mode.worker_ref(),
@@ -100,7 +114,7 @@ async fn local_delivery_uses_caller_snapshot_from_minimal_controller_environment
             "title": "Local Git configuration", "initialInput": null,
             "graph": full_graph(vec![node, success_node()]),
             "runtime": {"harness": "codex", "provider": "openai", "size": "small", "nodes": {
-                "deliver": {"kind": "git_delivery"}
+                "deliver": binding
             }},
             "source": {"repository": "fixture/project", "branch": "main", "revision": base,
                 "remote": remote_input},
@@ -119,7 +133,7 @@ async fn local_delivery_uses_caller_snapshot_from_minimal_controller_environment
                 workspace: &fixture.workspace,
                 storage: &fixture.root.path().join("storage"),
                 memory_storage: None,
-                github_token: review.then(|| "fixture-github-token".to_owned()),
+                github_token: None,
                 github_token_file: None,
                 delivery_validator: None,
                 git_credentials: None,
@@ -135,7 +149,7 @@ async fn local_delivery_uses_caller_snapshot_from_minimal_controller_environment
             .start(NodeRunRequest {
                 delivery_state: None,
                 dispatch: Default::default(),
-                environment: ResolvedEnvironment::exact(&binding, BTreeMap::new()).assert_value(),
+                environment: ResolvedEnvironment::exact(&binding, connection_values).assert_value(),
                 invocation: NodeInvocation {
                     reference: ExecutionRef {
                         run_id,
@@ -196,8 +210,19 @@ async fn local_delivery_uses_caller_snapshot_from_minimal_controller_environment
     }
 }
 
-#[cfg(unix)]
-fn advance_github_target(fixture: &mut GitFixture, remote: &Path) {
+struct ForgeFixture {
+    base: String,
+    ca: PathBuf,
+    server: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for ForgeFixture {
+    fn drop(&mut self) {
+        self.server.abort();
+    }
+}
+
+async fn advance_github_target(fixture: &GitFixture, remote: &Path) -> ForgeFixture {
     fixture.git(&["checkout", "-b", "upstream"]);
     std::fs::write(fixture.workspace.join("upstream.txt"), b"upstream\n").assert_value();
     fixture.git(&["add", "--all"]);
@@ -205,31 +230,29 @@ fn advance_github_target(fixture: &mut GitFixture, remote: &Path) {
     fixture.git(&["push", remote.to_str().assert_value(), "HEAD:main"]);
     let revision = String::from_utf8(fixture.git(&["rev-parse", "HEAD"])).assert_value();
     fixture.git(&["checkout", "main"]);
-    let directory = fixture.root.path().join("bin");
-    std::fs::create_dir(&directory).assert_value();
     let reference =
         json!({"ref": "refs/heads/main", "object": {"sha": revision.trim(), "type": "commit"}});
-    openengine_cluster_testkit::fixture::write_executable(
-        &directory.join("gh"),
-        format!(
-            r#"#!/bin/sh
-test -z "${{GIT_CONFIG_NOSYSTEM-}}${{XDG_CONFIG_HOME-}}" || exit 91
-case "$2" in
-  graphql) printf '%s\n' '{{"data":{{"repository":{{"nameWithOwner":"fixture/project","mergeQueue":null}}}}}}' ;;
-  repos/fixture/project/pulls) printf '[]\n' ;;
-  repos/fixture/project/git/ref/heads/main) printf '%s\n' '{reference}' ;;
-  *) printf 'gh: Not Found (HTTP 404)\n' >&2; exit 1 ;;
-esac
-"#
-        ),
-        0o700,
-    )
-    .assert_value();
-    let path = std::env::join_paths(
-        std::iter::once(directory).chain(std::env::split_paths(&fixture.environment["PATH"])),
-    )
-    .assert_value();
-    fixture
-        .environment
-        .insert("PATH".to_owned(), path.into_string().assert_value());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .assert_value();
+    let base = format!("https://{}", listener.local_addr().assert_value());
+    let ca = fixture.root.path().join("forge-ca.pem");
+    let tls = http_fixture::loopback_tls(&ca);
+    let server = tokio::spawn(http_fixture::serve_tls(listener, tls, move |request| {
+        assert_eq!(
+            request.headers["authorization"],
+            "Bearer fixture-github-token"
+        );
+        let value = match request.uri.path() {
+            "/api/v3/meta" => json!({"installed_version":"3.22.2"}),
+            "/api/graphql" => {
+                json!({"data":{"repository":{"nameWithOwner":"fixture/project","mergeQueue":null}}})
+            }
+            "/api/v3/repos/fixture/project/pulls" => json!([]),
+            "/api/v3/repos/fixture/project/git/ref/heads/main" => reference.clone(),
+            _ => return reqwest::StatusCode::NOT_FOUND.into_response(),
+        };
+        Json(value).into_response()
+    }));
+    ForgeFixture { base, ca, server }
 }

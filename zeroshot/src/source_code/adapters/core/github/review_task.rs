@@ -6,12 +6,17 @@ use openengine_cluster_protocol::{
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
+use tokio::time::Instant;
 
+use super::http::{Failure, FailureKind, Http, Reply, Request};
 use crate::native_v2_review::{
     PreparedReview, ReviewResolutionRequest, ReviewResolveError, ReviewTarget, ReviewTargetKind,
     ReviewMetadata,
 };
+use crate::source_code_provider::SourceDeliveryCredential;
 
+const API_VERSION: &str = "2022-11-28";
+const API_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_API_BYTES: usize = 2 * 1024 * 1024;
 const MAX_BODY_BYTES: usize = 1024 * 1024;
 #[path = "review_task/pull.rs"]
@@ -96,23 +101,12 @@ pub(crate) async fn resolve(
     request: ReviewResolutionRequest,
     token: &str,
 ) -> Result<PreparedReview, ReviewResolveError> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .redirect(reqwest::redirect::Policy::none())
-        .user_agent("zeroshot-review")
-        .build()
-        .map_err(|_| ReviewResolveError::Transport)?;
     if token.trim().is_empty() || token.len() > 4096 || token.chars().any(char::is_control) {
         return Err(ReviewResolveError::Credential);
     }
-    resolve_with(
-        request,
-        &HttpMetadata {
-            client,
-            token: token.to_owned(),
-        },
-    )
-    .await
+    let http = Http::for_review(reqwest::Client::builder(), API_VERSION)
+        .map_err(|_| ReviewResolveError::Transport)?;
+    resolve_with(request, &HttpMetadata { http, token }).await
 }
 
 pub(crate) async fn resolve_with(
@@ -252,59 +246,60 @@ async fn get<T: serde::de::DeserializeOwned>(
     serde_json::from_value(value).map_err(|_| ReviewResolveError::Identity)
 }
 
-struct HttpMetadata {
-    client: reqwest::Client,
-    token: String,
+struct HttpMetadata<'a> {
+    http: Http,
+    token: &'a str,
 }
 
 #[async_trait::async_trait]
-impl ReviewMetadata for HttpMetadata {
+impl ReviewMetadata for HttpMetadata<'_> {
     async fn get(&self, path: &str) -> Result<Value, ReviewResolveError> {
-        self.read(self.client.get(format!("https://api.github.com/{path}")))
-            .await
+        decode_reply(
+            self.http
+                .encoded_get(
+                    path,
+                    SourceDeliveryCredential::token(self.token),
+                    (Instant::now() + API_TIMEOUT, MAX_API_BYTES),
+                )
+                .await,
+        )
     }
 
     async fn graphql(&self, query: &str, variables: &Value) -> Result<Value, ReviewResolveError> {
-        self.read(
-            self.client
-                .post("https://api.github.com/graphql")
-                .json(&json!({"query":query,"variables":variables})),
+        decode_reply(
+            self.http
+                .send(
+                    Request::Graphql {
+                        document: query,
+                        variables,
+                    },
+                    SourceDeliveryCredential::token(self.token),
+                    (Instant::now() + API_TIMEOUT, MAX_API_BYTES),
+                )
+                .await,
         )
-        .await
     }
 }
 
-impl HttpMetadata {
-    async fn read(&self, request: reqwest::RequestBuilder) -> Result<Value, ReviewResolveError> {
-        let mut response = request
-            .bearer_auth(&self.token)
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .send()
-            .await
-            .map_err(|_| ReviewResolveError::Transport)?;
-        if !response.status().is_success() {
-            return Err(ReviewResolveError::Http(response.status().as_u16()));
-        }
-        if response
-            .content_length()
-            .is_some_and(|len| len > MAX_API_BYTES as u64)
+fn decode_reply(result: Result<Reply, Failure>) -> Result<Value, ReviewResolveError> {
+    let reply = result.map_err(|failure| {
+        // Review preparation exposes a refusal's status even if its error body was interrupted.
+        if let Some(head) = failure
+            .head
+            .as_ref()
+            .filter(|head| !head.status.is_success())
         {
-            return Err(ReviewResolveError::TooLarge);
+            return ReviewResolveError::Http(head.status.as_u16());
         }
-        let mut bytes = Vec::new();
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|_| ReviewResolveError::Transport)?
-        {
-            if bytes.len().saturating_add(chunk.len()) > MAX_API_BYTES {
-                return Err(ReviewResolveError::TooLarge);
-            }
-            bytes.extend_from_slice(&chunk);
+        match failure.kind {
+            FailureKind::Oversize => ReviewResolveError::TooLarge,
+            _ => ReviewResolveError::Transport,
         }
-        serde_json::from_slice(&bytes).map_err(|_| ReviewResolveError::Identity)
+    })?;
+    if !reply.head.status.is_success() {
+        return Err(ReviewResolveError::Http(reply.head.status.as_u16()));
     }
+    serde_json::from_slice(&reply.body).map_err(|_| ReviewResolveError::Identity)
 }
 
 #[derive(Deserialize)]

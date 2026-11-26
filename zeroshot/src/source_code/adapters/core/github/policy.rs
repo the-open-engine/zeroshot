@@ -10,7 +10,7 @@ use super::super::ci_diagnostics::{MAX_FAILURE_DIAGNOSTIC_CHARS, bounded_text, i
 mod checks;
 use checks::{RequiredChecks, classify_required_checks, failure_diagnostic};
 
-const POLICY_QUERY: &str = r#"
+pub(super) const POLICY_QUERY: &str = r#"
 query($owner: String!, $name: String!, $number: Int!, $endCursor: String, $head: String!, $branch: String!) {
   repository(owner: $owner, name: $name) {
     nameWithOwner
@@ -162,6 +162,7 @@ impl PolicySnapshot {
     }
 }
 
+#[cfg(test)]
 pub(super) fn branch_rules_arguments(
     review: &SourceReviewReceipt,
 ) -> Result<Vec<String>, SourceDeliveryError> {
@@ -330,6 +331,7 @@ struct RepositoryPolicyWire {
     pull_request: Option<PullRequestPolicyWire>,
 }
 
+#[cfg(test)]
 pub(super) fn query_arguments(
     review: &SourceReviewReceipt,
 ) -> Result<Vec<String>, SourceDeliveryError> {

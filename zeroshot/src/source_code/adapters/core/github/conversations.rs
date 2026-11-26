@@ -322,7 +322,21 @@ async fn snapshot(
 ) -> Result<Snapshot, SourceDeliveryError> {
     let (review, comments, ignored_reply) = input;
     let pages = authority
-        .api(&review_query_arguments(review, QUERY)?, credential)
+        .graphql_pages(
+            GraphqlPages {
+                document: QUERY,
+                cursor_path: &[
+                    "data",
+                    "repository",
+                    "pullRequest",
+                    "reviewThreads",
+                    "pageInfo",
+                ],
+                read: GraphqlRead::Once,
+            },
+            review_variables(review)?,
+            credential,
+        )
         .await?;
     let pages = pages.as_array().ok_or_else(invalid)?;
     if pages.is_empty() {
@@ -457,10 +471,10 @@ async fn fresh(
     require_review_identity(&pr, review)?;
     let comments = feedback::pages::<ReviewCommentWire>(
         authority,
-        format!(
-            "repos/{}/pulls/{}/comments?per_page=100",
-            review.repository, review.review_id
-        ),
+        &repository_path(
+            &review.repository,
+            &["pulls", &review.review_id, "comments"],
+        )?,
         credential,
     )
     .await?;
@@ -552,11 +566,14 @@ pub(super) async fn resolve(
     intent.reply = None;
     pending.insert(key.clone(), intent);
     acknowledge(authority, &mut pending, checkpoint).await?;
-    let posted = authority.api(&[
-        "graphql".to_owned(), "-f".to_owned(),
-        "query=mutation($thread:ID!,$body:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$thread,body:$body}){comment{fullDatabaseId}}}".to_owned(),
-        "-f".to_owned(), format!("thread={}", response.thread_id), "-f".to_owned(), format!("body={body}"),
-    ], credential).await;
+    let posted = authority
+        .mutation(
+            (ADD_REPLY, "addPullRequestReviewThreadReply"),
+            &serde_json::json!({"thread": response.thread_id, "body": body}),
+            credential,
+        )
+        .await
+        .map_err(|failure| failure.error);
     let value = match posted {
         Ok(value) => value,
         Err(error) => {
@@ -693,17 +710,31 @@ async fn set_resolved(
     } else {
         "unresolveReviewThread"
     };
-    let value = authority.api(&[
-        "graphql".to_owned(), "-f".to_owned(),
-        format!("query=mutation($thread:ID!){{{mutation}(input:{{threadId:$thread}}){{thread{{id isResolved}}}}}}"),
-        "-f".to_owned(), format!("thread={id}"),
-    ], credential).await?;
+    let query = format!(
+        "mutation($thread:ID!){{{mutation}(input:{{threadId:$thread}}){{thread{{id isResolved}}}}}}"
+    );
+    let value = authority
+        .mutation(
+            (&query, mutation),
+            &serde_json::json!({"thread": id}),
+            credential,
+        )
+        .await
+        .map_err(|failure| failure.error)?;
     let thread = &value["data"][mutation]["thread"];
     if thread["id"].as_str() != Some(id) || thread["isResolved"].as_bool() != Some(resolved) {
         return Err(invalid());
     }
     Ok(())
 }
+
+const ADD_REPLY: &str = r#"
+mutation($thread: ID!, $body: String!) {
+  addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $thread, body: $body}) {
+    comment { fullDatabaseId }
+  }
+}
+"#;
 
 fn invalid() -> SourceDeliveryError {
     SourceDeliveryError::api(

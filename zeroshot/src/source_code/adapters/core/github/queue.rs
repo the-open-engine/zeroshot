@@ -1,9 +1,16 @@
-//! Exact-head queue admission and confirmed withdrawal of autonomous merge effects.
+//! Exact-head merge submissions and confirmed withdrawal of autonomous queue effects.
 use super::*;
-use serde_json::Value;
+use merge_policy::MergeMethod;
+use serde_json::{Value, json};
 
-type QueueIdentity = (String, String, String, String, String);
-type Submission = Result<QueueAdmission, api::CommandFailure>;
+type MergeIdentity = (String, String, String, String, String);
+type Submission = Result<MergeReceipt, api::MutationFailure>;
+
+#[derive(Clone, Debug)]
+enum MergeReceipt {
+    Direct,
+    Queued(QueueAdmission),
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct QueueAdmission {
@@ -18,37 +25,75 @@ pub(super) use outcome::observe_removal;
 pub(super) use recovery::{RecoveryPolicy, recovery_policy};
 
 #[derive(Clone, Debug, Default)]
-pub(super) struct QueueEffects(Arc<tokio::sync::Mutex<BTreeMap<QueueIdentity, QueueEffect>>>);
+pub(super) struct MergeEffects(Arc<tokio::sync::Mutex<BTreeMap<MergeIdentity, MergeEffect>>>);
 
 #[derive(Debug)]
-struct QueueEffect {
-    task: Option<tokio::task::JoinHandle<QueueSubmission>>,
+struct MergeEffect {
+    task: Option<tokio::task::JoinHandle<Submission>>,
     settled: Option<Submission>,
-    uncertain: bool,
+    method: MergeMethod,
+    queue_uncertain: bool,
+    direct_confirmation_required: bool,
     recovered_removals: std::collections::BTreeSet<String>,
     recoverable: Option<String>,
 }
 
-#[derive(Debug)]
-struct QueueSubmission {
-    result: Submission,
-    uncertain: bool,
-}
+impl MergeEffect {
+    fn admission(&self) -> Option<&QueueAdmission> {
+        match self.settled.as_ref()? {
+            Ok(MergeReceipt::Queued(admission)) => Some(admission),
+            _ => None,
+        }
+    }
 
-impl QueueEffect {
+    fn retains_submission(&self, method: MergeMethod) -> bool {
+        // Acceptance awaits observation. An unrepeatable indeterminate response keeps
+        // ownership even when later reads show an empty queue.
+        match self.settled.as_ref() {
+            Some(Ok(_)) => self.recoverable.is_none(),
+            Some(Err(failure)) => self.retains_failure(failure, method),
+            None => self.task.is_some(),
+        }
+    }
+
+    fn retains_failure(&self, failure: &api::MutationFailure, method: MergeMethod) -> bool {
+        if failure.error.cleanup_unconfirmed()
+            || self.method != method && self.has_unresolved_effect()
+        {
+            return true;
+        }
+        match failure.rejection {
+            Some(api::MutationRejection::Policy) => self.method == method,
+            Some(_) => false,
+            None => failure.error.api_status().is_none() && !failure.error.retryable_operation(),
+        }
+    }
+
+    fn has_unresolved_effect(&self) -> bool {
+        self.queue_uncertain || self.direct_confirmation_required || self.task.is_some()
+    }
+
     async fn settle(&mut self) -> Submission {
         if let Some(task) = self.task.as_mut() {
-            let submitted = task.await.unwrap_or_else(|_| QueueSubmission {
-                result: Err(api::CommandFailure::unknown(submission_panicked())),
-                uncertain: true,
+            let result = task.await.unwrap_or_else(|_| {
+                Err(api::MutationFailure::unknown(SourceDeliveryError::api(
+                    None,
+                    "GitHub merge submission task failed before confirming the remote effect",
+                )))
             });
-            self.uncertain |= submitted.uncertain;
-            self.settled = Some(submitted.result);
+            let uncertain = matches!(&result, Err(failure)
+                if failure.rejection.is_none() && uncertain_submission(&failure.error));
+            if self.method == MergeMethod::Queue {
+                self.queue_uncertain |= uncertain;
+            } else {
+                self.direct_confirmation_required |= uncertain || result.is_ok();
+            }
+            self.settled = Some(result);
             self.task = None;
         }
         self.settled
             .clone()
-            .unwrap_or_else(|| Err(api::CommandFailure::unknown(invalid_receipt())))
+            .unwrap_or_else(|| Err(api::MutationFailure::unknown(invalid_receipt())))
     }
 }
 
@@ -58,6 +103,18 @@ mutation($pullRequestId: ID!, $expectedHeadOid: GitObjectID!) {
     mergeQueueEntry {
       id enqueuedAt
       pullRequest { id number repository { nameWithOwner } baseRefName headRefName headRefOid }
+    }
+  }
+}
+"#;
+const MERGE: &str = r#"
+mutation($pullRequestId: ID!, $expectedHeadOid: GitObjectID!, $method: PullRequestMergeMethod!) {
+  mergePullRequest(input: {
+    pullRequestId: $pullRequestId, expectedHeadOid: $expectedHeadOid, mergeMethod: $method
+  }) {
+    pullRequest {
+      id number repository { nameWithOwner } baseRefName headRefName headRefOid
+      merged mergeCommit { oid }
     }
   }
 }
@@ -73,84 +130,93 @@ mutation($pullRequestId: ID!) {
 }
 "#;
 
-pub(super) async fn enqueue(
+pub(super) async fn merge(
     authority: &GhCliDeliveryAuthority,
     review: &SourceReviewReceipt,
-    node_id: &str,
+    (method, node_id): (MergeMethod, &str),
     credential: SourceDeliveryCredential<'_>,
-) -> Result<(), api::CommandFailure> {
-    let mut effects = authority.queue_effects.0.lock().await;
-    let key = identity(review);
-    if let Some(effect) = effects.get_mut(&key) {
-        if effect.task.is_some()
-            || effect.settled.as_ref().is_some_and(|result| {
-                result.is_ok() && effect.recoverable.is_none()
-                    || matches!(result, Err(failure) if failure.error.cleanup_unconfirmed()
-                    || uncertain_submission(&failure.error) && !failure.error.retryable_operation()
-                        && failure.rejection != Some(api::MutationRejection::RequiredCheckQueued))
-            })
-        {
-            return effect.settle().await.map(|_| ());
-        }
+) -> Result<(), api::MutationFailure> {
+    if node_id.trim().is_empty() {
+        return Err(api::MutationFailure::unknown(invalid_receipt()));
     }
-    {
-        let uncertain = effects.get(&key).is_some_and(|effect| effect.uncertain);
-        let mut recovered_removals = effects
-            .get(&key)
-            .map(|effect| effect.recovered_removals.clone())
-            .unwrap_or_default();
-        if let Some(removal) = effects
-            .get(&key)
-            .and_then(|effect| effect.recoverable.clone())
-        {
-            recovered_removals.insert(removal);
+    let mut effects = authority.merge_effects.0.lock().await;
+    let effect = effects
+        .entry(identity(review))
+        .or_insert_with(|| MergeEffect {
+            task: None,
+            settled: None,
+            method,
+            queue_uncertain: false,
+            direct_confirmation_required: false,
+            recovered_removals: Default::default(),
+            recoverable: None,
+        });
+    if !effect.retains_submission(method) {
+        if let Some(removal) = effect.recoverable.take() {
+            effect.recovered_removals.insert(removal);
         }
-        let mut command = mutation(authority, ENQUEUE, node_id, credential)
-            .map_err(api::CommandFailure::unknown)?;
-        command.args(["-f", &format!("expectedHeadOid={}", review.head_revision)]);
+        let authority = authority.clone();
         let token = credential.expose().to_owned();
-        let deadline = authority.config.api_deadline;
         let review = review.clone();
         let node_id = node_id.to_owned();
-        let task = tokio::spawn(async move {
-            let response = api::command_json(
-                command,
-                deadline,
+        effect.method = method;
+        effect.settled = None;
+        effect.task = Some(tokio::spawn(async move {
+            submit(
+                &authority,
+                &review,
+                (method, &node_id),
                 SourceDeliveryCredential::token(&token),
-                Some("enqueuePullRequest"),
             )
-            .await;
-            let rejected = response
-                .as_ref()
-                .err()
-                .is_some_and(|failure| failure.rejection.is_some());
-            let result = response.and_then(|value| {
-                confirm_receipt(value, &review, &node_id).map_err(api::CommandFailure::unknown)
-            });
-            QueueSubmission {
-                uncertain: !rejected
-                    && matches!(&result, Err(failure) if uncertain_submission(&failure.error)),
-                result,
-            }
-        });
-        effects.insert(
-            key.clone(),
-            QueueEffect {
-                task: Some(task),
-                settled: None,
-                uncertain,
-                recovered_removals,
-                recoverable: None,
-            },
-        );
+            .await
+        }));
     }
     // Retain the task when this future is cancelled; withdrawal drains that same request first.
-    effects
-        .get_mut(&key)
-        .ok_or_else(|| api::CommandFailure::unknown(invalid_receipt()))?
-        .settle()
-        .await
-        .map(|_| ())
+    effect.settle().await.map(|_| ())
+}
+
+async fn submit(
+    authority: &GhCliDeliveryAuthority,
+    review: &SourceReviewReceipt,
+    (method, node_id): (MergeMethod, &str),
+    credential: SourceDeliveryCredential<'_>,
+) -> Submission {
+    let mut variables = json!({
+        "pullRequestId": node_id,
+        "expectedHeadOid": review.head_revision,
+    });
+    let direct = match method {
+        MergeMethod::Queue => None,
+        MergeMethod::Merge => Some("MERGE"),
+        MergeMethod::Squash => Some("SQUASH"),
+        MergeMethod::Rebase => Some("REBASE"),
+    };
+    let Some(direct) = direct else {
+        let value = authority
+            .mutation((ENQUEUE, "enqueuePullRequest"), &variables, credential)
+            .await?;
+        return confirm_receipt(value, review, node_id)
+            .map(MergeReceipt::Queued)
+            .map_err(api::MutationFailure::unknown);
+    };
+    variables["method"] = json!(direct);
+    let value = authority
+        .mutation((MERGE, "mergePullRequest"), &variables, credential)
+        .await?;
+    let pull = &value["data"]["mergePullRequest"]["pullRequest"];
+    (matches_review(pull, review, node_id)
+        && pull["merged"] == true
+        && pull
+            .pointer("/mergeCommit/oid")
+            .and_then(Value::as_str)
+            .is_some_and(valid_revision))
+    .then_some(MergeReceipt::Direct)
+    .ok_or_else(|| {
+        api::MutationFailure::unknown(SourceDeliveryError::api(
+            None,
+            "GitHub returned an invalid direct merge receipt or identity",
+        ))
+    })
 }
 
 fn confirm_receipt(
@@ -166,7 +232,18 @@ fn confirm_receipt(
         .get("id")
         .and_then(Value::as_str)
         .is_some_and(|id| !id.is_empty())
-        && pull.get("id").and_then(Value::as_str) == Some(node_id)
+        && matches_review(pull, review, node_id);
+    valid
+        .then_some(QueueAdmission {
+            entry_id: entry["id"].as_str().ok_or_else(invalid_receipt)?.to_owned(),
+            enqueued_at: queue_timestamp(&entry["enqueuedAt"]).ok_or_else(invalid_receipt)?,
+            pull_request_id: node_id.to_owned(),
+        })
+        .ok_or_else(invalid_receipt)
+}
+
+fn matches_review(pull: &Value, review: &SourceReviewReceipt, node_id: &str) -> bool {
+    pull.get("id").and_then(Value::as_str) == Some(node_id)
         && pull
             .get("number")
             .and_then(Value::as_u64)
@@ -179,14 +256,7 @@ fn confirm_receipt(
             == Some(review.repository.as_str())
         && pull.get("baseRefName").and_then(Value::as_str) == Some(review.target_branch.as_str())
         && pull.get("headRefName").and_then(Value::as_str) == Some(review.head_branch.as_str())
-        && pull.get("headRefOid").and_then(Value::as_str) == Some(review.head_revision.as_str());
-    valid
-        .then_some(QueueAdmission {
-            entry_id: entry["id"].as_str().ok_or_else(invalid_receipt)?.to_owned(),
-            enqueued_at: queue_timestamp(&entry["enqueuedAt"]).ok_or_else(invalid_receipt)?,
-            pull_request_id: node_id.to_owned(),
-        })
-        .ok_or_else(invalid_receipt)
+        && pull.get("headRefOid").and_then(Value::as_str) == Some(review.head_revision.as_str())
 }
 
 fn queue_timestamp(value: &Value) -> Option<time::OffsetDateTime> {
@@ -203,15 +273,21 @@ pub(super) async fn withdraw(
     credential: SourceDeliveryCredential<'_>,
 ) -> Result<SourceMergeWithdrawal, SourceDeliveryError> {
     let key = identity(review);
-    let mut effects = authority.queue_effects.0.lock().await;
-    let uncertain = match effects.get_mut(&key) {
+    let mut effects = authority.merge_effects.0.lock().await;
+    let (queue_uncertain, direct_confirmation_required) = match effects.get_mut(&key) {
         Some(effect) => match effect.settle().await {
             Err(failure) if failure.error.cleanup_unconfirmed() => return Err(failure.error),
-            _ => effect.uncertain,
+            _ => (effect.queue_uncertain, effect.direct_confirmation_required),
         },
-        None => false,
+        None => (false, false),
     };
-    let result = withdraw_confirmed(authority, review, (credential, uncertain)).await;
+    let result = withdraw_confirmed(authority, review, (credential, queue_uncertain)).await;
+    if direct_confirmation_required && matches!(result, Ok(SourceMergeWithdrawal::Withdrawn)) {
+        return Err(SourceDeliveryError::api(
+            None,
+            "direct merge submission remains unconfirmed; an empty observation cannot authorize repair",
+        ));
+    }
     if result.is_ok() {
         effects.remove(&key);
     }
@@ -227,9 +303,9 @@ async fn withdraw_confirmed(
     review: &SourceReviewReceipt,
     context: (SourceDeliveryCredential<'_>, bool),
 ) -> Result<SourceMergeWithdrawal, SourceDeliveryError> {
-    let (credential, uncertain) = context;
+    let (credential, queue_uncertain) = context;
     let mut snapshot = authority.policy_snapshot(review, credential).await?;
-    require_observed_submission(&snapshot, uncertain)?;
+    require_observed_submission(&snapshot, queue_uncertain)?;
     // Disable old CLI auto-merge intent first: otherwise removing an entry could re-enqueue it.
     for query in [DISABLE_AUTO_MERGE, DEQUEUE] {
         if let Some(settled) = withdrawal(&snapshot)? {
@@ -261,9 +337,9 @@ async fn withdraw_confirmed(
 
 fn require_observed_submission(
     snapshot: &PolicySnapshot,
-    uncertain: bool,
+    queue_uncertain: bool,
 ) -> Result<(), SourceDeliveryError> {
-    if uncertain
+    if queue_uncertain
         && !snapshot.is_in_merge_queue
         && !matches!(snapshot.state, SourceReviewState::Merged { .. })
     {
@@ -282,19 +358,19 @@ async fn withdraw_step(
     credential: SourceDeliveryCredential<'_>,
 ) -> Result<PolicySnapshot, SourceDeliveryError> {
     let (review, node_id) = identity;
-    let submitted = api::command_json(
-        mutation(authority, query, node_id, credential)?,
-        authority.config.api_deadline,
-        credential,
-        None,
-    )
-    .await
-    .map_err(|failure| failure.error);
-    if let Err(error) = &submitted {
-        if error.cleanup_unconfirmed() {
-            return Err(error.clone());
-        }
-    }
+    let field = if query == DISABLE_AUTO_MERGE {
+        "disablePullRequestAutoMerge"
+    } else {
+        "dequeuePullRequest"
+    };
+    let submitted = authority
+        .mutation(
+            (query, field),
+            &json!({"pullRequestId": node_id}),
+            credential,
+        )
+        .await
+        .map_err(|failure| failure.error);
     let observed = authority.policy_snapshot(review, credential).await;
     if let Ok(snapshot) = &observed {
         if withdrawal(snapshot)?.is_some()
@@ -324,28 +400,7 @@ fn withdrawal(
     )
 }
 
-fn mutation(
-    authority: &GhCliDeliveryAuthority,
-    query: &str,
-    node_id: &str,
-    credential: SourceDeliveryCredential<'_>,
-) -> Result<Command, SourceDeliveryError> {
-    if node_id.trim().is_empty() {
-        return Err(invalid_receipt());
-    }
-    let mut command = authority.api_command(credential);
-    command.args([
-        "api",
-        "graphql",
-        "-f",
-        &format!("query={query}"),
-        "-f",
-        &format!("pullRequestId={node_id}"),
-    ]);
-    Ok(command)
-}
-
-fn identity(review: &SourceReviewReceipt) -> QueueIdentity {
+fn identity(review: &SourceReviewReceipt) -> MergeIdentity {
     (
         review.repository.clone(),
         review.review_id.clone(),
@@ -360,20 +415,4 @@ fn invalid_receipt() -> SourceDeliveryError {
         None,
         "GitHub returned an invalid merge queue receipt or identity",
     )
-}
-
-fn submission_panicked() -> SourceDeliveryError {
-    SourceDeliveryError::Command(Box::new(crate::native_v2_delivery::GitCommandFailure {
-        command: "gh api graphql enqueuePullRequest".into(),
-        working_directory: "[PRIVATE]".into(),
-        exit_status: None,
-        stdout: String::new(),
-        stderr: String::new(),
-        stdout_truncated: false,
-        stderr_truncated: false,
-        context: "merge queue submission panicked; process cleanup is unconfirmed".into(),
-        timed_out: false,
-        cleanup_unconfirmed: true,
-        classification: None,
-    }))
 }

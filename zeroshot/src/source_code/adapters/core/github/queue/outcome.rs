@@ -40,6 +40,18 @@ query QueueOutcome($owner: String!, $name: String!, $number: Int!, $endCursor: S
   }
 }
 "#;
+const OUTCOME_PAGE_INFO: &[&str] = &[
+    "data",
+    "repository",
+    "pullRequest",
+    "timelineItems",
+    "nodes",
+    "0",
+    "beforeCommit",
+    "statusCheckRollup",
+    "contexts",
+    "pageInfo",
+];
 
 pub(in super::super) async fn observe_removal(
     authority: &GhCliDeliveryAuthority,
@@ -54,7 +66,7 @@ pub(in super::super) async fn observe_removal(
         return Ok(None);
     }
     let admission = {
-        let mut effects = authority.queue_effects.0.lock().await;
+        let mut effects = authority.merge_effects.0.lock().await;
         let Some(effect) = effects.get_mut(&identity(review)) else {
             return Ok(None);
         };
@@ -62,6 +74,11 @@ pub(in super::super) async fn observe_removal(
         effect.recoverable = None;
         if effect.task.as_ref().is_some_and(|task| task.is_finished()) {
             let _ = effect.settle().await;
+        }
+        if effect.method != MergeMethod::Queue
+            && (effect.task.is_some() || matches!(effect.settled, Some(Ok(MergeReceipt::Direct))))
+        {
+            return recovery::pending(snapshot).map(|()| None);
         }
         // Exact-head check failures need no removal proof; repair still requires withdrawal.
         if matches!(
@@ -73,34 +90,33 @@ pub(in super::super) async fn observe_removal(
             return Ok(None);
         }
         if snapshot.is_in_merge_queue
-            || (effect.uncertain || effect.task.is_some())
+            || effect.has_unresolved_effect()
                 && (matches!(snapshot.state, SourceReviewState::Conflict)
                     || snapshot.head_update.is_some())
         {
             return recovery::pending(snapshot).map(|()| None);
         }
-        effect
-            .settled
-            .as_ref()
-            .and_then(|result| result.as_ref().ok())
-            .cloned()
+        effect.admission().cloned()
     };
     let Some(admission) = admission else {
         return Ok(None);
     };
     let value = authority
-        .api(&review_query_arguments(review, OUTCOME_QUERY)?, credential)
+        .graphql_pages(
+            GraphqlPages {
+                document: OUTCOME_QUERY,
+                cursor_path: OUTCOME_PAGE_INFO,
+                read: GraphqlRead::Once,
+            },
+            review_variables(review)?,
+            credential,
+        )
         .await?;
-    let effects = authority.queue_effects.0.lock().await;
+    let effects = authority.merge_effects.0.lock().await;
     let Some(effect) = effects.get(&identity(review)) else {
         return recovery::pending(snapshot).map(|()| None);
     };
-    if effect
-        .settled
-        .as_ref()
-        .and_then(|result| result.as_ref().ok())
-        != Some(&admission)
-    {
+    if effect.admission() != Some(&admission) {
         return recovery::pending(snapshot).map(|()| None);
     }
     if let Some((removal, checks)) = removed_candidate(value, review, &admission)? {
@@ -149,13 +165,9 @@ impl RemovalFailure {
         review: &SourceReviewReceipt,
         snapshot: &mut PolicySnapshot,
     ) -> Result<(), SourceDeliveryError> {
-        let effects = authority.queue_effects.0.lock().await;
+        let effects = authority.merge_effects.0.lock().await;
         if effects.get(&identity(review)).is_some_and(|effect| {
-            effect
-                .settled
-                .as_ref()
-                .and_then(|result| result.as_ref().ok())
-                == Some(&self.admission)
+            effect.admission() == Some(&self.admission)
                 && !effect.recovered_removals.contains(&self.removal_id)
         }) {
             Ok(())

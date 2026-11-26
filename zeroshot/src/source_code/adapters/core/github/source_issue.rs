@@ -19,7 +19,11 @@ pub(super) async fn connect_source_issue(
     if !body_has_closing_reference(wire.body.as_deref(), &closing_reference) {
         let body = refresh_pull_request_body(wire.body.as_deref(), request)?;
         let updated = authority
-            .patch_review(review, &[format!("body={body}")], credential)
+            .patch_review(
+                review,
+                (&json!({"body": body}), request.known_review.is_some()),
+                credential,
+            )
             .await?;
         if updated.body.as_deref() != Some(body.as_str()) {
             return Err(SourceDeliveryError::Rejected);
@@ -39,62 +43,68 @@ async fn comment_on_source_issue(
         .as_ref()
         .ok_or(SourceDeliveryError::Rejected)?;
     let marker = delivery_comment_marker(&request.head_branch);
-    let value = authority
-        .api(
-            &[
-                format!("repos/{}/issues/{}", review.repository, issue.number),
-                "--method".to_owned(),
-                "GET".to_owned(),
-            ],
-            credential,
-        )
-        .await?;
+    let issue_number = issue.number.to_string();
+    let path = repository_path(&review.repository, &["issues", &issue_number])?;
+    let value = authority.rest(Request::get(&path), credential).await?;
+    let comments_path =
+        repository_path(&review.repository, &["issues", &issue_number, "comments"])?;
     let issue_wire: IssueWire =
         serde_json::from_value(value).map_err(|_| SourceDeliveryError::Rejected)?;
     let last_comment_page = issue_wire.comments.saturating_sub(1) / 100 + 1;
+    if has_delivery_marker(
+        authority,
+        (&comments_path, last_comment_page),
+        &marker,
+        credential,
+    )
+    .await?
+    {
+        return Ok(());
+    }
+    let body = format!(
+        "Zeroshot opened pull request #{} for this issue.\n\n{}",
+        review.review_id, marker,
+    );
+    authority
+        .rest(
+            Request::Rest {
+                method: Method::POST,
+                path: &comments_path,
+                query: &[],
+                body: Some(&json!({"body": body})),
+            },
+            credential,
+        )
+        .await?;
+    Ok(())
+}
+
+async fn has_delivery_marker(
+    authority: &GhCliDeliveryAuthority,
+    (comments_path, last_comment_page): (&[&str], u64),
+    marker: &str,
+    credential: SourceDeliveryCredential<'_>,
+) -> Result<bool, SourceDeliveryError> {
     for page in 1..=last_comment_page {
+        let page = page.to_string();
         let value = authority
-            .api(
-                &[
-                    format!(
-                        "repos/{}/issues/{}/comments",
-                        review.repository, issue.number
-                    ),
-                    "--method".to_owned(),
-                    "GET".to_owned(),
-                    "-f".to_owned(),
-                    "per_page=100".to_owned(),
-                    "-f".to_owned(),
-                    format!("page={page}"),
-                ],
+            .rest(
+                Request::Rest {
+                    method: Method::GET,
+                    path: comments_path,
+                    query: &[("per_page", "100"), ("page", &page)],
+                    body: None,
+                },
                 credential,
             )
             .await?;
         let comments: Vec<IssueCommentWire> =
             serde_json::from_value(value).map_err(|_| SourceDeliveryError::Rejected)?;
-        if comments_have_marker(&comments, &marker) {
-            return Ok(());
+        if comments_have_marker(&comments, marker) {
+            return Ok(true);
         }
     }
-    authority
-        .api(
-            &[
-                format!(
-                    "repos/{}/issues/{}/comments",
-                    review.repository, issue.number
-                ),
-                "--method".to_owned(),
-                "POST".to_owned(),
-                "-f".to_owned(),
-                format!(
-                    "body=Zeroshot opened pull request #{} for this issue.\n\n{}",
-                    review.review_id, marker
-                ),
-            ],
-            credential,
-        )
-        .await?;
-    Ok(())
+    Ok(false)
 }
 
 fn closing_reference(issue_number: u64) -> String {
