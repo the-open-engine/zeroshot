@@ -1492,3 +1492,5 @@ mod cleanup_tests;
 mod lifecycle_tests;
 #[cfg(all(test, unix))]
 mod test_support;
+#[cfg(all(test, target_os = "linux"))]
+mod workspace_tests;

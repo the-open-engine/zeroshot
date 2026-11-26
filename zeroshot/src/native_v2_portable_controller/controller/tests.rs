@@ -12,6 +12,8 @@ use super::*;
 
 #[path = "tests/continuation.rs"]
 mod continuation;
+#[path = "tests/file_inputs.rs"]
+mod file_inputs;
 #[path = "tests/settlement.rs"]
 mod settlement;
 
