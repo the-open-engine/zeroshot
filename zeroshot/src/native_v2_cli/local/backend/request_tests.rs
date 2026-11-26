@@ -352,11 +352,12 @@ async fn answer_preflight_errors_leave_no_successor_or_recovery_mutation() {
 #[tokio::test]
 async fn refused_local_answer_preserves_files_owned_by_another_attempt() {
     let root = TestDirectory::new("local-refused-answer-files");
-    let workspace = root.child("workspace");
+    let root_path = root.path().canonicalize().assert_value();
+    let workspace = root_path.join("workspace");
     std::fs::create_dir(&workspace).assert_value();
     let backend = LocalCliBackend::new(
-        root.child("state"),
-        root.child("missing-controller"),
+        root_path.join("state"),
+        root_path.join("missing-controller"),
         workspace.clone(),
         "git".into(),
     );
