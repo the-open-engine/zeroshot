@@ -58,6 +58,114 @@ fn read(value: &Value, field: &str) -> String {
 }
 
 #[test]
+fn parent_relative_local_inputs_freeze_before_sources_disappear() {
+    let root = tempdir();
+    let files = files(root.path());
+    let invoking = root.path().join("invoking");
+    let source = root.path().join("dataset");
+    std::fs::create_dir(&invoking).unwrap();
+    std::fs::create_dir(&source).unwrap();
+    std::fs::write(source.join("data.csv"), "accepted bytes").unwrap();
+    let value = json!({"left":"../dataset/data.csv", "right":"../dataset"});
+    let freeze = || {
+        files.freeze_file_inputs(InputAdmission {
+            run_id: &RunId::new("run"),
+            owner: &RunId::new("run"),
+            key: &operation("key"),
+            schema: &schema(),
+            value: &value,
+            local_root: Some(&invoking),
+        })
+    };
+    let accepted = freeze().unwrap().value;
+    std::fs::remove_dir_all(source).unwrap();
+    assert_eq!(freeze().unwrap().value, accepted);
+    files
+        .materialize_file_inputs(&RunId::new("run"), false)
+        .unwrap();
+    assert_eq!(read(&accepted, "left"), "accepted bytes");
+    assert_eq!(
+        std::fs::read(Path::new(accepted["right"].as_str().unwrap()).join("data.csv")).unwrap(),
+        b"accepted bytes"
+    );
+    files.release_file_inputs(&RunId::new("run")).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn parent_relative_local_inputs_do_not_hide_link_traversal() {
+    let root = tempdir();
+    let files = files(root.path());
+    let invoking = root.path().join("invoking");
+    std::fs::create_dir(&invoking).unwrap();
+    std::fs::write(root.path().join("data.csv"), "private bytes").unwrap();
+    std::os::unix::fs::symlink(&invoking, invoking.join("alias")).unwrap();
+    let result = files.freeze_file_inputs(InputAdmission {
+        run_id: &RunId::new("run"),
+        owner: &RunId::new("run"),
+        key: &operation("key"),
+        schema: &PayloadType::Filepath,
+        value: &json!("alias/../../data.csv"),
+        local_root: Some(&invoking),
+    });
+    assert!(result.is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn unreadable_input_directories_can_be_restarted_and_released() {
+    use std::os::unix::fs::PermissionsExt;
+    for mode in [0o000, 0o300] {
+        let root = tempdir();
+        let files = files(root.path());
+        let source = root.path().join("dataset");
+        std::fs::create_dir_all(source.join("nested")).unwrap();
+        std::fs::write(source.join("nested/data"), "accepted bytes").unwrap();
+        let original = std::fs::metadata(&source).unwrap().permissions();
+        let value = json!({"left":staged(&files, &source, "left"), "right":staged(&files, &source, "right")});
+        let (run, input) = admit(&files, &value, ("run", "run", "key")).unwrap();
+        files.release_staged_inputs(&schema(), &value).unwrap();
+        files.materialize_file_inputs(&run, false).unwrap();
+        let authority = files.file_input_authority_roots(&run).unwrap();
+        for restart in [true, false] {
+            let copy = Path::new(input["left"].as_str().unwrap());
+            let key_root = copy.parent().unwrap();
+            // Repair must reach a sealed key root, a sealed selected folder and its child.
+            for directory in [copy.join("nested"), copy.to_owned(), key_root.to_owned()] {
+                std::fs::set_permissions(directory, std::fs::Permissions::from_mode(mode)).unwrap();
+            }
+            let recorded_authority = files.file_input_authority_roots(&run);
+            let result = if restart {
+                files.materialize_file_inputs(&run, true).map(|_| ())
+            } else {
+                files.release_file_inputs(&run)
+            };
+            // Keep a failing fixture disposable, including under a non-root account.
+            if result.is_err() || recorded_authority.is_err() {
+                for directory in [key_root.to_owned(), copy.to_owned(), copy.join("nested")] {
+                    let _ =
+                        std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700));
+                }
+            }
+            assert_eq!(recorded_authority.unwrap(), authority);
+            result.unwrap();
+            if restart {
+                assert_eq!(
+                    std::fs::read(copy.join("nested/data")).unwrap(),
+                    b"accepted bytes"
+                );
+            }
+        }
+        assert!(!Path::new(input["left"].as_str().unwrap()).exists());
+        assert_eq!(std::fs::metadata(&source).unwrap().permissions(), original);
+        assert_eq!(
+            std::fs::read(source.join("nested/data")).unwrap(),
+            b"accepted bytes"
+        );
+    }
+}
+
+#[test]
 fn cleanup_refuses_redirected_input_ancestors_and_preserves_external_files() {
     for depth in [0, 1, 2] {
         let root = tempdir();

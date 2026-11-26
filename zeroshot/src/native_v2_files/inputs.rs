@@ -413,8 +413,14 @@ impl WorkspaceFiles {
                     )?;
                 }
                 Source::Local { path } => {
+                    // Resolve caller-relative parents only when acquiring a new pin. Replays
+                    // remain independent of the original, which may no longer exist. Refuse
+                    // links before canonicalization could hide a link followed by `..`.
+                    let _ancestors = paths::guard_ancestors(path)?;
+                    paths::reject_links(path)?;
+                    let source = path.canonicalize()?;
                     let mut transfer = super::new_transfer(&self.directory.join("transfers"))?;
-                    super::pack(path, &mut transfer)?;
+                    super::pack(&source, &mut transfer)?;
                     transfer.rewind()?;
                     self.host.stage(&access, &pin, &mut transfer)?;
                 }
@@ -454,9 +460,11 @@ impl WorkspaceFiles {
                 // Refuse redirected ancestry before canonicalization can hide it. Windows guards
                 // also keep the ancestry unchanged while its ordinary spelling is canonicalized.
                 paths::reject_links(&root)?;
-                // The runner is prepared before startup materializes inputs. Record the missing
-                // suffix beneath its canonical existing ancestor, without creating mutable trees.
-                let mut existing = root.as_path();
+                // Startup has not repaired/materialized the mutable key root yet. Anchor its
+                // spelling to host-owned ancestry without requiring read access to that root.
+                let mut existing = root
+                    .parent()
+                    .ok_or_else(|| invalid("input root has no parent"))?;
                 while !existing.try_exists()? {
                     existing = existing
                         .parent()

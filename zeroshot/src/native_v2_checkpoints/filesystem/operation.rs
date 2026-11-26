@@ -25,7 +25,7 @@ impl SnapshotOperation {
         }
     }
 
-    pub(super) fn uncancelled() -> Self {
+    pub(crate) fn uncancelled() -> Self {
         Self {
             stopping: None,
             runtime: None,

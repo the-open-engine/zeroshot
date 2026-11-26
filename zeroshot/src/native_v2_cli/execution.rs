@@ -1183,44 +1183,21 @@ async fn execute_answer<B: NativeV2CliBackend, S: DetachSignal, W: Write>(
     output: &mut W,
 ) -> Result<CliOutcome, NativeV2CliError> {
     let (mut run, input, forward_github_token) = command;
-    context
-        .backend
-        .validate_request_ask(run.target.as_deref())
-        .await?;
-    let status = context
-        .backend
-        .run_status(
-            run.target.as_deref(),
-            RunStatusParams {
-                part_id: run.part_id.clone(),
-                run_id: run.run_id.clone(),
-            },
-        )
-        .await?;
-    if status.part_id != status.current_part_id {
-        return Err(stale_part(&status.current_part_id));
-    }
-    if let Some(successor) = status.workspace_recovery.successor_run_id {
-        return Err(request_error(format!(
-            "run already has successor {}",
-            successor.as_str()
-        )));
-    }
-    let CliRunStatus::Target(RunStatus::Suspended { suspension, .. }) = status.status else {
-        return Err(request_error("answer requires a suspended run"));
-    };
-    let openengine_cluster_protocol::RunSuspension::Request { .. } = &suspension else {
-        return Err(request_error(format!(
-            "answer requires a request; suspension reason is {}",
-            if suspension.due_at().is_some() {
-                "wait"
-            } else {
-                "command"
+    let part = answer_part(context.backend, &run).await;
+    let answer = read_request_answer(&input);
+    run.part_id = Some(match part {
+        Ok(part) => part,
+        Err(error) => {
+            if let Ok(openengine_cluster_protocol::RunResumeFrom::Answer { output, .. }) = &answer {
+                let _ = context
+                    .backend
+                    .release_rejected_answer_uploads(&run, output)
+                    .await;
             }
-        )));
-    };
-    run.part_id = Some(status.part_id);
-    let (from, input_error) = match read_request_answer(&input) {
+            return Err(error);
+        }
+    });
+    let (from, input_error) = match answer {
         Ok(from) => (from, None),
         Err(error) => (
             // Only the owning controller knows whether the deadline passed. An invalid
@@ -1260,6 +1237,45 @@ async fn execute_answer<B: NativeV2CliBackend, S: DetachSignal, W: Write>(
         }
     }
     result
+}
+
+async fn answer_part<B: NativeV2CliBackend>(
+    backend: &B,
+    run: &RunSelector,
+) -> Result<RunId, NativeV2CliError> {
+    backend.validate_request_ask(run.target.as_deref()).await?;
+    let status = backend
+        .run_status(
+            run.target.as_deref(),
+            RunStatusParams {
+                part_id: run.part_id.clone(),
+                run_id: run.run_id.clone(),
+            },
+        )
+        .await?;
+    if status.part_id != status.current_part_id {
+        return Err(stale_part(&status.current_part_id));
+    }
+    if let Some(successor) = status.workspace_recovery.successor_run_id {
+        return Err(request_error(format!(
+            "run already has successor {}",
+            successor.as_str()
+        )));
+    }
+    let CliRunStatus::Target(RunStatus::Suspended { suspension, .. }) = status.status else {
+        return Err(request_error("answer requires a suspended run"));
+    };
+    let openengine_cluster_protocol::RunSuspension::Request { .. } = &suspension else {
+        return Err(request_error(format!(
+            "answer requires a request; suspension reason is {}",
+            if suspension.due_at().is_some() {
+                "wait"
+            } else {
+                "command"
+            }
+        )));
+    };
+    Ok(status.part_id)
 }
 
 fn read_request_answer(

@@ -1139,6 +1139,14 @@ impl NativeV2CliBackend for LocalCliBackend {
         }
         crate::v2_run_ledger::inbox::page(requests, params).map_err(vector_error)
     }
+    async fn release_rejected_answer_uploads(
+        &self,
+        run: &RunSelector,
+        output: &serde_json::Value,
+    ) -> Result<(), NativeV2CliError> {
+        self.release_selected_answer_uploads(run, output).await
+    }
+
     async fn inbox_show(
         &self,
         target: Option<&str>,

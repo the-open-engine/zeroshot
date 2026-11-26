@@ -577,6 +577,63 @@ async fn restore_without_a_stop_request_replaces_the_workspace_within_one_poll()
     assert_eq!(fixture.source(), "initial");
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn unborn_git_checkpoint_restores_without_a_stop_receiver() {
+    for attempt in [false, true] {
+        let fixture = Fixture::new();
+        let git = |args: &[&str]| {
+            let result = std::process::Command::new("git")
+                .current_dir(&fixture.workspace)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            result.stdout
+        };
+        git(&["init", "--initial-branch=unborn"]);
+        git(&["add", "source"]);
+        let point = fixture.input_checkpoint("writer").await;
+        fs::write(fixture.workspace.join("source"), "later edits").unwrap();
+        git(&["add", "source"]);
+        let selection = CheckpointRestore {
+            directory: fixture.directory.clone(),
+            selection: CheckpointRestoreSelection::Checkpoint {
+                checkpoint_id: point.checkpoint_id,
+            },
+        };
+        if attempt {
+            restore_attempt(
+                &selection,
+                &fixture.workspace,
+                RestoreAttempt {
+                    owner: &RunId::new("0199f33f-3b44-7d21-9000-000000000001"),
+                    deadline: Instant::now() + std::time::Duration::from_secs(60),
+                },
+            )
+            .await
+            .unwrap();
+        } else {
+            restore(&selection, &fixture.workspace).await.unwrap();
+        }
+        assert_eq!(fixture.source(), "initial");
+        assert_eq!(git(&["symbolic-ref", "HEAD"]), b"refs/heads/unborn\n");
+        assert_eq!(git(&["show", ":source"]), b"initial");
+        assert!(
+            !std::process::Command::new("git")
+                .current_dir(&fixture.workspace)
+                .args(["rev-parse", "--verify", "HEAD"])
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+    }
+}
+
 #[tokio::test]
 async fn failed_restore_does_not_touch_the_live_workspace_and_can_be_retried() {
     let fixture = Fixture::new();

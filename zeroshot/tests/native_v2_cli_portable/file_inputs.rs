@@ -106,6 +106,291 @@ fn observed(fixture: &Fixture) -> Value {
 }
 
 #[test]
+fn parent_relative_paths_work_for_submission_directories_and_answers() {
+    let fixture = Fixture::new();
+    configure(&fixture, true);
+    fs::create_dir(fixture.root.path("dataset")).unwrap();
+    fs::write(fixture.root.path("dataset/data.csv"), "accepted input").unwrap();
+    fixture.write(
+        "input.json",
+        &json!({"payload":{
+            "text":"Supply a file", "left":"../dataset/data.csv",
+            "right":"../dataset/data.csv", "folder":"../dataset"
+        }}),
+    );
+    let id = receipt(
+        &fixture
+            .run_command("finish", true)
+            .arg("--workspace")
+            .output()
+            .unwrap(),
+    );
+    settled(&fixture, &id, "suspended");
+    fs::write(fixture.root.path("dataset/data.csv"), "changed original").unwrap();
+    fs::write(fixture.root.path("answer.csv"), "accepted answer").unwrap();
+    fixture.write(
+        "answer.json",
+        &json!({"signals":{},"output":{"reply":"../answer.csv"}}),
+    );
+    let part = receipt(
+        &fixture
+            .command(&["answer", &id, "--input"])
+            .arg(fixture.root.path("answer.json"))
+            .output()
+            .unwrap(),
+    );
+    await_file(&fixture.root.path("ready"));
+    fs::write(fixture.root.path("answer.csv"), "changed answer original").unwrap();
+    fs::write(fixture.root.path("release"), "release").unwrap();
+    let status = settled(&fixture, &part, "finished");
+    assert_eq!(
+        status["status"]["terminalResult"]["status"], "succeeded",
+        "{status}"
+    );
+    let result = observed(&fixture);
+    for field in ["left", "right", "folder"] {
+        assert_eq!(result[field], "accepted input");
+    }
+    assert_eq!(result["reply"], "accepted answer");
+    for field in ["left", "right", "folder", "reply"] {
+        assert!(!Path::new(result["paths"][field].as_str().unwrap()).exists());
+    }
+    assert_eq!(
+        fs::read(fixture.root.path("dataset/data.csv")).unwrap(),
+        b"changed original"
+    );
+    assert_eq!(
+        fs::read(fixture.root.path("answer.csv")).unwrap(),
+        b"changed answer original"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn successful_cleanup_releases_input_directories_without_read_permissions() {
+    for mode in [0o000, 0o300] {
+        let fixture = Fixture::new();
+        configure(&fixture, false);
+        fs::create_dir(fixture.root.path("dataset")).unwrap();
+        fs::write(fixture.root.path("dataset/data.csv"), "accepted input").unwrap();
+        fixture.write(
+            "input.json",
+            &json!({"payload":{
+                "text":"Read files", "left":fixture.root.path("dataset/data.csv"),
+                "right":fixture.root.path("dataset/data.csv"), "folder":fixture.root.path("dataset")
+            }}),
+        );
+        let mut runtime: Value =
+            serde_json::from_slice(&fs::read(fixture.root.path("runtime.json")).unwrap()).unwrap();
+        let script = runtime["nodes"]["worker"]["command"][2].as_str().unwrap();
+        runtime["nodes"]["worker"]["command"][2] = json!(script.replace("console.log('null');", &format!(
+            "fs.chmodSync(v.folder, {mode}); fs.chmodSync(require('node:path').dirname(v.folder), {mode}); console.log('null');"
+        )));
+        fixture.write("runtime.json", &runtime);
+        fs::write(fixture.root.path("release"), "release").unwrap();
+        let id = receipt(
+            &fixture
+                .run_command("finish", true)
+                .arg("--workspace")
+                .output()
+                .unwrap(),
+        );
+        let status = settled(&fixture, &id, "finished");
+        assert_eq!(
+            status["status"]["terminalResult"]["status"], "succeeded",
+            "mode {mode:o}: {status}"
+        );
+        let result = observed(&fixture);
+        assert!(!Path::new(result["paths"]["folder"].as_str().unwrap()).exists());
+        assert_eq!(
+            fs::read(fixture.root.path("dataset/data.csv")).unwrap(),
+            b"accepted input"
+        );
+        assert_eq!(
+            fs::read(fixture.workspace.join("live-output")).unwrap(),
+            b"worker output"
+        );
+        assert_eq!(
+            fs::read_dir(fixture.root.path("state/files/objects"))
+                .unwrap()
+                .count(),
+            0
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn restart_prepares_authority_before_replacing_unreadable_input_directories() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut failures = Vec::new();
+    for mode in [0o700, 0o000, 0o300] {
+        let fixture = Fixture::new();
+        configure(&fixture, false);
+        let source = fixture.root.path("dataset");
+        fs::create_dir(&source).unwrap();
+        fs::write(source.join("data.csv"), "accepted input").unwrap();
+        fixture.write(
+            "input.json",
+            &json!({"payload":{
+                "text":"Read files", "left":source.join("data.csv"),
+                "right":source.join("data.csv"), "folder":source
+            }}),
+        );
+        let mut runtime: Value =
+            serde_json::from_slice(&fs::read(fixture.root.path("runtime.json")).unwrap()).unwrap();
+        runtime["workspaceCheckpoints"] = json!(false);
+        fixture.write("runtime.json", &runtime);
+        fs::write(fixture.root.path("release"), "release").unwrap();
+        fs::write(fixture.root.path("fail-once"), "fail").unwrap();
+        let id = receipt(
+            &fixture
+                .run_command("finish", true)
+                .arg("--workspace")
+                .output()
+                .unwrap(),
+        );
+        let failed = settled(&fixture, &id, "finished");
+        assert_eq!(failed["status"]["terminalResult"]["status"], "failed");
+        let first = observed(&fixture);
+        let folder = Path::new(first["paths"]["folder"].as_str().unwrap());
+        let key_root = folder.parent().unwrap();
+        fs::write(source.join("data.csv"), "changed original").unwrap();
+        fs::write(folder.join("data.csv"), "changed copy").unwrap();
+        fs::remove_file(fixture.root.path("ready")).unwrap();
+        fs::set_permissions(folder, fs::Permissions::from_mode(mode)).unwrap();
+        fs::set_permissions(key_root, fs::Permissions::from_mode(mode)).unwrap();
+        let output = fixture
+            .command(&["resume", &id, "--restart"])
+            .output()
+            .unwrap();
+        if !output.status.success() {
+            // Restore only our own fixture on failure so baseline evidence remains disposable.
+            fs::set_permissions(key_root, fs::Permissions::from_mode(0o700)).unwrap();
+            fs::set_permissions(folder, fs::Permissions::from_mode(0o700)).unwrap();
+            assert!(
+                !fixture.root.path("ready").exists(),
+                "no dispatch before preparation"
+            );
+            failures.push((mode, String::from_utf8_lossy(&output.stderr).into_owned()));
+            continue;
+        }
+        let part = receipt(&output);
+        assert_ne!(part, id);
+        let status = settled(&fixture, &part, "finished");
+        assert_eq!(
+            status["status"]["terminalResult"]["status"], "succeeded",
+            "mode {mode:o}: {status}"
+        );
+        let result = observed(&fixture);
+        for field in ["left", "right", "folder"] {
+            assert_eq!(result[field], "accepted input");
+            assert!(!Path::new(result["paths"][field].as_str().unwrap()).exists());
+        }
+        assert!(fixture.root.path("ready").exists(), "successor dispatched");
+        assert_eq!(
+            fs::read(source.join("data.csv")).unwrap(),
+            b"changed original"
+        );
+        assert_eq!(
+            fs::read(fixture.workspace.join("live-output")).unwrap(),
+            b"worker output"
+        );
+    }
+    assert!(
+        failures.is_empty(),
+        "restart preparation failures: {failures:?}"
+    );
+}
+
+#[test]
+fn answered_request_refusals_reclaim_only_declared_uploads() {
+    let fixture = Fixture::new();
+    configure(&fixture, true);
+    let mut graph: Value =
+        serde_json::from_slice(&fs::read(fixture.root.path("graph.json")).unwrap()).unwrap();
+    for name in ["kind", "runId", "operation"] {
+        graph["root"]["children"][0]["output"]["fields"][name] =
+            json!({"required":false,"type":{"kind":"string"}});
+    }
+    fixture.write("graph.json", &graph);
+    let source = fixture.root.path("data.csv");
+    fs::write(&source, "accepted bytes").unwrap();
+    fixture.write(
+        "input.json",
+        &json!({"payload":{"text":"Supply a file", "left":source,"right":source}}),
+    );
+    let id = receipt(
+        &fixture
+            .run_command("finish", true)
+            .arg("--workspace")
+            .output()
+            .unwrap(),
+    );
+    settled(&fixture, &id, "suspended");
+    fixture.write(
+        "answer.json",
+        &json!({"signals":{},"output":{"reply":source}}),
+    );
+    let successor = receipt(
+        &fixture
+            .command(&["answer", &id, "--input"])
+            .arg(fixture.root.path("answer.json"))
+            .output()
+            .unwrap(),
+    );
+    await_file(&fixture.root.path("ready"));
+    // Keep the accepted successor's files live while refusing new answers to its predecessor.
+    let mut retained_objects = 0;
+    let mut failures = Vec::new();
+    for explicit_part in [false, true] {
+        let upload = fixture.json(&["file", "stage", source.to_str().unwrap()]);
+        let mut output = fixture.json(&["file", "stage", source.to_str().unwrap()]);
+        output["reply"] = upload;
+        fixture.write("answer.json", &json!({"signals":{},"output":output}));
+        let before = fs::read_dir(fixture.root.path("state/files/objects"))
+            .unwrap()
+            .count();
+        let mut command = fixture.command(&["answer", &id, "--input"]);
+        command.arg(fixture.root.path("answer.json"));
+        if explicit_part {
+            command.args(["--part", &id]);
+        }
+        let refused = command.output().unwrap();
+        assert!(!refused.status.success());
+        let after = fs::read_dir(fixture.root.path("state/files/objects"))
+            .unwrap()
+            .count();
+        if after != before - 1 {
+            failures.push((
+                explicit_part,
+                before,
+                after,
+                String::from_utf8_lossy(&refused.stderr).into_owned(),
+            ));
+        }
+        retained_objects += 1;
+        assert_eq!(fixture.json(&["status", &id])["currentPartId"], successor);
+    }
+    fs::write(fixture.root.path("release"), "release").unwrap();
+    assert_eq!(
+        settled(&fixture, &successor, "finished")["status"]["terminalResult"]["status"],
+        "succeeded"
+    );
+    assert_eq!(observed(&fixture)["reply"], "accepted bytes");
+    assert!(
+        failures.is_empty(),
+        "refused upload cleanup failures: {failures:?}"
+    );
+    assert_eq!(
+        fs::read_dir(fixture.root.path("state/files/objects"))
+            .unwrap()
+            .count(),
+        retained_objects
+    );
+}
+
+#[test]
 #[cfg(unix)]
 fn startup_keeps_host_input_location_after_variables_and_connections() {
     for override_source in ["none", "variable", "connection"] {

@@ -988,7 +988,7 @@ pub(crate) async fn restore_with(
             &restored,
             workspace,
             &configuration.inputs,
-            &filesystem::SnapshotOperation::current(None),
+            &filesystem::SnapshotOperation::uncancelled(),
         ),
     };
     replaced.map_err(|error| progress.failed("replacing the workspace", error))?;

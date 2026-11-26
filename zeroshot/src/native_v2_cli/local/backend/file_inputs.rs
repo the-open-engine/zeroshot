@@ -2,6 +2,27 @@
 use super::*;
 
 impl LocalCliBackend {
+    pub(super) async fn release_selected_answer_uploads(
+        &self,
+        run: &RunSelector,
+        output: &serde_json::Value,
+    ) -> Result<(), NativeV2CliError> {
+        let request = self
+            .inbox_show(
+                run.target.as_deref(),
+                openengine_cluster_protocol::InboxShowParams {
+                    run_id: run.run_id.clone(),
+                    part_id: run.part_id.clone(),
+                },
+            )
+            .await?;
+        crate::native_v2_cli::files::release_staged_uploads(
+            &self.state_root,
+            &request.request.output,
+            output,
+        )
+    }
+
     pub(super) async fn release_answer_uploads(
         &self,
         run_id: &RunId,

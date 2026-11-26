@@ -2676,7 +2676,9 @@ python -m mkdocs build --strict
   blocking worker drains to a durable result; retry its operation key after a lost response.
 - Explicit filepath submissions and answers share `native_v2_files::inputs` admission, independent
   of workspace seeds and placement. Local strings select paths relative to the invoking directory;
-  remote callers use typed authorized target selections or private `file stage` handles. Every
+  resolve parent-relative sources only when acquiring a new pin, after link checks, so accepted
+  retries do not depend on the original path still existing.
+  Remote callers use typed authorized target selections or private `file stage` handles. Every
   accepted file/folder has its own immutable pin, including local sources inside an in-place folder.
   Key/run manifests bind identity and host-generated private pin nonces before pin changes; retries
   keep the original paths and bytes. Answer replays require the exact successor and resolved
@@ -2688,13 +2690,15 @@ python -m mkdocs build --strict
   Release refused uploads even when no accepted-input manifest exists yet. Upload reclamation
   follows declared filepath fields using the admission schema traversal, including on refusals
   and replays; ordinary scalar records never grant upload-release authority. Answers use the
-  stored request's output schema, and unavailable request metadata grants no cleanup authority.
+  stored request's output schema, including CLI refusals before resume dispatch, and unavailable
+  request metadata grants no cleanup authority.
 - Mutable input trees live outside the checkout under a recovery-lineage location exposed as
   `ZEROSHOT_INPUTS` to startup and executions. Project/export absolute input locations even when target
   storage is relative. Apply the host input location after authored preparation variables/connections;
   keep controller-state identity unchanged. Host-selected roots extend response filepath authority;
-  record canonical response-authority roots after refusing redirected ancestry without changing
-  controller-state path identity. Arbitrary host paths and redirected roots remain refused.
+  record canonical response-authority roots through validated host-owned ancestry without opening
+  mutable input roots for reading before startup repairs them. Refuse redirected ancestry without
+  changing controller-state path identity. Arbitrary host paths and redirected roots remain refused.
   Restic snapshots include these trees
   separately even in Git mode, and external `HostedWorkspaceStorage` receives `file_inputs` for the
   same capture/restore contract. Original pins rebuild checkpoint-free restarts. Requests retain the
@@ -2703,7 +2707,8 @@ python -m mkdocs build --strict
   inputs; success, final recovery disposal and confirmed admission refusals release only their owners.
   Input deletion uses validated parent directory capabilities, including on checkpoint replacement;
   redirected lineage/data ancestors cannot select external files. Confined deletion restores directory
-  write/search permissions (Windows read-only attributes) through no-follow handles; never repair
+  read/write/search permissions (Windows read-only attributes) before enumeration through confined
+  no-follow capabilities, including for mode `000` directories; never repair
   permissions through links or file aliases. Hosted cleanup reclaims every
   transferred input root for the controller before releasing its writer UID lease. Reconstructed
   force-stop releases inputs for in-place placements as well as managed workspaces.

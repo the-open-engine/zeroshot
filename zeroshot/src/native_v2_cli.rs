@@ -1006,6 +1006,14 @@ pub trait NativeV2CliBackend: Send + Sync {
     async fn validate_request_ask(&self, _target: Option<&str>) -> Result<(), NativeV2CliError> {
         Ok(())
     }
+    /// Reclaim staged selections when CLI answer preflight refuses before resume dispatch.
+    async fn release_rejected_answer_uploads(
+        &self,
+        _run: &RunSelector,
+        _output: &serde_json::Value,
+    ) -> Result<(), NativeV2CliError> {
+        Ok(())
+    }
     async fn inbox_list(
         &self,
         _target: Option<&str>,
