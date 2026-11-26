@@ -387,7 +387,7 @@ async fn refused_local_answer_preserves_files_owned_by_another_attempt() {
     assert_eq!(
         files
             .materialize_file_inputs(&params.run_id, true)
-            .assert_value()
+            .unwrap_or_else(|error| panic!("materialize accepted file input failed: {error}"))
             .len(),
         1
     );

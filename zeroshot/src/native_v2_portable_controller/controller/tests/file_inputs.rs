@@ -78,7 +78,8 @@ async fn completed_run_reopens_without_recreating_released_inputs_or_its_workspa
     assert!(files.file_input_roots(&run).assert_value().is_empty());
     drop(controller);
     let moved = root.path().join("moved-workspace");
-    std::fs::rename(&workspace, &moved).assert_value();
+    std::fs::rename(&workspace, &moved)
+        .unwrap_or_else(|error| panic!("move workspace after completion failed: {error}"));
 
     let reopened = PortableRunController::reopen(bootstrap())
         .await

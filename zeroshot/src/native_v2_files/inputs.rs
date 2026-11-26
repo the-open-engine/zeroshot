@@ -76,6 +76,12 @@ struct Manifest {
 fn hash(value: &impl Serialize) -> io::Result<String> {
     Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(value)?)))
 }
+
+// Private input paths contain three nested identifiers. Keep each at 128 bits so ordinary
+// Windows state directories stay below MAX_PATH without weakening manifest or pin identities.
+fn path_hash(value: &impl Serialize) -> io::Result<String> {
+    Ok(hash(value)?[..32].to_owned())
+}
 fn pin(manifest: &Manifest, pointer: &str) -> io::Result<FilePin> {
     Ok(FilePin {
         run_id: manifest.run_id.clone(),
@@ -278,11 +284,11 @@ impl WorkspaceFiles {
     }
 
     pub fn input_location(&self, owner: &RunId) -> io::Result<PathBuf> {
-        Ok(std::path::absolute(self.input_data_directory())?.join(hash(owner)?))
+        Ok(std::path::absolute(self.input_data_directory())?.join(path_hash(owner)?))
     }
 
     fn input_root(&self, owner: &RunId, key: &IdempotencyKey) -> io::Result<PathBuf> {
-        Ok(self.input_location(owner)?.join(hash(key)?))
+        Ok(self.input_location(owner)?.join(path_hash(key)?))
     }
 
     fn project_file_inputs(
@@ -339,7 +345,7 @@ impl WorkspaceFiles {
             *value
                 .pointer_mut(pointer)
                 .ok_or_else(|| invalid("file input field disappeared"))? = Value::String(
-                root.join(hash(&(pointer, source))?)
+                root.join(path_hash(&(pointer, source))?)
                     .to_str()
                     .ok_or_else(|| invalid("input path is not UTF-8"))?
                     .to_owned(),
@@ -393,7 +399,7 @@ impl WorkspaceFiles {
             *value
                 .pointer_mut(pointer)
                 .ok_or_else(|| invalid("file input field disappeared"))? = Value::String(
-                root.join(hash(&(pointer, &manifest.sources[pointer]))?)
+                root.join(path_hash(&(pointer, &manifest.sources[pointer]))?)
                     .to_str()
                     .ok_or_else(|| invalid("input path is not UTF-8"))?
                     .to_owned(),
@@ -528,7 +534,7 @@ impl WorkspaceFiles {
                         &pin(&manifest, pointer)?,
                         &stage
                             .path()
-                            .join(hash(&(pointer, &manifest.sources[pointer]))?),
+                            .join(path_hash(&(pointer, &manifest.sources[pointer]))?),
                     )?;
                 }
                 if root.exists() {
