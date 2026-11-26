@@ -284,7 +284,18 @@ impl WorkspaceFiles {
     }
 
     pub fn input_location(&self, owner: &RunId) -> io::Result<PathBuf> {
-        Ok(std::path::absolute(self.input_data_directory())?.join(path_hash(owner)?))
+        let data = self.input_data_directory();
+        let parent = data
+            .parent()
+            .ok_or_else(|| invalid("input directory has no parent"))?;
+        let name = data
+            .file_name()
+            .ok_or_else(|| invalid("input directory has no name"))?;
+        paths::reject_links(parent)?;
+        let _guard = paths::Directory::open(parent)?;
+        // Use the host-owned parent's canonical spelling in both projected values and the
+        // execution environment. Windows short names must not produce two path strings.
+        Ok(parent.canonicalize()?.join(name).join(path_hash(owner)?))
     }
 
     fn input_root(&self, owner: &RunId, key: &IdempotencyKey) -> io::Result<PathBuf> {

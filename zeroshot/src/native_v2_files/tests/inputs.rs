@@ -693,8 +693,13 @@ fn input_authority_records_canonical_roots_without_accepting_redirected_ancestry
     std::fs::write(&source, "accepted bytes").unwrap();
     let input =
         json!({"left":staged(&files, &source, "left"),"right":staged(&files, &source, "right")});
-    let (run, _) = admit(&files, &input, ("run", "run", "key")).unwrap();
+    let (run, projected) = admit(&files, &input, ("run", "run", "key")).unwrap();
     let authority = files.file_input_authority_roots(&run).unwrap();
+    assert_eq!(
+        Path::new(projected["left"].as_str().unwrap()).parent(),
+        Some(authority[0].as_path()),
+        "projected paths and execution authority must use the same spelling"
+    );
     let roots = files.materialize_file_inputs(&run, false).unwrap();
     assert_eq!(authority, vec![roots[0].canonicalize().unwrap()]);
     let recorded_directory = files.directory.clone();
@@ -725,6 +730,56 @@ fn input_authority_records_canonical_roots_without_accepting_redirected_ancestry
             .success()
     );
     assert!(files.file_input_authority_roots(&run).is_err());
+}
+
+#[test]
+fn damaged_input_manifests_block_replay_and_cleanup_without_losing_accepted_bytes() {
+    let root = tempdir();
+    let files = files(root.path());
+    let source = root.path().join("data.csv");
+    std::fs::write(&source, "accepted bytes").unwrap();
+    let selected = staged(&files, &source, "upload");
+    let value = json!({"left":selected,"right":selected});
+    let (run, projected) = admit(&files, &value, ("run", "run", "key")).unwrap();
+    files.materialize_file_inputs(&run, false).unwrap();
+    let manifests = files.directory.join("file-inputs");
+    let entries = std::fs::read_dir(&manifests)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    let find = |prefix: &str| {
+        entries
+            .iter()
+            .find(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with(prefix)
+            })
+            .unwrap()
+            .clone()
+    };
+    let run_manifest = find("run-");
+    let submission_manifest = find("submission-");
+
+    for manifest in [&submission_manifest, &run_manifest] {
+        let original = std::fs::read(manifest).unwrap();
+        std::fs::write(manifest, b"{damaged manifest").unwrap();
+        assert!(admit(&files, &value, ("retry", "run", "key")).is_err());
+        if manifest == &run_manifest {
+            assert!(files.file_input_roots(&run).is_err());
+            assert!(files.file_input_authority_roots(&run).is_err());
+            assert!(files.materialize_file_inputs(&run, true).is_err());
+            assert!(files.release_file_input_part(&run).is_err());
+            assert!(files.release_file_inputs(&run).is_err());
+        }
+        assert_eq!(read(&projected, "left"), "accepted bytes");
+        std::fs::write(manifest, original).unwrap();
+    }
+    files.materialize_file_inputs(&run, true).unwrap();
+    assert_eq!(read(&projected, "left"), "accepted bytes");
+    files.release_file_inputs(&run).unwrap();
+    assert!(!Path::new(projected["left"].as_str().unwrap()).exists());
 }
 
 #[test]

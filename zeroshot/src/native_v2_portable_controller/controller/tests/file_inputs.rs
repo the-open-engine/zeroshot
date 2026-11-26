@@ -4,6 +4,25 @@ use crate::native_v2_platform::CapsuleAllocator;
 use openengine_cluster_protocol::PayloadType;
 use serde_json::json;
 
+async fn move_workspace_after_monitor_drop(workspace: &std::path::Path, moved: &std::path::Path) {
+    // This in-process fixture keeps the workspace monitor alive briefly after the controller
+    // is dropped. Windows cannot rename a directory until that monitor releases its handle.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        match std::fs::rename(workspace, moved) {
+            Ok(()) => break,
+            Err(error)
+                if cfg!(windows)
+                    && error.raw_os_error() == Some(32)
+                    && std::time::Instant::now() < deadline =>
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            Err(error) => panic!("move workspace after completion failed: {error}"),
+        }
+    }
+}
+
 #[tokio::test]
 async fn completed_run_reopens_without_recreating_released_inputs_or_its_workspace() {
     let root =
@@ -78,8 +97,7 @@ async fn completed_run_reopens_without_recreating_released_inputs_or_its_workspa
     assert!(files.file_input_roots(&run).assert_value().is_empty());
     drop(controller);
     let moved = root.path().join("moved-workspace");
-    std::fs::rename(&workspace, &moved)
-        .unwrap_or_else(|error| panic!("move workspace after completion failed: {error}"));
+    move_workspace_after_monitor_drop(&workspace, &moved).await;
 
     let reopened = PortableRunController::reopen(bootstrap())
         .await
