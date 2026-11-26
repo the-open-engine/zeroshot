@@ -1196,7 +1196,9 @@ Commands:
 <section id="zeroshot-run"><h3><code>zeroshot run</code></h3>
 <pre><code>Submit a graph run locally or to a named target.
 
-Local runs use --cwd or the invoking folder; Git worktrees use their root. Local Git delivery requires an attached, committed branch and an HTTPS/SSH remote. PR/merge also require a supported forge. Named targets require a committed Git source. Local workspaces must not overlap Zeroshot state. Local delivery commits on the checked-out branch and pushes that same branch, including existing unpushed commits. PR/merge targets a different upstream branch, or the remote&#39;s default branch; starting on that target is refused. Start from a feature branch or use --worktree. Explicit --push can publish any branch, including main, without force-pushing. --worktree creates a retained worktree and managed run branch from local HEAD by default. --worktree-base remote fetches the invoking branch&#39;s upstream and requires one to be set. Worktree PR/merge targets the invoking branch&#39;s upstream, or its name without an upstream. Preparation verifies the target before agents start. Worktrees contain committed files only; dependencies and untracked resources are not copied or installed. Resume reuses the same workspace and attached branch without rewinding shared refs. Remove worktrees explicitly.
+Local runs use --cwd or the invoking folder; Git worktrees use their root. Local Git delivery requires an attached, committed branch and an HTTPS/SSH remote. PR/merge also require a supported forge. Named repository runs require a committed Git source. Local workspaces must not overlap Zeroshot state. Local delivery commits on the checked-out branch and pushes that same branch, including existing unpushed commits. PR/merge targets a different upstream branch, or the remote&#39;s default branch; starting on that target is refused. Start from a feature branch or use --worktree. Explicit --push can publish any branch, including main, without force-pushing. --worktree creates a retained worktree and managed run branch from local HEAD by default. --worktree-base remote fetches the invoking branch&#39;s upstream and requires one to be set. Worktree PR/merge targets the invoking branch&#39;s upstream, or its name without an upstream. Preparation verifies the target before agents start. Worktrees contain committed files only; dependencies and untracked resources are not copied or installed. Resume reuses the same workspace and attached branch without rewinding shared refs. Remove worktrees explicitly.
+
+Select --workspace for delivery-free file work without a Git source. Locally it uses the exact invoking folder or --cwd in place, including a Git subfolder. --copy-workspace freezes that folder&#39;s contents into a disposable managed copy. --workspace-placement managed starts empty, or accepts repeated --workspace-seed user:PATH / org:PATH selections from target files (append #MEMBER to select a subtree). Files keep their basename; folders keep their name and descendants. Named targets always use managed placement. Inputs are pinned before acceptance; later library edits do not change the run. Workspace mode rejects delivery, Git source flags, and context repositories. Managed copies reject external Git administration such as linked worktree .git pointers; use in-place placement or select files without Git metadata. Only graph memory applies.
 
 A foreground run follows NDJSON events until completion or suspension. Suspension exits 0. --detach returns after submission. It prints graphResult when the graph ends and keeps waiting through the Active Memory postmortem and finalization; its exit code follows the final terminalResult. Ctrl-C before the submission attempt begins cancels the command; once it begins, Ctrl-C waits for the receipt and then detaches. During observation, Ctrl-C detaches without stopping the run.
 
@@ -1255,6 +1257,20 @@ Options:
 
       --cwd &lt;FOLDER&gt;
           Working folder (default: invoking folder). File arguments stay relative to the invoking folder
+
+      --workspace
+          Execute without a Git source or delivery
+
+      --workspace-placement &lt;WORKSPACE_PLACEMENT&gt;
+          Workspace placement; defaults to in-place locally and managed on targets
+
+          [possible values: in-place, managed]
+
+      --workspace-seed &lt;SCOPE:PATH&gt;
+          Seed from a target library path, USER:PATH or ORG:PATH (optionally #MEMBER). Repeatable
+
+      --copy-workspace
+          Copy the selected local folder&#39;s contents into a disposable managed workspace
 
       --worktree
           Run in a retained Git worktree on a new managed branch. Local runs only
@@ -1400,8 +1416,8 @@ ENVIRONMENT PREPARATION
     Hook failures stop the run before agents start and use no graph retry attempts.
     Inspect `zeroshot logs RUN_ID --target NAME` for preparation output.
     Omit both flags to allow host defaults; direct Docker defaults to the base environment.
-    --no-environment sends {} to bypass host defaults. Local runs use the invoking machine and
-    reject hooks and hook connections.
+    --no-environment sends {} to bypass host defaults. Linux/macOS local hooks run as the invoking
+    user in the selected workspace. Windows local runs reject hooks and hook connections.
 
     Installation, services, limits, and recovery:
     https://the-open-engine.github.io/zeroshot/current/guides/runtime-environments/
@@ -1766,7 +1782,7 @@ Commands:
 
 A suspended run continues at its saved boundary without restoring files. A suspended wait continues after its wait node, from the due time onward. Suspended runs accept no checkpoint selection or --discard-workspace-changes. Every successor takes over the vector record. By default, a failed run selects its newest entry checkpoint. The selected node can run again, even when it completed before the failure. Local restores require --discard-workspace-changes. Use --from-checkpoint to select a specific entry instead. Use --restart to restart where the failed run started, on its retained workspace: a submitted run at the root of its graph, a successor at the boundary it began at, so an answered request stays answered. A local run keeps its checkout as it is now, including files and Git state changed after the failure; a named target restarts on the latest snapshot of its retained copy. List available entries with `zeroshot checkpoints`. Restoring a local checkpoint replaces the checkout and requires --discard-workspace-changes. Files and the index return to the checkpoint; attached HEAD and branch tips are kept. After a local history rewrite, first merge the published head into the run branch to preserve published ancestry, or start a new run on a feature branch based on that head. Older local Git-delivery runs without recorded branch ownership cannot resume; preserve their workspace and start a new run from the intended attached branch or with --worktree. The successor resolves credentials again for its effective runtime and saved environment; make those credentials available.
 
-Target runs reuse the saved environment definition: setup runs before workspace restore, then startup runs before the graph. Startup must tolerate existing workspace files. Checkpoint continuations and suspended successors restore captured node-instance agent conversations. Missing or unsupported conversations start new with a system log explanation. Restarting a successor restores the conversations it started with; restarting a submitted run, and execution-scoped agents, start new ones. Token usage starts at zero. Services and Docker state are not restored.
+Target runs reuse the saved environment definition: setup runs before workspace restore, then startup runs before the graph. Startup must tolerate existing workspace files. Checkpoint continuations and suspended successors restore captured node-instance agent conversations. Missing or unsupported conversations start new with a system log explanation. Restarting a successor restores the conversations it started with; restarting a submitted run, and execution-scoped agents, start new ones. Token usage starts at zero. Services and Docker state are not restored. In-place workspace runs always keep the original folder&#39;s current contents and cannot restore file snapshots. Managed local runs with checkpoints disabled restart from their original pinned inputs; suspension continues the current managed copy.
 
 Usage: zeroshot resume [OPTIONS] &lt;RUN_ID&gt;
 

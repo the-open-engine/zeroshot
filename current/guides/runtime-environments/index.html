@@ -2355,6 +2355,13 @@ If installation needs private registry access, add
 The CLI can collect hook credentials for a definition you supply. When a host selects a default,
 its connection store must supply those credentials; the CLI does not inspect saved environments
 to discover additional secrets in your shell.</p>
+<p>For a delivery-free file run, select <code>--workspace</code>. Locally, setup and startup run in the selected
+in-place folder or the prepared managed workspace. On targets, setup runs in the run root before
+workspace inputs are materialized; startup runs in the workspace after the inputs are ready. An
+empty environment is supported; workspace mode refuses <code>contextRepositories</code>. In-place resume
+reruns local hooks against the folder's current contents without restoring a snapshot. A managed
+fresh restart without checkpoints reconstructs the original pinned inputs before startup. See
+<a href="../../concepts/execution/#file-workspaces">File workspaces</a> for placement and cleanup behavior.</p>
 <h2 id="read-only-context-repositories">Read-only context repositories<a class="headerlink" href="#read-only-context-repositories" title="Permanent link">&para;</a></h2>
 <p><code>contextRepositories</code> lists up to 16 extra repositories that agents can inspect and build against.
 Each entry has a <code>repository</code> (GitHub <code>owner/name</code> or a credential-free HTTPS/SSH Git URL) and an
@@ -2507,7 +2514,7 @@ machine removes its Docker resources. The <code>teardown</code> field is for loc
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-25">25 November 2026</time>
+    Last updated <time datetime="2026-11-26">26 November 2026</time>
   </span>
 
     
