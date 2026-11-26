@@ -180,12 +180,12 @@ impl ProductionCapsuleAllocator {
             if !roots.is_empty() {
                 super::super::set_traversable_directory(&files.input_data_directory())
                     .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
-                let location = files
-                    .input_location(request.delivery_run_id)
-                    .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
+                    let location = files
+                        .input_location(request.delivery_run_id)
+                        .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
                     std::fs::set_permissions(location, std::fs::Permissions::from_mode(0o755))
                         .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
                 }
