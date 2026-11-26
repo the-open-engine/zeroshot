@@ -38,7 +38,7 @@ impl GitCommandOutput {
         self.raw_stdout_truncated
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn stderr(&self) -> Option<&str> {
         self.raw_stderr.as_deref()
     }

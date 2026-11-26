@@ -65,7 +65,7 @@ impl ForgeNetwork {
         Ok(())
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn apply_command(&self, command: &mut tokio::process::Command) {
         command.envs(&self.values);
     }

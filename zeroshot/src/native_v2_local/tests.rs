@@ -508,6 +508,7 @@ fn github_source() -> ResolvedSource {
     )
 }
 
+#[cfg(unix)]
 fn delivery_submission(source: &ResolvedSource) -> RunSubmission {
     serde_json::from_value(json!({
         "title": "Local delivery programs",
