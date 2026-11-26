@@ -106,6 +106,19 @@ def local_status() -> dict[str, object]:
     }
 
 
+def test_queued_status_and_inventory_keep_the_current_part() -> None:
+    value = local_status()
+    value.update(partId="part-2", currentPartId="part-2", status={"phase": "queued"})
+
+    status = _status(value)
+
+    assert status.phase == "queued"
+    assert status.active_executions == ()
+    assert status.result is None
+    assert _summary(status).phase == "queued"
+    assert _summary(status).current_part_id == "part-2"
+
+
 @pytest.mark.parametrize("timestamp", [None, 1, 1_725_000_000_123, 9_007_199_254_740_991])
 def test_status_and_watch_preserve_optional_recording_times(timestamp: int | None) -> None:
     value = local_status()
