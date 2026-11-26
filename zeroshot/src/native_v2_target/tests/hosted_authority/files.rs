@@ -370,3 +370,170 @@ async fn staging_sends_the_framed_selection_and_exact_transfer_bytes() {
     );
     assert_eq!(&sent[4 + length..], bytes);
 }
+
+#[tokio::test]
+async fn transfer_preflight_refuses_capabilities_and_oversized_headers_without_uploading() {
+    use std::io::{Seek as _, Write as _};
+    use openengine_cluster_protocol::{IdempotencyKey, RunId, MAX_FILE_HEADER_BYTES};
+    use super::super::fixtures::direct_target;
+    for case in ["absent", "unknown", "oversized"] {
+        let root = super::super::fixtures::TempRoot::new_in(
+            "file-preflight",
+            &std::env::temp_dir().canonicalize().assert_value(),
+        )
+        .assert_value();
+        let (listener, _, origin) = bind_target_authority().await;
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.assert_value();
+            let request = read_http_request(&mut stream).await;
+            assert_eq!(request.path, "/.well-known/zeroshot-native-v2");
+            assert!(request.authorization.is_none());
+            let mut discovery = serde_json::to_value(
+                zeroshot_engine::native_v2_target_authority::TargetDiscoveryDocument::direct(
+                    zeroshot_engine::native_v2_target_authority::TargetAuthentication::None,
+                ),
+            )
+            .assert_value();
+            if case == "absent" {
+                if let Some(extensions) = discovery
+                    .get_mut("extensions")
+                    .and_then(serde_json::Value::as_object_mut)
+                {
+                    extensions.remove("files");
+                }
+            } else {
+                discovery["extensions"]["files"] = json!({
+                    "kind":if case == "unknown" {"unknown.file-protocol/v1"} else {TARGET_FILES_KIND}
+                });
+            }
+            write_http_response(&mut stream, &discovery.to_string()).await;
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(200), listener.accept())
+                    .await
+                    .is_err(),
+                "a refused transfer must not contact the file route"
+            );
+        });
+        let (_, authority) = test_authority(&root);
+        let scratch = root.path("stage");
+        let mut transfer = new_transfer(&scratch).assert_value();
+        let bytes = b"private upload must remain unread";
+        transfer.write_all(bytes).assert_value();
+        let request = FileRequest::Stage {
+            run_id: RunId::new(if case == "oversized" {
+                "r".repeat(MAX_FILE_HEADER_BYTES)
+            } else {
+                "run".to_owned()
+            }),
+            operation: IdempotencyKey::new("upload").assert_value(),
+        };
+        let error = authority
+            .file_request(&direct_target(origin), &request, (&transfer, &scratch))
+            .await
+            .err()
+            .assert_value()
+            .to_string();
+        assert!(
+            error.contains(if case == "oversized" {
+                "exceeds limit"
+            } else {
+                "does not advertise"
+            }),
+            "{case}: {error}"
+        );
+        assert_eq!(
+            transfer.stream_position().assert_value(),
+            bytes.len() as u64
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(30), server)
+            .await
+            .assert_value()
+            .assert_value();
+    }
+}
+
+#[tokio::test]
+async fn transfer_scratch_failures_preserve_existing_files_and_release_nothing() {
+    use openengine_cluster_protocol::{
+        FileAddress, FileSelection, IdempotencyKey, RunId, TARGET_FILES_MEDIA_TYPE,
+    };
+    use super::super::fixtures::direct_target;
+    use zeroshot_engine::native_v2_files::FilePin;
+    let root = super::super::fixtures::TempRoot::new_in(
+        "file-scratch-refusal",
+        &std::env::temp_dir().canonicalize().assert_value(),
+    )
+    .assert_value();
+    let blocked = root.path("refresh-locks/file-transfers");
+    std::fs::create_dir_all(blocked.parent().assert_value()).assert_value();
+    std::fs::write(&blocked, "preserve existing file").assert_value();
+    let (listener, _, origin) = bind_target_authority().await;
+    let (_, authority) = test_authority(&root);
+    let error = authority
+        .release_staged_uploads(
+            &direct_target(origin),
+            &[FilePin {
+                run_id: RunId::new("upload"),
+                operation: IdempotencyKey::new("answer").assert_value(),
+            }],
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("private file transfer I/O failed")
+    );
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(200), listener.accept())
+            .await
+            .is_err(),
+        "a local staging refusal cannot release an upload"
+    );
+    let (origin, server) = file_authority(
+        false,
+        vec![framed_response(
+            TARGET_FILES_MEDIA_TYPE,
+            b"private download",
+        )],
+    )
+    .await;
+    let stage = new_transfer(&root.path("request")).assert_value();
+    let error = authority
+        .file_request(
+            &direct_target(origin),
+            &FileRequest::Download {
+                selection: FileSelection {
+                    address: FileAddress {
+                        scope: FileScope::User,
+                        path: FilePath::new("library/source.csv").assert_value(),
+                    },
+                    member: FilePath::new("").assert_value(),
+                },
+            },
+            (&stage, &blocked),
+        )
+        .await
+        .err()
+        .assert_value();
+    assert!(
+        error
+            .to_string()
+            .contains("private file transfer I/O failed")
+    );
+    let captured = tokio::time::timeout(std::time::Duration::from_secs(30), server)
+        .await
+        .assert_value()
+        .assert_value();
+    assert_eq!(
+        captured
+            .iter()
+            .filter(|r| r.path == TARGET_FILES_PATH)
+            .count(),
+        1
+    );
+    assert_eq!(
+        std::fs::read(blocked).assert_value(),
+        b"preserve existing file"
+    );
+}

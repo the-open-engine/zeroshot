@@ -202,3 +202,101 @@ async fn retained_input_cleanup_follows_recovery_eligibility_and_final_disposal(
         assert_eq!(std::fs::read(original).assert_value(), b"accepted original");
     }
 }
+
+#[tokio::test]
+async fn completed_input_cleanup_preserves_an_explicit_managed_publication() {
+    use crate::native_v2_files::{publication::FilePublication, FilePublicationOwner, TargetFileHost};
+    use openengine_cluster_protocol::{
+        FieldName, FilePath, FileSelection, PublishedFile, UnixTimestampMillis,
+    };
+    use std::io::Seek as _;
+
+    let root = TestDirectory::new("host-input-and-publication-retention");
+    let state = root.child("library");
+    let files = crate::native_v2_cli::files::workspace_files(&state).assert_value();
+    let (store, identity, _) =
+        crate::native_v2_cli::files::local_file_store_at(&state).assert_value();
+    let store = Arc::new(store);
+    let workspace = root.child("workspace");
+    std::fs::create_dir(&workspace).assert_value();
+    assert!(
+        allocator(&root.child("disabled"), None)
+            .file_publisher(&workspace)
+            .is_none()
+    );
+    let mut config = crate::native_v2_hosting::tests::fixtures::capsule_config(root.child("host"));
+    config.workspace_files = Some(files.clone());
+    config.file_store = Some((store.clone(), identity.clone()));
+    let allocator =
+        crate::native_v2_hosting::tests::fixtures::capsule_allocator(config).assert_value();
+    let run = RunId::new("completed-publication");
+    let original = root.write("original.csv", "accepted input");
+    let frozen = files
+        .freeze_file_inputs(InputAdmission {
+            run_id: &run,
+            owner: &run,
+            key: &IdempotencyKey::new("input").assert_value(),
+            schema: &PayloadType::Filepath,
+            value: &json!(original),
+            local_root: Some(root.path()),
+        })
+        .assert_value();
+    let accepted = PathBuf::from(frozen.value.as_str().assert_value());
+    files.materialize_file_inputs(&run, true).assert_value();
+    let output = workspace.join("report.csv");
+    std::fs::write(&output, "published output").assert_value();
+    let (_stop, stopping) = tokio::sync::watch::channel(false);
+    let published = allocator
+        .file_publisher(&workspace)
+        .assert_value()
+        .publish(FilePublication {
+            owner: FilePublicationOwner::Final {
+                run_id: run.clone(),
+            },
+            paths: BTreeMap::from([(FieldName::new("report").assert_value(), "report.csv".into())]),
+            now: UnixTimestampMillis::new(1).assert_value(),
+            cancellation: crate::execution::driver::DriverCancellation::new(stopping),
+            preflight: Arc::new(|files| {
+                assert!(matches!(
+                    files.values().next(),
+                    Some(PublishedFile::Managed { .. })
+                ));
+                Ok(())
+            }),
+        })
+        .await
+        .assert_value();
+    std::fs::write(&output, "later workspace edit").assert_value();
+    allocator
+        .release_disposed_inputs(&run, &run, RunRuntimeExit::Completed)
+        .await
+        .assert_value();
+    assert!(!accepted.exists());
+    assert!(files.file_input_roots(&run).assert_value().is_empty());
+    let PublishedFile::Managed { address, .. } = published.values().next().assert_value() else {
+        panic!("expected managed publication");
+    };
+    let mut packed = tempfile::tempfile().assert_value();
+    store
+        .download(
+            &FileAccess {
+                target: store.target(),
+                identity: &identity,
+            },
+            &FileSelection {
+                address: address.clone(),
+                member: FilePath::new("").assert_value(),
+            },
+            &mut packed,
+        )
+        .assert_value();
+    packed.rewind().assert_value();
+    let restored = root.child("downloaded-report");
+    crate::native_v2_files::unpack(&mut packed, &restored).assert_value();
+    assert_eq!(std::fs::read(restored).assert_value(), b"published output");
+    assert_eq!(
+        std::fs::read(output).assert_value(),
+        b"later workspace edit"
+    );
+    assert_eq!(std::fs::read(original).assert_value(), b"accepted input");
+}

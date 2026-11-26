@@ -682,3 +682,95 @@ async fn file_answer_validation_rolls_back_its_own_pin_without_dispatching() {
             .is_none()
     );
 }
+
+#[tokio::test]
+async fn file_answer_refusals_preserve_history_and_create_no_successor() {
+    use super::super::local_contract_tests::prepared_local_run;
+    use openengine_cluster_protocol::{RequestAnswer, RequestResolution};
+    for state in ["missing", "admitted", "upload-unavailable"] {
+        let root =
+            tempfile::tempdir_in(std::env::temp_dir().canonicalize().assert_value()).assert_value();
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir(&workspace).assert_value();
+        let original = workspace.join("original.csv");
+        std::fs::write(&original, "preserve original").assert_value();
+        let backend = LocalCliBackend::new(
+            root.path().join("state"),
+            "unused".into(),
+            workspace.clone(),
+            "git".into(),
+        );
+        let params = resume(Some(RunResumeFrom::Answer {
+            signals: Default::default(),
+            output: json!({"file":{"kind":"staged","runId":"missing-upload","operation":"answer"}}),
+        }));
+        let (submission, ledger) = if state == "upload-unavailable" {
+            let schema = serde_json::from_value(json!({"kind":"record","fields":{
+                "file":{"required":true,"type":{"kind":"filepath"}}
+            }}))
+            .assert_value();
+            let (recovery, ledger) = suspended_run_with_output(&backend, false, schema).await;
+            (recovery.submission, ledger)
+        } else {
+            let submission = contract_submission("file-answer-refusal");
+            let ledger = if state == "missing" {
+                let storage = backend.create_run_storage(&params.run_id).assert_value();
+                SqliteRunLedger::open(storage.join("runs.sqlite3")).assert_value()
+            } else {
+                create_contract_run(&backend, &params.run_id, &submission).await
+            };
+            (submission, ledger)
+        };
+        let before = ledger.get(&params.run_id).await.assert_value();
+        let mut prepared =
+            prepared_local_run(params.successor_run_id.clone(), submission, workspace);
+        prepared.delivery_run_id = params.run_id.clone();
+        let resolved = backend.resolve_local_request(&params).await;
+        if state == "upload-unavailable" {
+            assert!(resolved.assert_value().is_some());
+        } else {
+            let error = resolved.assert_error().to_string();
+            assert!(error.contains("suspended"), "{state}: {error}");
+        }
+        let RunResumeFrom::Answer { signals, output } = params.from.clone().assert_value() else {
+            unreachable!()
+        };
+        let mut resolution = Some(RequestResolution::Answer {
+            answer: RequestAnswer { signals, output },
+        });
+        let error = backend
+            .accept_request_files(&params, &prepared, &mut resolution)
+            .await
+            .assert_error()
+            .to_string();
+        let expected = match state {
+            "missing" => "request is unavailable",
+            "admitted" => "run has no request",
+            _ => "$.output:",
+        };
+        assert!(error.contains(expected), "{state}: {error}");
+        backend
+            .release_answer_uploads(&params.run_id, &json!({}))
+            .await
+            .assert_value();
+        assert_eq!(ledger.get(&params.run_id).await.assert_value(), before);
+        assert!(
+            !backend
+                .paths(&params.successor_run_id)
+                .assert_value()
+                .storage()
+                .exists()
+        );
+        if let Some(files) =
+            crate::native_v2_cli::files::input_files_if_present(&backend.state_root).assert_value()
+        {
+            assert!(
+                files
+                    .file_input_roots(&params.run_id)
+                    .assert_value()
+                    .is_empty()
+            );
+        }
+        assert_eq!(std::fs::read(original).assert_value(), b"preserve original");
+    }
+}
