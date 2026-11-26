@@ -3,6 +3,7 @@ use std::sync::Arc;
 use reqwest::{Method, StatusCode, Url, header::HeaderMap};
 use serde::Serialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+#[cfg(unix)]
 use tokio::net::TcpListener;
 
 #[cfg(unix)]
