@@ -34,8 +34,8 @@ pub(crate) async fn check_forge_access(
 }
 
 /// Checkpoint restores resolve executables only after restoration under the controller lease.
-/// The controller's stop request ends the request with confirmed cleanup, and a stopped check
-/// is refused even when the forge answered.
+/// The controller's stop request cancels the forge read. A stopped check is refused
+/// even when the forge answered.
 pub(crate) async fn check_restored_forge_access(
     bootstrap: &crate::native_v2_portable_controller::PortableControllerBootstrap,
     stopping: Option<tokio::sync::watch::Receiver<bool>>,
@@ -102,19 +102,14 @@ async fn check_access(
             target.repository
         )))
     };
-    let programs = local_delivery_programs(
-        source,
-        &required,
-        prepared.native_environment,
-        prepared.workspace,
-    )?;
+    let git = local_delivery_git(prepared.native_environment, prepared.workspace)?;
     prepare_private_directory(directory)?;
     let authority = delivery_authority(
         SourceDeliveryFactoryRequest {
             source,
             workspace: prepared.workspace,
-            git_program: &programs.git,
-            gh_program: &programs.gh,
+            git_program: &git,
+            gh_program: Path::new("gh"),
             home_directory: directory,
             private_directory: directory,
             git_identity: None,

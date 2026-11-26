@@ -1,13 +1,77 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use openengine_cluster_testkit::assertions::AssertValue;
-use openengine_cluster_testkit::fixture::TemporaryDirectory;
+use reqwest::StatusCode;
+use serde_json::json;
+use tokio::net::TcpListener;
+use tokio::task::JoinHandle;
 
+use super::super::super::http_fixture::{self, IntoResponse, Json, Response};
 use super::*;
-
-#[path = "policy_read_tests.rs"]
-mod policy_read_tests;
+use crate::native_v2_delivery::git_auth::encode_basic_credential;
 use crate::source_code_provider::adapters::core::ci_diagnostics::{
     MAX_FAILURE_FEEDBACK_CHARS, MAX_JOB_LOG_TAIL_BYTES, include_job_logs,
 };
+
+#[path = "mutation_tests.rs"]
+mod mutation_tests;
+#[path = "policy_read_tests.rs"]
+mod policy_read_tests;
+#[path = "rest_pagination_tests.rs"]
+mod rest_pagination_tests;
+
+const TOKEN: &str = "fixture-token";
+const REST_PATH: &[&str] = &["repos", "acme", "project", "pulls"];
+
+fn authority(deadline: Duration) -> GhCliDeliveryAuthority {
+    GhCliDeliveryAuthority::new(GhCliAuthorityConfig {
+        api_deadline: deadline,
+        ..GhCliAuthorityConfig::hosted(std::env::temp_dir())
+    })
+}
+
+struct ApiFixture {
+    origin: String,
+    server: JoinHandle<()>,
+    attempts: Arc<AtomicUsize>,
+}
+
+impl ApiFixture {
+    async fn serve(
+        handler: impl Fn(usize, http_fixture::Request) -> Response + Send + Sync + 'static,
+    ) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let calls = Arc::clone(&attempts);
+        let server = tokio::spawn(http_fixture::serve(listener, move |request| {
+            handler(calls.fetch_add(1, Ordering::Relaxed), request)
+        }));
+        Self {
+            origin,
+            server,
+            attempts,
+        }
+    }
+
+    fn calls(&self) -> usize {
+        self.attempts.load(Ordering::Relaxed)
+    }
+
+    fn authority(&self) -> GhCliDeliveryAuthority {
+        authority(Duration::from_secs(10)).with_test_api(&self.origin)
+    }
+}
+
+impl Drop for ApiFixture {
+    fn drop(&mut self) {
+        self.server.abort();
+    }
+}
+
+fn credential() -> SourceDeliveryCredential<'static> {
+    SourceDeliveryCredential::token(TOKEN)
+}
 
 fn check_log_tail(output: &[u8]) -> JobLog {
     super::check_log_tail(output, SourceDeliveryCredential::token(""), &[])
@@ -156,65 +220,7 @@ fn credential_collisions_preserve_raw_failure_context_through_both_budgets() {
 }
 
 #[test]
-fn unsupported_log_option_is_classified_before_redaction() {
-    use crate::source_code_provider::SourceGitCredential;
-
-    let message = "unknown flag: --allow-escape-sequences";
-    for username in [
-        "ordinary-user",
-        "flag",
-        "unknown",
-        "--allow-escape-sequences",
-    ] {
-        let credential =
-            SourceDeliveryCredential::token("forge-token").with_git(SourceGitCredential::Https {
-                username,
-                password: "private-password",
-            });
-        let output = ApiOutput {
-            stderr: format!("{message}\n").into_bytes(),
-            ..Default::default()
-        };
-        assert!(output.unsupported_escape_sequences());
-        let error = output.failure(None, "download failed", credential);
-        assert!(!error.authentication_failed());
-        assert!(!error.retryable_operation());
-        assert!(!error.to_string().contains(username));
-    }
-    for stderr in [
-        "unknown flag: --other-option",
-        "prefix unknown flag: --allow-escape-sequences",
-        "unexpected EOF",
-    ] {
-        assert!(
-            !ApiOutput {
-                stderr: stderr.as_bytes().to_vec(),
-                ..Default::default()
-            }
-            .unsupported_escape_sequences()
-        );
-    }
-    assert!(
-        !ApiOutput {
-            stdout: message.as_bytes().to_vec(),
-            ..Default::default()
-        }
-        .unsupported_escape_sequences()
-    );
-}
-
-#[test]
-fn api_payload_budget_and_log_tail_are_bounded() {
-    let payload = vec![b'x'; 512 * 1024];
-    assert_eq!(
-        validate_api_output(payload).assert_value().len(),
-        512 * 1024
-    );
-    assert_eq!(
-        validate_api_output(vec![b'x'; MAX_API_OUTPUT_BYTES + 1]),
-        Err(SourceDeliveryError::Rejected)
-    );
-
+fn log_tail_retains_the_end_within_the_capture_budget() {
     let mut output = b"discard".to_vec();
     output.extend(vec![b'x'; MAX_JOB_LOG_TAIL_BYTES]);
     output.extend_from_slice(b"failure at end");
@@ -222,329 +228,6 @@ fn api_payload_budget_and_log_tail_are_bounded() {
     assert_eq!(tail.text.len(), MAX_JOB_LOG_TAIL_BYTES);
     assert!(!tail.text.contains("discard"));
     assert!(tail.text.ends_with("failure at end"));
-}
-
-#[test]
-fn api_error_parser_preserves_bounded_provider_status_and_reason() {
-    let error = github_api_error(
-        br#"gh: Validation Failed (HTTP 422)
-{
-  "message":"Validation Failed",
-  "errors":[{
-    "resource":"PullRequest",
-    "field":"head",
-    "code":"invalid",
-    "message":"Head sha can't be blank"
-  }],
-  "status":"422"
-}
-"#,
-    );
-    assert!(error.to_string().contains("Head sha can't be blank"));
-    assert!(error.to_string().contains("Validation Failed (HTTP 422)"));
-    assert!(error.retryable_review_sync());
-
-    let unauthorized = SourceDeliveryError::api(Some(401), "HTTP 401: Bad credentials");
-    assert!(!unauthorized.retryable_review_sync());
-    assert!(unauthorized.authentication_failed());
-}
-
-#[test]
-fn only_typed_transient_api_failures_are_retryable_during_review_sync() {
-    let forbidden =
-        github_api_error(b"gh: unusual remote refusal (HTTP 403)\nPlease try again later.");
-    assert!(!forbidden.authentication_failed());
-    assert!(!forbidden.retryable_review_sync());
-    assert!(forbidden.to_string().contains("unusual remote refusal"));
-    assert!(forbidden.to_string().contains("Please try again later."));
-
-    let statusless = SourceDeliveryError::api(None, "GitHub returned an invalid response");
-    assert!(!statusless.retryable_review_sync());
-    assert!(statusless.clone().temporary().retryable_review_sync());
-    assert!(SourceDeliveryError::api(Some(429), "rate limited").retryable_review_sync());
-}
-
-fn authority(program: PathBuf, deadline: Duration) -> GhCliDeliveryAuthority {
-    let home = program.parent().assert_value().to_path_buf();
-    GhCliDeliveryAuthority::new(GhCliAuthorityConfig {
-        gh_program: program,
-        api_deadline: deadline,
-        ..GhCliAuthorityConfig::hosted(home)
-    })
-}
-
-fn spawn_error(program: &std::path::Path) -> String {
-    std::process::Command::new(program)
-        .spawn()
-        .err()
-        .assert_value()
-        .to_string()
-}
-
-#[tokio::test]
-async fn missing_api_executable_preserves_os_error_and_redacts_command() {
-    let root = TemporaryDirectory::for_test("github-api");
-    let program = root.as_path().join("missing-test-token-gh");
-    let expected = spawn_error(&program);
-    let error = authority(program, Duration::from_secs(1))
-        .api_output(
-            &["repos/acme/project/pulls".to_owned()],
-            SourceDeliveryCredential::token("test-token"),
-        )
-        .await
-        .err()
-        .assert_value();
-    let diagnostic = error.to_string();
-    assert!(diagnostic.contains("could not start command:"));
-    assert!(diagnostic.contains(&expected));
-    assert!(diagnostic.contains("missing-[REDACTED]-gh"));
-    assert!(diagnostic.contains("repos/acme/project/pulls"));
-    assert!(!diagnostic.contains("test-token"));
-    assert_eq!(error.api_status(), None);
-    assert!(!error.retryable_review_sync());
-    assert!(!error.authentication_failed());
-}
-
-#[cfg(unix)]
-fn script(root: &std::path::Path, source: &str) -> PathBuf {
-    let program = root.join("gh-fixture");
-    openengine_cluster_testkit::fixture::write_executable(
-        &program,
-        format!("#!/bin/sh\n{source}"),
-        0o755,
-    )
-    .assert_value_with("write GitHub API fixture");
-    program
-}
-
-#[cfg(unix)]
-#[tokio::test]
-async fn empty_api_output_remains_an_error() {
-    let root = TemporaryDirectory::for_test("github-empty-api");
-    let program = script(root.as_path(), "exit 0\n");
-    let error = authority(program, Duration::from_secs(1))
-        .api_output(
-            &["graphql".to_owned()],
-            SourceDeliveryCredential::token("test-token"),
-        )
-        .await
-        .err()
-        .assert_value();
-    assert!(matches!(error, SourceDeliveryError::Api(_)));
-    assert!(!error.retryable_operation());
-}
-
-#[cfg(unix)]
-#[tokio::test]
-async fn nonexecutable_api_program_preserves_permission_error() {
-    use std::os::unix::fs::PermissionsExt;
-
-    let root = TemporaryDirectory::for_test("github-api");
-    let program = script(root.as_path(), "exit 0\n");
-    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o644)).assert_value();
-    let expected = spawn_error(&program);
-    let error = authority(program, Duration::from_secs(1))
-        .api_output(&[], SourceDeliveryCredential::token("test-token"))
-        .await
-        .err()
-        .assert_value();
-    assert!(error.to_string().contains("could not start command:"));
-    assert!(error.to_string().contains(&expected));
-    assert!(!error.retryable_review_sync());
-}
-
-#[cfg(unix)]
-#[test]
-fn explicit_rate_limit_403s_are_temporary_but_permission_403_is_terminal() {
-    use std::os::unix::process::ExitStatusExt;
-
-    for (message, retryable) in [
-        ("API rate limit exceeded for user ID 123.", true),
-        (
-            "You have exceeded a secondary rate limit. Please wait a few minutes before you try again.",
-            true,
-        ),
-        ("Resource not accessible by integration", false),
-    ] {
-        let error = ApiOutput {
-            stdout: Vec::new(),
-            stderr: format!("gh: {message} (HTTP 403)\n").into_bytes(),
-            ..Default::default()
-        }
-        .failure(
-            Some(std::process::ExitStatus::from_raw(1 << 8)),
-            "fixture failure",
-            SourceDeliveryCredential::token("test-token"),
-        );
-
-        assert_eq!(error.api_status(), Some(403));
-        assert_eq!(error.retryable_review_sync(), retryable);
-        assert_eq!(error.retryable_operation(), retryable);
-    }
-}
-
-#[cfg(unix)]
-#[tokio::test]
-async fn interrupted_api_preserves_redacted_partial_streams_without_claiming_auth_refusal() {
-    let root = TemporaryDirectory::for_test("github-api");
-    let program = script(
-        root.as_path(),
-        r#"printf 'partial stdout %s\n' "$GH_TOKEN"
-printf 'gh: partial response (HTTP 401) %s\npartial secret: test-to' "$GH_TOKEN" >&2
-exec /bin/sleep 30
-"#,
-    );
-    let error = authority(program, Duration::from_secs(1))
-        .api_output(&[], SourceDeliveryCredential::token("test-token"))
-        .await
-        .err()
-        .assert_value();
-    let diagnostic = error.to_string();
-    assert!(
-        diagnostic.contains("command timed out after 1000 milliseconds"),
-        "unexpected diagnostic: {diagnostic}"
-    );
-    assert!(diagnostic.contains("stdout (truncated=true):\npartial stdout [REDACTED]"));
-    assert!(
-        diagnostic.contains("stderr (truncated=true):\ngh: partial response (HTTP 401) [REDACTED]")
-    );
-    assert!(diagnostic.contains("partial secret:"));
-    assert!(!diagnostic.contains("test-to"));
-    assert_eq!(error.api_status(), None);
-    assert!(error.retryable_review_sync());
-    assert!(!error.authentication_failed());
-}
-
-#[cfg(unix)]
-#[tokio::test]
-async fn failed_api_reserves_diagnostic_space_for_both_streams_and_retains_http_status() {
-    let root = TemporaryDirectory::for_test("github-api");
-    let mut stdout = b"stdout retained: ".to_vec();
-    stdout.resize(MAX_API_DIAGNOSTIC_STREAM_BYTES - 4, b'x');
-    stdout.extend_from_slice(b"test-token");
-    stdout.resize(MAX_API_OUTPUT_BYTES + 1, b'x');
-    let mut stderr = b"gh: fixture failure (HTTP 401)\nstderr retained: test-token\n".to_vec();
-    let encoded = encode_basic_credential("test-token");
-    stderr.extend_from_slice(format!("encoded credential: {encoded}\n").as_bytes());
-    stderr.extend(vec![b'y'; MAX_API_ERROR_BYTES + 1]);
-    std::fs::write(root.as_path().join("stdout"), stdout).assert_value();
-    std::fs::write(root.as_path().join("stderr"), stderr).assert_value();
-    let program = script(
-        root.as_path(),
-        "/bin/cat \"$HOME/stdout\"\n/bin/cat \"$HOME/stderr\" >&2\nexit 7\n",
-    );
-    // Emitting and draining both bounded multi-megabyte streams is intentionally heavier under
-    // coverage instrumentation; the assertion is about capture bounds, not scheduler latency.
-    let error = authority(program, Duration::from_secs(30))
-        .api_output(&[], SourceDeliveryCredential::token("test-token"))
-        .await
-        .err()
-        .assert_value();
-    let diagnostic = error.to_string();
-    assert!(diagnostic.contains("exitStatus: Some(7)"));
-    assert!(diagnostic.contains("stdout (truncated=true):\nstdout retained:"));
-    assert!(diagnostic.contains("stderr (truncated=true):\ngh: fixture failure (HTTP 401)"));
-    assert!(diagnostic.contains("stderr retained: [REDACTED]"));
-    assert!(diagnostic.contains("encoded credential: [REDACTED]"));
-    assert!(!diagnostic.contains("test-"));
-    assert!(!diagnostic.contains(&encoded));
-    assert!(diagnostic.len() < 32 * 1024);
-    assert_eq!(error.api_status(), Some(401));
-    assert!(!error.retryable_review_sync());
-    assert!(error.authentication_failed());
-}
-
-#[cfg(unix)]
-#[tokio::test]
-async fn bare_gh_api_http_status_keeps_transient_and_refusal_classification() {
-    // gh api prints a non-JSON error body to stdout and only the status to stderr.
-    for (status, retryable) in [(503, true), (429, true), (401, false), (403, false)] {
-        let root = TemporaryDirectory::for_test("github-api");
-        let program = script(
-            root.as_path(),
-            &format!("printf 'Service Unavailable'\nprintf 'gh: HTTP {status}\\n' >&2\nexit 1\n"),
-        );
-        let error = authority(program, Duration::from_secs(10))
-            .api_output(
-                &["repos/acme/project/pulls/1538".to_owned()],
-                SourceDeliveryCredential::token("test-token"),
-            )
-            .await
-            .err()
-            .assert_value();
-        assert_eq!(error.api_status(), Some(status));
-        assert_eq!(error.retryable_operation(), retryable, "HTTP {status}");
-        assert_eq!(error.authentication_failed(), status == 401);
-        assert!(error.to_string().contains(&format!("gh: HTTP {status}")));
-    }
-}
-
-#[cfg(unix)]
-#[tokio::test]
-async fn successful_api_retains_large_raw_response_without_redacting_or_truncating_it() {
-    let root = TemporaryDirectory::for_test("github-api");
-    let mut expected = b"raw response: test-token\0\xff".to_vec();
-    expected.extend(vec![b'x'; 512 * 1024]);
-    std::fs::write(root.as_path().join("payload"), &expected).assert_value();
-    let program = script(root.as_path(), "exec /bin/cat \"$HOME/payload\"\n");
-    let output = authority(program, Duration::from_secs(10))
-        .api_output(&[], SourceDeliveryCredential::token("test-token"))
-        .await
-        .assert_value();
-    assert_eq!(output, expected);
-}
-
-struct FailingReader(&'static [u8]);
-
-impl AsyncRead for FailingReader {
-    fn poll_read(
-        mut self: std::pin::Pin<&mut Self>,
-        _context: &mut std::task::Context<'_>,
-        buffer: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        if self.0.is_empty() {
-            return std::task::Poll::Ready(Err(std::io::Error::other(
-                "fixture read failure: test-token",
-            )));
-        }
-        let count = self.0.len().min(buffer.remaining());
-        buffer.put_slice(&self.0[..count]);
-        self.0 = &self.0[count..];
-        std::task::Poll::Ready(Ok(()))
-    }
-}
-
-#[tokio::test]
-async fn api_pipe_failure_preserves_stream_and_partial_output_with_redaction() {
-    for stream in ["stdout", "stderr"] {
-        let mut output = ApiOutput::default();
-        let bytes = if stream == "stdout" {
-            &mut output.stdout
-        } else {
-            &mut output.stderr
-        };
-        let error = collect_bounded(
-            FailingReader(b"retained output: test-token\npartial secret: test-to"),
-            bytes,
-            MAX_API_ERROR_BYTES,
-            stream,
-        )
-        .await
-        .err()
-        .assert_value();
-        let failure = output.failure(None, &error, SourceDeliveryCredential::token("test-token"));
-        let diagnostic = failure.to_string();
-        assert!(diagnostic.contains(&format!(
-            "could not read command {stream}: fixture read failure: [REDACTED]"
-        )));
-        assert!(diagnostic.contains(&format!(
-            "{stream} (truncated=true):\nretained output: [REDACTED]"
-        )));
-        assert!(diagnostic.contains("partial secret:"));
-        assert!(!diagnostic.contains("test-to"));
-        assert!(!failure.retryable_review_sync());
-        assert!(!failure.authentication_failed());
-    }
 }
 
 #[test]
@@ -793,13 +476,105 @@ fn separate_git_credentials_cannot_be_split_into_visible_log_fragments() {
     }
 }
 
-#[cfg(unix)]
+#[test]
+fn native_git_credentials_remain_redacted_through_capture_and_aggregation() {
+    let password = "native-password-private-0123456789-abcdefghijklmnopqrstuvwxyz";
+    let secrets = vec![password.to_owned(), encode_basic_credential(password)];
+    let credential =
+        SourceDeliveryCredential::token("forge-token").with_diagnostic_secrets(&secrets);
+    assert!(credential.git().is_none());
+    for secret in &secrets {
+        for (noise, jobs) in [(24_000, 1), (8_000, 2)] {
+            let mut raw = "setup context\nassertion failed: native password boundary\n".to_owned();
+            raw.push_str(&"x".repeat(8 * 1024 - 24 - raw.len()));
+            raw.push_str(secret);
+            raw.push_str(&format!(
+                "\n{}\n##[error]exit code 1\n",
+                "noise\n".repeat(noise)
+            ));
+            assert_eq!(raw.len() > MAX_JOB_LOG_TAIL_BYTES, jobs == 1);
+            let logs = (91..91 + jobs)
+                .map(|job| (job, super::check_log_tail(raw.as_bytes(), credential, &[])))
+                .collect::<Vec<_>>();
+            for label in ["GitHub Actions", "GitLab"] {
+                let mut feedback = "Required CI checks failed".to_owned();
+                include_job_logs(&mut feedback, label, &logs);
+                let feedback = crate::native_v2_delivery::command::redact(&feedback, &secrets);
+                assert!(feedback.chars().count() <= MAX_FAILURE_FEEDBACK_CHARS);
+                assert!(feedback.contains("assertion failed: native password boundary"));
+                assert!(feedback.contains("setup context"));
+                assert!(feedback.contains("##[error]exit code 1"));
+                assert!(!feedback.contains(&secret[..24]));
+            }
+        }
+    }
+}
+
+#[test]
+fn schema_failures_preserve_bounded_redacted_response_details() {
+    let token = "sensitive-test-token";
+    let value = serde_json::json!({
+        "unexpected": format!("{token} {} {}", encode_basic_credential(token), "λ🦀".repeat(20_000))
+    });
+    let error = authority(Duration::from_secs(1))
+        .decode_response::<GitReferenceWire>(value, SourceDeliveryCredential::token(token))
+        .err()
+        .expect("wrong schema must fail");
+    let diagnostic = error.to_string();
+    assert!(diagnostic.contains("missing field"));
+    assert!(diagnostic.contains("unexpected"));
+    assert!(diagnostic.contains("truncated=true"));
+    assert!(diagnostic.contains("[REDACTED]"));
+    assert!(!diagnostic.contains(token));
+    assert!(!diagnostic.contains(&encode_basic_credential(token)));
+    assert!(diagnostic.len() < 32 * 1024);
+    assert!(!error.retryable_operation());
+}
+
+fn proxy_cutoff_fixture() -> (super::super::super::network::ForgeNetwork, [String; 3]) {
+    let password = format!("proxy-password-boundary-{}", "p".repeat(96));
+    let url = format!("proxy-user:{password}@proxy.invalid:8080");
+    let basic = crate::native_v2_delivery::git_auth::encode_user_password("proxy-user", &password);
+    let network = super::super::super::network::ForgeNetwork::from_snapshot(&BTreeMap::from([(
+        "HTTPS_PROXY".into(),
+        url.clone(),
+    )]));
+    (network, [password, url, basic])
+}
+
+fn assert_proxy_cutoff_redacted(error: SourceDeliveryError, echoed: &str) {
+    let diagnostic = format!("{error:?}\n{error}");
+    assert!(diagnostic.contains("truncated=true"), "{diagnostic}");
+    assert!(diagnostic.contains("[REDACTED]"), "{diagnostic}");
+    assert!(
+        !diagnostic.contains(&echoed[..24]),
+        "partial proxy credential leaked"
+    );
+}
+
+#[test]
+fn schema_failures_redact_proxy_credentials_before_diagnostic_cutoff() {
+    let (network, echoes) = proxy_cutoff_fixture();
+    let authority = authority(Duration::from_secs(1)).with_network(network);
+    for echoed in echoes {
+        let value = serde_json::json!({"unexpected": format!("{}{echoed}{}",
+            "x".repeat(MAX_API_DIAGNOSTIC_BYTES - 48), "z".repeat(1024))});
+        let error = authority
+            .decode_response::<GitReferenceWire>(
+                value,
+                SourceDeliveryCredential::token("test-token"),
+            )
+            .err()
+            .expect("schema must be rejected");
+        assert_proxy_cutoff_redacted(error, &echoed);
+    }
+}
+
 #[tokio::test]
-async fn job_log_capture_opts_in_and_feedback_removes_terminal_controls() {
+async fn native_job_log_retains_annotations_and_feedback_removes_terminal_controls() {
     use crate::native_v2_delivery::git_auth;
     use crate::source_code_provider::SourceGitCredential;
 
-    let root = TemporaryDirectory::for_test("github-job-log");
     let credential = SourceDeliveryCredential::token("test-token")
         .with_github_git_token("separate-github-git-token")
         .with_git(SourceGitCredential::Https {
@@ -815,17 +590,17 @@ async fn job_log_capture_opts_in_and_feedback_removes_terminal_controls() {
         git_auth::encode_user_password("delivery-user", "separate-git-password"),
         git_auth::encode_basic_credential("separate-github-git-token"),
     );
-    std::fs::write(root.as_path().join("payload"), &payload).assert_value();
-    let program = script(
-        root.as_path(),
-        r#"case "$*" in
-  'api repos/acme/project/actions/jobs/91/logs --method GET --allow-escape-sequences --header X-GitHub-Api-Version: 2026-03-10') ;;
-  *) printf '%s\n' 'the response contains terminal escape sequences' >&2; exit 1 ;;
-esac
-exec /bin/cat "$HOME/payload"
-"#,
-    );
-    let output = authority(program, Duration::from_secs(10))
+    let fixture = ApiFixture::serve(move |_, request| {
+        assert_eq!(
+            request.uri.path(),
+            "/repos/acme/project/actions/jobs/91/logs"
+        );
+        assert_eq!(request.method, reqwest::Method::GET);
+        Response::raw(payload.clone().into_bytes())
+    })
+    .await;
+    let output = fixture
+        .authority()
         .job_log_output("acme/project", 91, credential)
         .await
         .assert_value();
@@ -873,114 +648,91 @@ exec /bin/cat "$HOME/payload"
     );
 }
 
-#[test]
-fn native_git_credentials_remain_redacted_through_capture_and_aggregation() {
-    let password = "native-password-private-0123456789-abcdefghijklmnopqrstuvwxyz";
-    let secrets = vec![password.to_owned(), encode_basic_credential(password)];
-    let credential =
-        SourceDeliveryCredential::token("forge-token").with_diagnostic_secrets(&secrets);
-    assert!(credential.git().is_none());
-    for secret in &secrets {
-        for (noise, jobs) in [(24_000, 1), (8_000, 2)] {
-            let mut raw = "setup context\nassertion failed: native password boundary\n".to_owned();
-            raw.push_str(&"x".repeat(8 * 1024 - 24 - raw.len()));
-            raw.push_str(secret);
-            raw.push_str(&format!(
-                "\n{}\n##[error]exit code 1\n",
-                "noise\n".repeat(noise)
-            ));
-            assert_eq!(raw.len() > MAX_JOB_LOG_TAIL_BYTES, jobs == 1);
-            let logs = (91..91 + jobs)
-                .map(|job| (job, super::check_log_tail(raw.as_bytes(), credential, &[])))
-                .collect::<Vec<_>>();
-            for label in ["GitHub Actions", "GitLab"] {
-                let mut feedback = "Required CI checks failed".to_owned();
-                include_job_logs(&mut feedback, label, &logs);
-                let feedback = crate::native_v2_delivery::command::redact(&feedback, &secrets);
-                assert!(feedback.chars().count() <= MAX_FAILURE_FEEDBACK_CHARS);
-                assert!(feedback.contains("assertion failed: native password boundary"));
-                assert!(feedback.contains("setup context"));
-                assert!(feedback.contains("##[error]exit code 1"));
-                assert!(!feedback.contains(&secret[..24]));
-            }
-        }
-    }
-}
-
-#[test]
-fn interrupted_log_streams_redact_all_credentials_before_diagnostic_bounds() {
-    use crate::source_code_provider::SourceGitCredential;
-
-    let password = "interrupted-private-password-0123456789-abcdefghijklmnopqrstuvwxyz";
-    let secrets = vec![password.to_owned()];
-    for native in [false, true] {
-        let credential = SourceDeliveryCredential::token("forge-token");
-        let credential = if native {
-            credential.with_diagnostic_secrets(&secrets)
-        } else {
-            credential.with_git(SourceGitCredential::Https {
-                username: "git-user",
-                password,
-            })
-        };
-        for stderr in ["unexpected EOF", "error connecting to api.github.com"] {
-            let mut stdout = "assertion failed: interrupted log\n".to_owned();
-            stdout.push_str(&"x".repeat(MAX_API_DIAGNOSTIC_STREAM_BYTES - 24 - stdout.len()));
-            stdout.push_str(password);
-            stdout.push_str(&"noise\n".repeat(8_000));
-            let error = ApiOutput {
-                stdout: stdout.into_bytes(),
-                stderr: stderr.as_bytes().to_vec(),
-                ..Default::default()
-            }
-            .failure(None, "could not read command stdout", credential);
-            assert_eq!(error.api_status(), None);
-            assert!(!error.authentication_failed());
-            assert_eq!(
-                error.retryable_operation(),
-                stderr.starts_with("error connecting")
-            );
-            let log = JobLog::unavailable(format!("GitHub job log unavailable: {error}"));
-            assert!(log.text.contains(stderr));
-            assert!(!log.text.contains(&password[..24]));
-            let logs = (91..99).map(|job| (job, log.clone())).collect::<Vec<_>>();
-            let mut feedback = "Required CI checks failed".to_owned();
-            include_job_logs(&mut feedback, "GitHub Actions", &logs);
-            let feedback = crate::native_v2_delivery::command::redact(&feedback, &secrets);
-            assert!(!feedback.contains(&password[..24]));
-            assert!(feedback.contains("--- GitHub Actions job 91 log excerpt ---"));
-            assert!(feedback.chars().count() <= MAX_FAILURE_FEEDBACK_CHARS);
-        }
-    }
-    // Secret replacement must not hide a native transport classification.
-    let transport = "error connecting to api.github.com".to_owned();
-    let credential = SourceDeliveryCredential::token("forge-token")
-        .with_diagnostic_secrets(std::slice::from_ref(&transport));
-    let error = ApiOutput {
-        stderr: transport.as_bytes().to_vec(),
-        ..Default::default()
-    }
-    .failure(None, "download failed", credential);
-    assert!(error.retryable_operation());
-    assert!(!error.to_string().contains(&transport));
-}
-
-#[cfg(unix)]
 #[tokio::test]
-async fn interrupted_job_log_download_redacts_partial_stdout_before_feedback() {
+async fn job_log_deadline_preserves_bounded_operation_retry() {
+    let disconnected = Arc::new(tokio::sync::Notify::new());
+    let fixture =
+        ApiFixture::serve(move |_, _| Response::stall_until_disconnect(disconnected.clone())).await;
+    let provider = authority(Duration::from_secs(1)).with_test_api(&fixture.origin);
+    let error = provider
+        .job_log_output("acme/project", 91, credential())
+        .await
+        .unwrap_err();
+    assert!(error.retryable_operation(), "{error}");
+    assert!(error.to_string().contains("API deadline"), "{error}");
+    assert_eq!(fixture.calls(), 1);
+    assert!(super::super::job_log_excerpt(Err(error)).is_err());
+}
+
+#[tokio::test]
+async fn signed_job_log_failures_retry_without_claiming_forge_authentication() {
+    let root = tempfile::tempdir().unwrap();
+    let ca = root.path().join("ca.pem");
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("https://{}", listener.local_addr().unwrap());
+    let tls = http_fixture::loopback_tls(&ca);
+    let server = tokio::spawn(http_fixture::serve_tls(listener, tls, |request| {
+        if request.uri.path() == "/api/v3/meta" {
+            return Json(json!({"installed_version":"3.22.2"})).into_response();
+        }
+        if let Some(code) = request.uri.path().strip_prefix("/signed/") {
+            assert!(!request.headers.contains_key("authorization"));
+            assert_eq!(request.uri.query(), Some("sig=private-download-signature"));
+            return (
+                code.parse::<StatusCode>().unwrap(),
+                Json(json!({"message":"failure with private-download-signature"})),
+            )
+                .into_response();
+        }
+        assert_eq!(request.headers["authorization"], "Bearer fixture-token");
+        let path: Vec<_> = request.uri.path().split('/').collect();
+        let job = path[path.len() - 2];
+        StatusCode::FOUND.into_response().header(
+            "Location",
+            &format!("/signed/{job}?sig=private-download-signature"),
+        )
+    }));
+    let network = super::super::super::network::ForgeNetwork::from_snapshot(&BTreeMap::from([(
+        "SSL_CERT_FILE".into(),
+        ca.to_string_lossy().into_owned(),
+    )]));
+    let provider = authority(Duration::from_secs(5))
+        .with_base_url(openengine_cluster_protocol::SourceForgeBaseUrl::new(origin).unwrap())
+        .unwrap()
+        .with_network(network);
+    for (status, retry) in [(401, false), (403, false), (429, true), (503, true)] {
+        let error = provider
+            .job_log_output("acme/project", status, credential())
+            .await
+            .unwrap_err();
+        assert_eq!(error.api_status(), None);
+        assert!(!error.authentication_failed(), "{error}");
+        assert_eq!(error.retryable_operation(), retry, "{error}");
+        assert!(
+            error.to_string().contains(&format!("HTTP {status}")),
+            "{error}"
+        );
+        assert!(
+            !error.to_string().contains("private-download-signature"),
+            "{error}"
+        );
+    }
+    server.abort();
+}
+
+#[tokio::test]
+async fn interrupted_job_log_download_redacts_partial_body_before_feedback() {
     use crate::source_code_provider::SourceGitCredential;
 
-    let root = TemporaryDirectory::for_test("github-partial-log");
     let password = "interrupted-private-password-0123456789-abcdefghijklmnopqrstuvwxyz";
     let mut payload = "assertion failed: interrupted log\n".to_owned();
-    payload.push_str(&"x".repeat(MAX_API_DIAGNOSTIC_STREAM_BYTES - 24 - payload.len()));
+    payload.push_str(&"x".repeat(MAX_API_DIAGNOSTIC_BYTES - 24 - payload.len()));
     payload.push_str(password);
-    std::fs::write(root.as_path().join("payload"), payload).assert_value();
-    let program = script(
-        root.as_path(),
-        "cat \"$HOME/payload\"\nprintf 'unexpected EOF\\n' >&2\nexit 1\n",
-    );
-    let authority = authority(program, Duration::from_secs(10));
+    let fixture = ApiFixture::serve(move |_, _| {
+        Response::raw(payload.clone().into_bytes()).content_length(payload.len() + 1)
+    })
+    .await;
+    let authority = fixture.authority();
     let secrets = vec![password.to_owned()];
     for native in [false, true] {
         let credential = SourceDeliveryCredential::token("forge-token");
@@ -1000,7 +752,7 @@ async fn interrupted_job_log_download_redacts_partial_stdout_before_feedback() {
         assert!(!error.authentication_failed());
         assert!(!error.retryable_operation());
         let log = super::super::job_log_excerpt(Err(error)).assert_value();
-        assert!(log.text.contains("unexpected EOF"));
+        assert!(log.text.contains("partial response: assertion failed"));
         assert!(log.text.contains("job log unavailable"));
         assert!(!log.text.contains(&password[..24]));
         let logs = (91..99).map(|job| (job, log.clone())).collect::<Vec<_>>();
@@ -1012,371 +764,319 @@ async fn interrupted_job_log_download_redacts_partial_stdout_before_feedback() {
     }
 }
 
-#[cfg(unix)]
 #[tokio::test]
-async fn job_log_capture_supports_older_gh_without_the_opt_in_flag() {
-    use crate::source_code_provider::SourceGitCredential;
-
-    for username in ["ordinary-user", "flag", "unknown", "error"] {
-        let root = TemporaryDirectory::for_test("github-job-log");
-        let program = script(
-            root.as_path(),
-            r#"printf 'call\n' >> "$HOME/calls"
-case "$*" in
-  *--allow-escape-sequences*) printf '%s\n' 'unknown flag: --allow-escape-sequences' >&2; exit 1 ;;
-esac
-printf 'older CLI failure details test-token\n##[error]exit code 1\ncleanup-must-disappear\n'
-"#,
-        );
-        let output = authority(program, Duration::from_secs(10))
-            .job_log_output(
-                "acme/project",
-                91,
-                SourceDeliveryCredential::token("test-token").with_git(
-                    SourceGitCredential::Https {
-                        username,
-                        password: "private-password",
-                    },
-                ),
-            )
-            .await
-            .assert_value();
-        let expected = crate::native_v2_delivery::command::redact(
-            "older CLI failure details test-token\n##[error]exit code 1\n",
-            &["test-token".to_owned(), username.to_owned()],
-        );
-        assert_eq!(output.text, expected);
-        assert_eq!(
-            std::fs::read_to_string(root.as_path().join("calls")).assert_value(),
-            "call\ncall\n"
-        );
-    }
-}
-
-#[cfg(unix)]
-#[tokio::test]
-async fn job_log_capture_does_not_retry_unrelated_api_failures() {
-    let root = TemporaryDirectory::for_test("github-job-log");
-    let program = script(
-        root.as_path(),
-        r#"printf 'call\n' >> "$HOME/calls"
-printf 'gh: permission denied (HTTP 403)\n' >&2
-exit 1
-"#,
-    );
-    let error = authority(program, Duration::from_secs(10))
-        .job_log_output(
-            "acme/project",
-            91,
-            SourceDeliveryCredential::token("test-token"),
-        )
-        .await
-        .err()
-        .assert_value();
-    assert_eq!(error.api_status(), Some(403));
-    assert!(error.to_string().contains("permission denied"));
-    assert_eq!(
-        std::fs::read_to_string(root.as_path().join("calls")).assert_value(),
-        "call\n"
-    );
-}
-
-#[test]
-fn schema_failures_preserve_bounded_redacted_response_details() {
-    let token = "sensitive-test-token";
-    let value = serde_json::json!({
-        "unexpected": format!("{token} {} {}", encode_basic_credential(token), "λ🦀".repeat(20_000))
-    });
-    let error = authority(PathBuf::from("unused"), Duration::from_secs(1))
-        .decode_response::<GitReferenceWire>(value, SourceDeliveryCredential::token(token))
-        .err()
-        .expect("wrong schema must fail");
-    let diagnostic = error.to_string();
-    assert!(diagnostic.contains("missing field"));
-    assert!(diagnostic.contains("unexpected"));
-    assert!(diagnostic.contains("truncated=true"));
-    assert!(diagnostic.contains("[REDACTED]"));
-    assert!(!diagnostic.contains(token));
-    assert!(!diagnostic.contains(&encode_basic_credential(token)));
-    assert!(diagnostic.len() < 32 * 1024);
-    assert!(!error.retryable_operation());
-}
-
-#[test]
-fn native_cli_http_errors_preserve_status_and_retry_classification() {
-    for (text, status, retryable) in [
+async fn http_status_and_rate_limits_determine_read_and_review_sync_recovery() {
+    let cases = [
+        (401, "Bad credentials", None, false, false),
         (
-            "HTTP 401: Bad credentials (https://api.github.com/graphql)",
-            Some(401),
-            false,
-        ),
-        (
-            "HTTP 429: Too Many Requests (https://api.github.com/graphql)",
-            Some(429),
-            true,
-        ),
-        ("HTTP 503 (https://api.github.com/graphql)", Some(503), true),
-        ("gh: HTTP 503", Some(503), true),
-        ("gh: HTTP 502", Some(502), true),
-        ("gh: HTTP 429", Some(429), true),
-        ("gh: HTTP 401", Some(401), false),
-        ("gh: HTTP 403", Some(403), false),
-        ("gh: HTTP 404", Some(404), false),
-        (
-            r#"non-200 OK status code: 503 Service Unavailable body: "Service Unavailable""#,
-            Some(503),
-            true,
-        ),
-        (
-            r#"non-200 OK status code: 502 Bad Gateway body: "<html>Bad Gateway</html>""#,
-            Some(502),
-            true,
-        ),
-        (
-            r#"non-200 OK status code: 401 Unauthorized body: "{\"message\": \"Bad credentials\"}""#,
-            Some(401),
-            false,
-        ),
-        (
-            r#"non-200 OK status code: 403 Forbidden body: "{\"message\": \"Forbidden\"}""#,
-            Some(403),
-            false,
-        ),
-        (
-            "HTTP 403: API rate limit exceeded for user ID 123. (https://api.github.com/graphql)",
-            Some(403),
-            true,
-        ),
-        (
-            "HTTP 403: You have exceeded a secondary rate limit. (https://api.github.com/graphql)",
-            Some(403),
-            true,
-        ),
-        (
-            "HTTP 403: Resource not accessible by integration (https://api.github.com/graphql)",
-            Some(403),
-            false,
-        ),
-        (
-            "GraphQL: Resource not accessible by integration (mergePullRequest)",
+            403,
+            "Resource not accessible by integration",
             None,
             false,
+            false,
         ),
-        ("HTTP unavailable", None, false),
+        (
+            403,
+            "API rate limit exceeded for user ID 123.",
+            None,
+            true,
+            true,
+        ),
+        (
+            403,
+            "You have exceeded a secondary rate limit. Please wait.",
+            None,
+            true,
+            true,
+        ),
+        (403, "Forbidden", Some(("retry-after", "1")), true, true),
+        (
+            403,
+            "Forbidden",
+            Some(("x-ratelimit-remaining", "0")),
+            true,
+            true,
+        ),
+        (404, "Not found", None, false, true),
+        (409, "Conflict", None, false, true),
+        (422, "Validation failed", None, false, true),
+        (429, "Too Many Requests", None, true, true),
+        (502, "Bad Gateway", None, true, true),
+        (503, "Service Unavailable", None, true, true),
+    ];
+    for (status, message, header, retry_operation, retry_review_sync) in cases {
+        let status = StatusCode::from_u16(status).unwrap();
+        let fixture = ApiFixture::serve(move |_, _| {
+            let response = if status.is_server_error() {
+                Response::raw(format!("<html>{message}</html>").into_bytes()).status(status)
+            } else {
+                (
+                    status,
+                    Json(json!({
+                        "message": message,
+                        "errors": [{"message": "Head sha can't be blank"}],
+                    })),
+                )
+                    .into_response()
+            };
+            if let Some((name, value)) = header {
+                response.header(name, value)
+            } else {
+                response
+            }
+        })
+        .await;
+        let error = fixture
+            .authority()
+            .rest(Request::get(REST_PATH), credential())
+            .await
+            .unwrap_err();
+        assert_eq!(error.api_status(), Some(status.as_u16()), "{message}");
+        assert_eq!(
+            error.authentication_failed(),
+            status == StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(error.retryable_operation(), retry_operation, "{message}");
+        assert_eq!(
+            error.retryable_review_sync(),
+            retry_review_sync,
+            "{message}"
+        );
+        assert!(error.to_string().contains(message));
+        if status == StatusCode::UNPROCESSABLE_ENTITY {
+            assert!(error.to_string().contains("Head sha can't be blank"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn complete_empty_and_malformed_replies_stay_distinct_from_a_lost_reply() {
+    for (body, interrupted, retryable_sync) in [
+        ("", false, false),
+        ("HTTP 401: Bad credentials", false, false),
+        (r#"{"key":"value"}"#, true, true),
+        (r#"{"key":"#, false, true),
     ] {
-        let error = github_api_error(text.as_bytes());
-        assert_eq!(error.api_status(), status, "{text}");
-        assert_eq!(error.retryable_operation(), retryable, "{text}");
-        assert_eq!(error.authentication_failed(), status == Some(401), "{text}");
+        let fixture = ApiFixture::serve(move |_, _| {
+            let response = Response::raw(body.as_bytes().to_vec());
+            if interrupted {
+                response.content_length(body.len() + 1)
+            } else {
+                response
+            }
+        })
+        .await;
+        let error = fixture
+            .authority()
+            .rest_review_sync(Request::get(REST_PATH), credential())
+            .await
+            .unwrap_err();
+        assert_eq!(error.api_status(), None);
+        assert!(!error.authentication_failed());
+        assert!(!error.retryable_operation());
+        assert_eq!(error.retryable_review_sync(), retryable_sync, "{body:?}");
     }
 }
 
-fn proxy_cutoff_fixture() -> (super::super::super::network::ForgeNetwork, [String; 3]) {
-    let password = format!("proxy-password-boundary-{}", "p".repeat(96));
-    let url = format!("proxy-user:{password}@proxy.invalid:8080");
-    let basic = crate::native_v2_delivery::git_auth::encode_user_password("proxy-user", &password);
-    let network = super::super::super::network::ForgeNetwork::from_snapshot(&BTreeMap::from([(
-        "HTTPS_PROXY".into(),
-        url.clone(),
-    )]));
-    (network, [password, url, basic])
-}
-
-fn assert_proxy_cutoff_redacted(error: SourceDeliveryError, echoed: &str) {
-    let diagnostic = format!("{error:?}\n{error}");
-    assert!(diagnostic.contains("truncated=true"), "{diagnostic}");
-    assert!(diagnostic.contains("[REDACTED]"), "{diagnostic}");
-    assert!(
-        !diagnostic.contains(&echoed[..24]),
-        "partial proxy credential leaked"
-    );
-}
-
-#[test]
-fn schema_failures_redact_proxy_credentials_before_diagnostic_cutoff() {
-    let (network, echoes) = proxy_cutoff_fixture();
-    let authority =
-        authority(PathBuf::from("unused"), Duration::from_secs(1)).with_network(network);
-    for echoed in echoes {
-        let value = serde_json::json!({"unexpected": format!("{}{echoed}{}",
-            "x".repeat(MAX_API_DIAGNOSTIC_STREAM_BYTES - 48), "z".repeat(1024))});
-        let error = authority
-            .decode_response::<GitReferenceWire>(
-                value,
-                SourceDeliveryCredential::token("test-token"),
-            )
-            .err()
-            .expect("schema must be rejected");
-        assert_proxy_cutoff_redacted(error, &echoed);
-    }
-}
-
-#[cfg(unix)]
 #[tokio::test]
 async fn malformed_success_redacts_proxy_credentials_before_diagnostic_cutoff() {
-    let root = TemporaryDirectory::for_test("github-proxy-cutoff");
-    let program = script(root.as_path(), "cat \"$HOME/payload\"\n");
     let (network, echoes) = proxy_cutoff_fixture();
-    let authority = authority(program, Duration::from_secs(10)).with_network(network);
     for echoed in echoes {
-        std::fs::write(
-            root.as_path().join("payload"),
-            format!(
-                "{}{echoed}{}",
-                "x".repeat(MAX_API_DIAGNOSTIC_STREAM_BYTES - 48),
-                "z".repeat(1024)
-            ),
-        )
-        .assert_value();
+        let body = format!(
+            "{}{echoed}{}",
+            "x".repeat(MAX_API_DIAGNOSTIC_BYTES - 48),
+            "z".repeat(1024),
+        );
+        let fixture = ApiFixture::serve(move |_, _| Response::raw(body.clone().into_bytes())).await;
+        let authority = authority(Duration::from_secs(10))
+            .with_network(network.clone())
+            .with_test_api(&fixture.origin);
         let error = authority
-            .api(
-                &["repos/acme/project".into()],
-                SourceDeliveryCredential::token("test-token"),
-            )
+            .rest(Request::get(REST_PATH), credential())
             .await
-            .expect_err("malformed JSON must be rejected");
-        assert_proxy_cutoff_redacted(error, &echoed);
+            .unwrap_err();
+        let diagnostic = format!("{error:?}\n{error}");
+        assert!(diagnostic.contains("[REDACTED]"), "{diagnostic}");
+        assert!(!diagnostic.contains(&echoed[..24]));
     }
 }
 
-fn plan_unavailable_output() -> ApiOutput {
-    ApiOutput {
-        // Captured shape from real gh api --paginate --slurp, including the first-page error wrapper.
-        stdout: br#"[{"message":"Upgrade to GitHub Pro or make this repository public to enable this feature.","documentation_url":"https://docs.github.com/rest/repos/rules#get-rules-for-a-branch","status":"403"}]"#.to_vec(),
-        stderr: b"gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)\n".to_vec(),
-        ..Default::default()
-    }
+#[tokio::test]
+async fn complete_error_body_retains_status_and_redacts_credentials_before_bounding() {
+    let encoded = encode_basic_credential(TOKEN);
+    let body = format!(
+        "Bad credentials\ntoken: {TOKEN}\nencoded: {encoded}\n{}",
+        "long response 々".repeat(3_500)
+    );
+    let fixture = ApiFixture::serve(move |_, _| {
+        Response::raw(body.clone().into_bytes())
+            .status(StatusCode::UNAUTHORIZED)
+            .header("x-github-request-id", "fixture-id")
+    })
+    .await;
+    let error = fixture
+        .authority()
+        .rest(Request::get(REST_PATH), credential())
+        .await
+        .unwrap_err();
+    let diagnostic = error.to_string();
+    assert_eq!(error.api_status(), Some(401));
+    assert!(error.authentication_failed());
+    assert!(!error.retryable_operation());
+    assert!(diagnostic.contains("fixture-id"));
+    assert!(diagnostic.contains("Bad credentials"));
+    assert!(diagnostic.contains("token: [REDACTED]"));
+    assert!(diagnostic.contains("encoded: [REDACTED]"));
+    assert!(!diagnostic.contains(TOKEN));
+    assert!(!diagnostic.contains(&encoded));
+    assert!(diagnostic.len() < crate::source_code_provider::MAX_SOURCE_API_DIAGNOSTIC_BYTES);
 }
 
-#[test]
-fn branch_rules_entitlement_requires_a_complete_standalone_protocol_response() {
-    let output = plan_unavailable_output();
-    assert!(output.branch_rules_unavailable());
-    let value: Value = serde_json::from_slice(&output.stdout).assert_value();
-    let error = &value[0];
-    let mut permission = error.clone();
-    permission["message"] = serde_json::json!("Resource not accessible by integration");
-    let mut wrong_status = error.clone();
-    wrong_status["status"] = serde_json::json!("401");
-    for value in [
-        Value::Null,
-        serde_json::json!([]),
-        error.clone(),
-        serde_json::json!([[], error]),
-        serde_json::json!([[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"required","integration_id":15368}]}}], error]),
-        serde_json::json!([error, error]),
-        serde_json::json!([permission]),
-        serde_json::json!([wrong_status]),
-        serde_json::json!([{"message":error["message"]}]),
-    ] {
-        let output = ApiOutput {
-            stdout: value.to_string().into_bytes(),
-            ..plan_unavailable_output()
-        };
-        assert!(!output.branch_rules_unavailable(), "{value}");
-    }
-    for stdout in [
-        Vec::new(),
-        output.stdout[..output.stdout.len() - 1].to_vec(),
-        [output.stdout.as_slice(), b"trailing garbage"].concat(),
-        [output.stdout.as_slice(), &[0xff]].concat(),
-        [output.stdout.as_slice(), &vec![b' '; MAX_API_OUTPUT_BYTES]].concat(),
-    ] {
-        assert!(
-            !ApiOutput {
-                stdout,
-                ..plan_unavailable_output()
-            }
-            .branch_rules_unavailable()
-        );
-    }
-    for stderr in [
-        Vec::new(),
-        b"gh: Resource not accessible by integration (HTTP 403)\n".to_vec(),
-        b"gh: API rate limit exceeded for user ID 123. (HTTP 403)\n".to_vec(),
-        [output.stderr.as_slice(), b"another failure\n"].concat(),
-        [output.stderr.as_slice(), &[0xff]].concat(),
-        [output.stderr.as_slice(), &vec![b' '; MAX_API_ERROR_BYTES]].concat(),
-    ] {
-        assert!(
-            !ApiOutput {
-                stderr,
-                ..plan_unavailable_output()
-            }
-            .branch_rules_unavailable()
-        );
-    }
+#[tokio::test]
+async fn logs_do_not_retry_unrelated_api_errors() {
+    let fixture = ApiFixture::serve(move |_, _| {
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({"message":"log unavailable"})),
+        )
+            .into_response()
+    })
+    .await;
+    let error = fixture
+        .authority()
+        .job_log_output("acme/project", 91, credential())
+        .await
+        .unwrap_err();
+    assert_eq!(error.api_status(), Some(422));
+    assert_eq!(fixture.calls(), 1);
 }
 
-#[cfg(unix)]
-fn plan_unavailable_script(root: &std::path::Path, ending: &str) -> PathBuf {
-    let output = plan_unavailable_output();
-    script(
-        root,
-        &format!(
-            "printf '%s' '{}'\nprintf '%s' '{}' >&2\n{ending}\n",
-            String::from_utf8(output.stdout).assert_value(),
-            String::from_utf8(output.stderr).assert_value(),
-        ),
-    )
-}
+const RULES_PATH: &[&str] = &["repos", "acme", "project", "rules", "branches", "main"];
+const UPGRADE: &str =
+    "Upgrade to GitHub Pro or make this repository public to enable this feature.";
 
-#[cfg(unix)]
 #[tokio::test]
 async fn branch_rules_entitlement_is_endpoint_scoped_and_precedes_redaction() {
-    let root = TemporaryDirectory::for_test("github-rules-entitlement");
-    // Matching command-path prose must neither grant nor suppress the exception.
-    let directory = root.as_path().join("gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)");
-    std::fs::create_dir(&directory).assert_value();
-    let program = plan_unavailable_script(&directory, "exit 1");
-    let provider = authority(program, Duration::from_secs(10));
-    for secret in ["test-token", "Upgrade to GitHub Pro", "403", "message"] {
-        let credential = SourceDeliveryCredential::token(secret);
-        let rules = provider
-            .branch_rules(&super::super::unit::review(), credential)
+    let fixture = ApiFixture::serve(|index, _| {
+        let mut body = json!({"message": UPGRADE});
+        if index % 4 >= 2 {
+            body["status"] = json!("403");
+        }
+        (StatusCode::FORBIDDEN, Json(body)).into_response()
+    })
+    .await;
+    let authority = fixture.authority();
+    for token in [TOKEN, "Upgrade to GitHub Pro", "403", "message"] {
+        let credential = SourceDeliveryCredential::token(token);
+        assert_eq!(
+            authority
+                .rest_pages(RULES_PATH, credential, true)
+                .await
+                .unwrap(),
+            json!([[]])
+        );
+        let error = authority
+            .rest(Request::get(REST_PATH), credential)
             .await
-            .assert_value();
-        assert_eq!(rules, serde_json::json!([[]]));
-        let error = provider
-            .api(&["repos/acme/project/pulls".to_owned()], credential)
-            .await
-            .err()
-            .assert_value();
+            .unwrap_err();
         assert_eq!(error.api_status(), Some(403));
         assert!(!error.retryable_operation());
-        assert!(!error.to_string().contains(secret));
+        assert!(!error.to_string().contains(token));
     }
-    // Identical command context and credential cannot convert a permission response to no rules.
-    script(
-        &directory,
-        "printf '%s' '[{\"message\":\"Resource not accessible by integration\",\"status\":\"403\"}]'\nprintf '%s\\n' 'gh: Resource not accessible by integration (HTTP 403)' >&2\nexit 1\n",
-    );
-    let error = provider
-        .branch_rules(
-            &super::super::unit::review(),
-            SourceDeliveryCredential::token("Resource not accessible by integration"),
-        )
-        .await
-        .err()
-        .assert_value();
-    assert_eq!(error.api_status(), Some(403));
-    assert!(!error.retryable_operation());
 }
 
-#[cfg(unix)]
 #[tokio::test]
-async fn timed_out_branch_rules_entitlement_remains_unknown_and_retryable() {
-    let root = TemporaryDirectory::for_test("github-rules-timeout");
-    let program = plan_unavailable_script(root.as_path(), "exec /bin/sleep 30");
-    let error = authority(program, Duration::from_secs(1))
-        .branch_rules(
-            &super::super::unit::review(),
-            SourceDeliveryCredential::token("test-token"),
+async fn branch_rules_entitlement_requires_a_complete_first_page_and_matching_status() {
+    let denied = || {
+        (
+            StatusCode::FORBIDDEN,
+            Json(json!({"message": UPGRADE, "status":"403"})),
         )
+            .into_response()
+    };
+    for (body, status, incomplete, linked, expected_status) in [
+        (json!({"message": UPGRADE}), 401, false, false, Some(401)),
+        (
+            json!({"message": UPGRADE, "status":"401"}),
+            403,
+            false,
+            false,
+            Some(403),
+        ),
+        (
+            json!({"message":"Resource not accessible by integration"}),
+            403,
+            false,
+            false,
+            Some(403),
+        ),
+        (json!({"message": UPGRADE}), 403, true, false, None),
+        (json!({"message": UPGRADE}), 403, false, true, Some(403)),
+        (
+            json!([[], {"message": UPGRADE}]),
+            403,
+            false,
+            false,
+            Some(403),
+        ),
+    ] {
+        let fixture = ApiFixture::serve(move |_, _| {
+            let bytes = serde_json::to_vec(&body).unwrap();
+            let len = bytes.len();
+            let mut response = Response::raw(bytes).status(StatusCode::from_u16(status).unwrap());
+            if incomplete {
+                response = response.content_length(len + 1);
+            }
+            if linked {
+                response =
+                    response.header("link", "<https://different.invalid?page=2>; rel=\"next\"");
+            }
+            response
+        })
+        .await;
+        let error = fixture
+            .authority()
+            .rest_pages(RULES_PATH, credential(), true)
+            .await
+            .unwrap_err();
+        assert_eq!(error.api_status(), expected_status);
+        assert_eq!(error.retryable_operation(), incomplete);
+    }
+    let fixture = ApiFixture::serve(move |_, request| {
+        if request.uri.query_pairs().any(|(key, _)| key == "page") {
+            denied()
+        } else {
+            let target = request.uri.path();
+            Json(json!([{"type":"required_status_checks"}]))
+                .into_response()
+                .header(
+                    "link",
+                    &format!("<{target}?per_page=100&page=2>; rel=\"next\""),
+                )
+        }
+    })
+    .await;
+    let error = fixture
+        .authority()
+        .rest_pages(RULES_PATH, credential(), true)
         .await
-        .err()
-        .assert_value();
+        .unwrap_err();
+    assert_eq!(error.api_status(), Some(403), "{error}");
+    assert_eq!(fixture.calls(), 2);
+}
+
+#[tokio::test]
+async fn refused_job_log_connection_is_retryable_without_http_authority() {
+    let socket = tokio::net::TcpSocket::new_v4().unwrap();
+    socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    // Reserve the port without starting a listener, so no other fixture accepts this request.
+    let origin = format!("http://{}", socket.local_addr().unwrap());
+    let api = authority(Duration::from_secs(2)).with_test_api(&origin);
+    let result = api.job_log_output("acme/project", 91, credential()).await;
+    drop(socket);
+
+    let error = super::super::job_log_excerpt(result).unwrap_err();
     assert_eq!(error.api_status(), None);
+    assert!(!error.authentication_failed());
     assert!(error.retryable_operation());
-    assert!(error.to_string().contains("command timed out"));
 }

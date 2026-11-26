@@ -30,18 +30,13 @@ async fn comment_run(source: Option<ResolvedSource>) -> (RunSubmission, Admitted
 
 #[cfg(unix)]
 #[tokio::test]
-async fn source_less_comment_composition_requires_gh_but_no_git_program_or_provider_login() {
+async fn source_less_comment_composes_with_only_the_provider_program() {
     let root = TestDirectory::new("local-comment-composition");
     let workspace = root.child("workspace");
     std::fs::create_dir(&workspace).assert_value();
     let storage = root.child("runs/attempt");
     let (bin, environment) = search_directory(&root);
     let (submission, admitted) = comment_run(None).await;
-    assert!(matches!(
-        check_delivery_executables(&submission, &environment, &workspace),
-        Err(LocalCompositionError::MissingDeliveryExecutable { executable: "gh" })
-    ));
-    install_executable(&bin, "gh");
     install_executable(&bin, "codex");
     check_delivery_executables(&submission, &environment, &workspace).assert_value();
     for owner in [false, true] {
@@ -75,16 +70,12 @@ async fn confirmed_comment_facts_survive_attempt_disposal_and_remain_lineage_sco
     let root = TestDirectory::new("local-comment-durability");
     let workspace = root.child("workspace");
     std::fs::create_dir(&workspace).assert_value();
-    let (bin, environment) = search_directory(&root);
-    install_executable(&bin, "gh");
     let (_, admitted) = comment_run(Some(github_source())).await;
     let compose = |storage: &Path, identity: &RunId| {
         local_comment_delivery(LocalCommentRequest {
             admitted: &admitted,
             delivery_run_id: identity,
             storage,
-            environment: &environment,
-            workspace: &workspace,
             runtime_home: &storage.join("runtime"),
         })
         .assert_value()
@@ -217,11 +208,6 @@ async fn software_change_pr_composition_checks_source_and_programs_without_dispa
         }),
         Err(LocalCompositionError::DeliverySourceRequired)
     ));
-    assert!(matches!(
-        build_local_process_candidate(request()),
-        Err(LocalCompositionError::MissingDeliveryExecutable { executable: "gh" })
-    ));
-    install("gh");
     assert!(matches!(
         build_local_process_candidate(request()),
         Err(LocalCompositionError::MissingDeliveryExecutable { executable: "git" })

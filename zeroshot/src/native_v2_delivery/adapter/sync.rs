@@ -330,3 +330,6 @@ mod tests;
 
 #[cfg(test)]
 mod outages;
+
+#[cfg(test)]
+mod github_http;

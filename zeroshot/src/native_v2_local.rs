@@ -544,12 +544,7 @@ fn build_local_candidate_config(
             .ok_or(LocalCompositionError::DeliverySourceRequired)?;
         let target = crate::native_v2_delivery::source_target(source, mode)
             .map_err(|_| LocalCompositionError::ResolvedSource)?;
-        let programs = local_delivery_programs(
-            source,
-            &required_capabilities,
-            native_environment,
-            workspace,
-        )?;
+        let git = local_delivery_git(native_environment, workspace)?;
         let config = NativeV2DeliveryConfig {
             local_branch,
             delivery_run_id: delivery_run_id.clone(),
@@ -558,7 +553,7 @@ fn build_local_candidate_config(
             commit_identity: None,
             commit_co_author: None,
             workspace: workspace.to_owned(),
-            git_program: programs.git.clone(),
+            git_program: git.clone(),
             target,
             poll: Default::default(),
         };
@@ -567,8 +562,8 @@ fn build_local_candidate_config(
             SourceDeliveryFactoryRequest {
                 source,
                 workspace,
-                git_program: &programs.git,
-                gh_program: &programs.gh,
+                git_program: &git,
+                gh_program: Path::new("gh"),
                 home_directory: &runtime_home,
                 private_directory: &runtime_home,
                 git_identity: None,
@@ -585,8 +580,6 @@ fn build_local_candidate_config(
         admitted,
         delivery_run_id: &delivery_run_id,
         storage,
-        environment: native_environment,
-        workspace,
         runtime_home: &runtime_home,
     })?;
     let config = NativeV2CandidateConfig {
@@ -736,36 +729,13 @@ pub(crate) async fn check_lane_versions(
     Ok(())
 }
 
-struct LocalDeliveryPrograms {
-    git: PathBuf,
-    gh: PathBuf,
-}
-
-/// Pins delivery's programs to the files the captured search path finds. Delivery clears the
-/// environment of its Git and GitHub CLI processes, so a bare name would search only the system's
-/// default directories.
-fn local_delivery_programs(
-    source: &ResolvedSource,
-    required: &[crate::source_code_provider::SourceCapability],
+/// Pin the executable from the caller's search path before the controller clears its environment.
+fn local_delivery_git(
     native_environment: &BTreeMap<String, String>,
     working_directory: &Path,
-) -> Result<LocalDeliveryPrograms, LocalCompositionError> {
-    let find = |executable| {
-        find_local_executable(executable, native_environment, working_directory)
-            .ok_or(LocalCompositionError::MissingDeliveryExecutable { executable })
-    };
-    // Other providers never start the GitHub CLI.
-    let gh = if crate::source_code_provider::adapters::core::delivery_uses_github_cli(
-        source, required,
-    ) {
-        find("gh")?
-    } else {
-        PathBuf::from("gh")
-    };
-    Ok(LocalDeliveryPrograms {
-        git: find("git")?,
-        gh,
-    })
+) -> Result<PathBuf, LocalCompositionError> {
+    find_local_executable("git", native_environment, working_directory)
+        .ok_or(LocalCompositionError::MissingDeliveryExecutable { executable: "git" })
 }
 
 /// Checks that the programs the submission's delivery runs are on the captured search path.
@@ -774,7 +744,7 @@ pub(crate) fn check_delivery_executables(
     native_environment: &BTreeMap<String, String>,
     working_directory: &Path,
 ) -> Result<(), LocalCompositionError> {
-    if let Some(input) = crate::native_v2_admission::resolve_comment_input_at(
+    crate::native_v2_admission::resolve_comment_input_at(
         &submission.graph.root,
         &submission.initial_input,
         submission
@@ -782,20 +752,11 @@ pub(crate) fn check_delivery_executables(
             .as_ref()
             .and_then(|source| source.remote.as_ref())
             .and_then(|remote| remote.forge.as_ref()),
-    )? {
-        let destination = input.destination;
-        if destination.provider.id().as_str()
-            == crate::source_code_provider::adapters::core::GITHUB_PROVIDER_ID
-            && find_local_executable("gh", native_environment, working_directory).is_none()
-        {
-            return Err(LocalCompositionError::MissingDeliveryExecutable { executable: "gh" });
-        }
-    }
+    )?;
     let required = crate::native_v2_admission::delivery_capabilities(&submission.graph.root);
     match &submission.source {
-        Some(source) if !required.is_empty() => {
-            local_delivery_programs(source, &required, native_environment, working_directory)
-                .map(drop)
+        Some(_) if !required.is_empty() => {
+            local_delivery_git(native_environment, working_directory).map(drop)
         }
         _ => Ok(()),
     }
@@ -836,8 +797,6 @@ struct LocalCommentRequest<'a> {
     admitted: &'a AdmittedRun,
     delivery_run_id: &'a RunId,
     storage: &'a Path,
-    environment: &'a BTreeMap<String, String>,
-    workspace: &'a Path,
     runtime_home: &'a Path,
 }
 
@@ -848,8 +807,6 @@ fn local_comment_delivery(
         admitted,
         delivery_run_id,
         storage,
-        environment,
-        workspace,
         runtime_home,
     } = request;
     use crate::native_v2_comment_delivery::{
@@ -859,17 +816,7 @@ fn local_comment_delivery(
     let Some(input) = crate::native_v2_admission::admitted_comment_input(admitted)? else {
         return Ok(None);
     };
-    let destination = &input.destination;
-    let gh = if destination.provider.id().as_str()
-        == crate::source_code_provider::adapters::core::GITHUB_PROVIDER_ID
-    {
-        find_local_executable("gh", environment, workspace)
-            .ok_or(LocalCompositionError::MissingDeliveryExecutable { executable: "gh" })?
-    } else {
-        PathBuf::from("gh")
-    };
-    let mut config = GhCliAuthorityConfig::hosted(runtime_home.to_owned());
-    config.gh_program = gh;
+    let config = GhCliAuthorityConfig::hosted(runtime_home.to_owned());
     let authority = comment_authority_for(config, &input.destination)
         .map_err(|_| LocalCompositionError::ResolvedSource)?;
     let state = storage

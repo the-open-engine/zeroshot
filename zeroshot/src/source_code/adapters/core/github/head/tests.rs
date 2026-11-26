@@ -37,23 +37,12 @@ fn response(overrides: impl FnOnce(&mut Value)) -> Value {
 }
 
 #[test]
-fn cas_update_arguments_pin_the_expected_head() {
-    let arguments = update_arguments("PR_node_17", OLD_HEAD);
-    let query = arguments
-        .iter()
-        .find(|argument| argument.starts_with("query="))
-        .assert_value();
-    assert!(query.contains("updatePullRequestBranch"));
-    assert!(query.contains("updateMethod: MERGE"));
-    assert!(
-        arguments
-            .iter()
-            .any(|value| value == "pullRequestId=PR_node_17")
-    );
-    assert!(
-        arguments
-            .iter()
-            .any(|value| value == &format!("expectedHeadOid={OLD_HEAD}"))
+fn cas_update_variables_pin_the_expected_head() {
+    assert!(UPDATE_HEAD_MUTATION.contains("updatePullRequestBranch"));
+    assert!(UPDATE_HEAD_MUTATION.contains("updateMethod: MERGE"));
+    assert_eq!(
+        update_variables("PR_node_17", OLD_HEAD),
+        json!({"pullRequestId":"PR_node_17","expectedHeadOid":OLD_HEAD})
     );
 }
 

@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::*;
 
@@ -90,11 +90,13 @@ pub(super) async fn update_review_head(
     require_local_head(context, &request.review.head_revision).await?;
     let value = context
         .authority
-        .api(
-            &update_arguments(request.pull_request_id, &request.review.head_revision),
+        .mutation(
+            (UPDATE_HEAD_MUTATION, "updatePullRequestBranch"),
+            &update_variables(request.pull_request_id, &request.review.head_revision),
             context.credential,
         )
-        .await?;
+        .await
+        .map_err(|failure| failure.error)?;
     updated_receipt(value, request.review, request.pull_request_id)
 }
 
@@ -115,16 +117,8 @@ pub(super) async fn synchronize_review_head(
     .await
 }
 
-fn update_arguments(pull_request_id: &str, expected_head: &str) -> Vec<String> {
-    vec![
-        "graphql".to_owned(),
-        "-f".to_owned(),
-        format!("query={UPDATE_HEAD_MUTATION}"),
-        "-f".to_owned(),
-        format!("pullRequestId={pull_request_id}"),
-        "-f".to_owned(),
-        format!("expectedHeadOid={expected_head}"),
-    ]
+fn update_variables(pull_request_id: &str, expected_head: &str) -> Value {
+    json!({"pullRequestId": pull_request_id, "expectedHeadOid": expected_head})
 }
 
 fn updated_receipt(

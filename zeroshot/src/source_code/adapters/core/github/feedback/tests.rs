@@ -448,7 +448,11 @@ async fn feedback_pagination_rejects_malformed_pages_and_identity_changes() {
     .assert_error();
     assert!(matches!(malformed, SourceDeliveryError::Api(_)));
     assert!(!malformed.retryable_operation());
-    assert!(malformed.to_string().contains("expected a sequence"));
+    assert!(
+        malformed
+            .to_string()
+            .contains("GitHub REST page is not an array")
+    );
 }
 
 #[tokio::test]

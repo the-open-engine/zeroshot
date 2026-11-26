@@ -1244,11 +1244,3 @@ case " $* " in
     done ;;
 esac
 "#;
-
-pub(super) const GH_MISMATCH_SCRIPT: &str = r#"#!/bin/sh
-/usr/bin/printf '%s%s%s%s\n' \
-  '[{"number":17,"state":"open","merged":false,"merge_commit_sha":null,"base":' \
-  '{"ref":"other","sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","repo":{"full_name":"acme/project"}},' \
-  '"head":{"ref":"zeroshot/v2-test","sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",' \
-  '"repo":{"full_name":"acme/project"}}}]'
-"#;

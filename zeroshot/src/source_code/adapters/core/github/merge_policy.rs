@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use super::{SourceDeliveryError, SourceReviewReceipt};
 
-const MERGE_POLICY_QUERY: &str = r#"
+pub(super) const MERGE_POLICY_QUERY: &str = r#"
 query MergePolicy($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
   repository(owner: $owner, name: $name) {
     nameWithOwner
@@ -137,6 +137,7 @@ struct PullRequestParameters {
     allowed_merge_methods: Option<Vec<String>>,
 }
 
+#[cfg(test)]
 pub(super) fn query_arguments(
     review: &SourceReviewReceipt,
 ) -> Result<Vec<String>, SourceDeliveryError> {

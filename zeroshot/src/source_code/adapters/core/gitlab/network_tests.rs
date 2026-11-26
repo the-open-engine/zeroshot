@@ -134,43 +134,18 @@ async fn captured_socks_proxy_supports_preflight_delivery_and_no_proxy() {
 }
 
 #[tokio::test]
-async fn native_github_cli_certificate_trust_matches_the_platform() {
+async fn native_github_https_trusts_the_captured_certificate() {
     use crate::source_code_provider::adapters::core::{GhCliAuthorityConfig, GhCliDeliveryAuthority};
     let fixture = TlsFixture::new().await;
-    let program = std::env::var_os("ZEROSHOT_GH_TEST")
-        .map(std::path::PathBuf::from)
-        .or_else(|| {
-            crate::execution::platform::find_executable(
-                "gh",
-                &std::env::vars().collect(),
-                &std::env::current_dir().unwrap(),
-            )
-        })
-        .expect("native gh is a repository test prerequisite");
     let root = tempfile::tempdir().unwrap();
-    let authority = GhCliDeliveryAuthority::new(GhCliAuthorityConfig {
-        gh_program: program,
-        ..GhCliAuthorityConfig::hosted(root.path().into())
-    })
-    .with_base_url(SourceForgeBaseUrl::new(format!("https://{}", fixture.address)).unwrap())
-    .unwrap()
-    .with_network(ForgeNetwork::from_snapshot(&fixture.ca_environment()));
-    let result = authority
+    let authority = GhCliDeliveryAuthority::new(GhCliAuthorityConfig::hosted(root.path().into()))
+        .with_base_url(SourceForgeBaseUrl::new(format!("https://{}", fixture.address)).unwrap())
+        .unwrap()
+        .with_network(ForgeNetwork::from_snapshot(&fixture.ca_environment()));
+    authority
         .check_access("acme/project", credential(), None)
-        .await;
-    // Go reads SSL_CERT_FILE on Linux. On macOS and Windows it does so from Go 1.27; a `gh` built
-    // with an older Go trusts only the system certificate store and refuses the private CA.
-    match result {
-        Ok(()) => {}
-        Err(error) if cfg!(any(target_os = "macos", windows)) => assert!(
-            error
-                .to_string()
-                .to_ascii_lowercase()
-                .contains("certificate"),
-            "an older gh may refuse only the untrusted certificate: {error}"
-        ),
-        Err(error) => panic!("gh must trust the captured CA file on this platform: {error}"),
-    }
+        .await
+        .expect("native GitHub HTTPS must trust the captured CA");
 }
 
 #[tokio::test]

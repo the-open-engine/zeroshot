@@ -32,7 +32,7 @@ zeroshot connection set openrouter --field OPENROUTER_API_KEY
 
 Choose a project folder. A local run with `--delivery none` edits that folder and needs no Git
 repository. Opening a PR also requires a clean checkout, a remote and
-[forge access](../guides/forge-delivery.md); GitHub delivery needs `gh` on `PATH`.
+[forge access](../guides/forge-delivery.md).
 
 [Run a first task](first-run.md) walks through the input, agent configuration and run command.
 

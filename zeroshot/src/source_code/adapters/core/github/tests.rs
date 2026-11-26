@@ -161,7 +161,7 @@ fn status_context(context: &str, state: &str, required: bool) -> Value {
     })
 }
 
-pub(super) fn policy_page(
+pub(crate) fn policy_page(
     mergeable: &str,
     merge_state_status: &str,
     contexts: Option<Vec<Value>>,
@@ -1290,8 +1290,11 @@ async fn transient_merge_failure_is_reclassified_from_the_latest_authoritative_p
             .classify_rejected_merge(
                 &review(),
                 SourceDeliveryCredential::token("test-token"),
-                &api::CommandFailure::unknown(
-                    SourceDeliveryError::api(None, "merge transport failed").temporary(),
+                (
+                    merge_policy::MergeMethod::Merge,
+                    &api::MutationFailure::unknown(
+                        SourceDeliveryError::api(None, "merge transport failed").temporary(),
+                    ),
                 ),
             )
             .await;

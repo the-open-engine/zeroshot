@@ -244,14 +244,13 @@ async fn production_storage_and_factory_reject_non_directory_roots_before_contro
 #[test]
 fn capsule_configuration_requires_every_executable_boundary() {
     let root = TestDirectory::new("hosting-invalid-capsule-config");
-    for missing in ["copilot", "codex", "claude", "git", "gh"] {
+    for missing in ["copilot", "codex", "claude", "git"] {
         let mut config = capsule_config(root.path().join(missing));
         match missing {
             "copilot" => config.copilot_executable = PathBuf::new(),
             "codex" => config.codex_executable = PathBuf::new(),
             "claude" => config.claude_executable.clear(),
             "git" => config.git_program = PathBuf::new(),
-            "gh" => config.gh_program = PathBuf::new(),
             _ => unreachable!(),
         }
         assert!(matches!(
@@ -259,6 +258,9 @@ fn capsule_configuration_requires_every_executable_boundary() {
             Err(ProductionHostingError::CapsuleConfiguration)
         ));
     }
+    let mut config = capsule_config(root.path().join("native-forge"));
+    config.gh_program.clear();
+    assert!(capsule_allocator(config).is_ok());
 }
 
 #[test]

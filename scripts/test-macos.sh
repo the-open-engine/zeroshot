@@ -79,7 +79,7 @@ cargo test --locked --package zeroshot --features ui --test native_v2_cli_portab
 
 # Checkpoint forge access, discard, diagnostics and capture logs
 cargo test --locked --package zeroshot --features ui --test native_v2_local_delivery_gh_search_path \
-  checkpoint_resume_checks_the_restored_gh_once_before_agents_start
+  checkpoint_resume_checks_the_restored_certificate_once_before_agents_start
 cargo test --locked --package zeroshot --lib --features ui -- \
   native_v2_cli::local::backend::discard_tests workspace_discard_rejects_redirected_roots interrupted_delivery_rechecks
 cargo test --locked --package zeroshot --features ui --test native_v2_cli_portable discard_workspace_tests

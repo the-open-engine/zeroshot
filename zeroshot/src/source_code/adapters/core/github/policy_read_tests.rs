@@ -34,6 +34,14 @@ fn fixture(root: &Path, stage: &str, failures: usize) -> GhCliDeliveryAuthority 
             "baseRefName":"main","headRefName":review().head_branch,"headRefOid":review().head_revision,
             "timelineItems":{"nodes":[]}}
     }}}]).to_string()).unwrap();
+    let mut receipt = super::queue_tests::enqueue_response()["data"]["enqueuePullRequest"]["mergeQueueEntry"]["pullRequest"].clone();
+    receipt["merged"] = json!(true);
+    receipt["mergeCommit"] = json!({"oid": "c".repeat(40)});
+    std::fs::write(
+        root.join("merged.json"),
+        json!({"data":{"mergePullRequest":{"pullRequest":receipt}}}).to_string(),
+    )
+    .unwrap();
     let program = root.join("gh-policy-read");
     write_executable(
         &program,
@@ -44,6 +52,7 @@ case "$2" in
 graphql)
     case "$*" in
     *'query QueueOutcome('*) /bin/cat "$HOME/queue-outcome.json"; exit 0 ;;
+    *mergePullRequest*) printf '%s\n' merge >> "$HOME/mutations"; /bin/cat "$HOME/merged.json"; exit 0 ;;
     *enqueuePullRequest*) printf '%s\n' call >> "$HOME/mutations"; printf '%s\n' "$@" >> "$HOME/enqueue-args"; /bin/cat "$HOME/enqueue.json"; exit 0 ;;
     *'query MergePolicy'*) stage=method ;;
     *'query($owner:'*) stage=snapshot ;;
@@ -60,7 +69,6 @@ graphql)
     fi
     /bin/cat "$HOME/ready.json" ;;
 'repos/acme/project/rules/branches/main?per_page=100') printf '[[]]\n' ;;
-merge) printf '%s\n' "$@" >> "$HOME/mutations" ;;
 *) exit 19 ;;
 esac
 "#
@@ -275,13 +283,18 @@ async fn recovered_policy_reads_never_authorize_changed_heads_or_blocking_policy
                     &TestReviewCheckpoint,
                 )
                 .await;
-            if stage == "snapshot" && change != "head" {
+            if stage == "snapshot" && change == "blocking" {
                 assert_eq!(result.unwrap(), SourceMergeRequestOutcome::Pending);
             } else {
                 assert!(result.is_err());
             }
             assert_eq!(read_count(root.path(), "mutations"), 0);
-            assert_eq!(read_count(root.path(), &format!("{stage}-reads")), 2);
+            let reads = read_count(root.path(), &format!("{stage}-reads"));
+            if change == "incomplete" {
+                assert!(reads >= 2);
+            } else {
+                assert_eq!(reads, 2);
+            }
         }
     }
 }

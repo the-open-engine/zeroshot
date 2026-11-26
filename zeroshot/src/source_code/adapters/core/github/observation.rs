@@ -2,7 +2,7 @@
 use serde::Deserialize;
 
 use super::*;
-use super::wire::{GitReferenceWire, read_review_receipt, reference_revision};
+use super::wire::{read_review_receipt, reference_revision};
 
 #[derive(Deserialize)]
 struct ObservedReview {
@@ -61,12 +61,9 @@ async fn find_identity(
     credential: SourceDeliveryCredential<'_>,
 ) -> Result<Option<SourceReviewReceipt>, SourceDeliveryError> {
     let value = authority
-        .api(
-            &review_list_arguments(
-                request.target,
-                request.head_branch,
-                request.include_terminal_reviews,
-            )?,
+        .review_list(
+            (&request.target.repository, request.head_branch),
+            request.include_terminal_reviews,
             credential,
         )
         .await?;
@@ -89,19 +86,8 @@ async fn observe_review(
     identity: &SourceReviewReceipt,
     credential: SourceDeliveryCredential<'_>,
 ) -> Result<SourceReviewObservation, SourceDeliveryError> {
-    let value = authority
-        .api(
-            &[
-                format!(
-                    "repos/{}/pulls/{}",
-                    request.target.repository, identity.review_id
-                ),
-                "--method".to_owned(),
-                "GET".to_owned(),
-            ],
-            credential,
-        )
-        .await?;
+    let path = repository_path(&request.target.repository, &["pulls", &identity.review_id])?;
+    let value = authority.rest(Request::get(&path), credential).await?;
     let wire: ObservedReview = authority.decode_response(value, credential)?;
     let receipt = read_review_receipt(wire.identity, request.target, request.head_branch)?;
     if receipt.review_id != identity.review_id {
@@ -110,19 +96,27 @@ async fn observe_review(
             identity.review_id, receipt.review_id,
         )));
     }
-    let state = match (wire.state.as_str(), wire.merged, wire.merge_commit_sha) {
-        ("closed", true, Some(revision)) if valid_revision(&revision) => {
-            SourceReviewState::Merged {
-                merge_revision: revision,
-            }
-        }
-        ("closed", false, _) => SourceReviewState::Closed,
-        ("open", false, _) => SourceReviewState::Open {
-            checks: SourceChecks::Pending,
-        },
-        _ => return Err(SourceDeliveryError::Rejected),
-    };
+    let state = observed_state(&wire.state, wire.merged, wire.merge_commit_sha)?;
     Ok(receipt.observation(state))
+}
+
+fn observed_state(
+    state: &str,
+    merged: bool,
+    revision: Option<String>,
+) -> Result<SourceReviewState, SourceDeliveryError> {
+    match (state, merged, revision) {
+        ("closed", true, Some(revision)) if valid_revision(&revision) => {
+            Ok(SourceReviewState::Merged {
+                merge_revision: revision,
+            })
+        }
+        ("closed", false, _) => Ok(SourceReviewState::Closed),
+        ("open", false, _) => Ok(SourceReviewState::Open {
+            checks: SourceChecks::Pending,
+        }),
+        _ => Err(SourceDeliveryError::Rejected),
+    }
 }
 
 async fn observe_ref(
@@ -131,11 +125,9 @@ async fn observe_ref(
     credential: SourceDeliveryCredential<'_>,
 ) -> Result<Option<String>, SourceDeliveryError> {
     let result = authority
-        .api(
-            &[format!(
-                "repos/{}/git/ref/heads/{}",
-                request.target.repository, request.head_branch
-            )],
+        .read_reference(
+            request.target.repository.as_str(),
+            request.head_branch,
             credential,
         )
         .await;
@@ -144,8 +136,7 @@ async fn observe_ref(
         Err(error) if error.api_status() == Some(404) => return Ok(None),
         Err(error) => return Err(error),
     };
-    let wire: GitReferenceWire = authority.decode_response(value, credential)?;
-    reference_revision(wire, request.head_branch).map(Some)
+    reference_revision(value, request.head_branch).map(Some)
 }
 
 #[cfg(all(test, unix))]

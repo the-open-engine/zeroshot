@@ -3,6 +3,12 @@ use super::*;
 use openengine_cluster_protocol::SourceForgeBaseUrl;
 
 impl GhCliDeliveryAuthority {
+    #[cfg(all(test, unix))]
+    pub(super) fn hostname(&self) -> String {
+        let url = url::Url::parse(self.base_url.as_str()).expect("validated instance URL");
+        url[url::Position::BeforeHost..url::Position::AfterPort].to_owned()
+    }
+
     pub fn with_base_url(mut self, base: SourceForgeBaseUrl) -> Result<Self, SourceDeliveryError> {
         let url = url::Url::parse(base.as_str()).map_err(|_| SourceDeliveryError::Rejected)?;
         if url.path() != "/" {
@@ -12,33 +18,14 @@ impl GhCliDeliveryAuthority {
         }
         self.base_url = base;
         self.instance_verified = Arc::new(tokio::sync::OnceCell::new());
+        self.http = Arc::new(tokio::sync::OnceCell::new());
         Ok(self)
     }
 
-    pub(super) fn hostname(&self) -> String {
-        let url = url::Url::parse(self.base_url.as_str()).expect("validated instance URL");
-        url[url::Position::BeforeHost..url::Position::AfterPort].to_owned()
-    }
-
     pub(super) fn is_cloud(&self) -> bool {
-        let host = self.hostname();
-        host == "github.com" || host.ends_with(".ghe.com")
-    }
-
-    pub(super) fn api_command(&self, credential: SourceDeliveryCredential<'_>) -> Command {
-        let mut command = clean_command(&self.config, &self.config.gh_program, credential);
-        self.network.apply_command(&mut command);
-        command
-            .env("GH_HOST", self.hostname())
-            .env_remove("GH_TOKEN")
-            .env_remove("GH_ENTERPRISE_TOKEN");
-        let field = if self.is_cloud() {
-            "GH_TOKEN"
-        } else {
-            "GH_ENTERPRISE_TOKEN"
-        };
-        command.env(field, credential.expose());
-        command
+        let url = url::Url::parse(self.base_url.as_str()).expect("validated instance URL");
+        url.host_str()
+            .is_some_and(|host| host == "github.com" || host.ends_with(".ghe.com"))
     }
 
     pub(super) async fn ensure_instance(
@@ -49,9 +36,10 @@ impl GhCliDeliveryAuthority {
             return Ok(());
         }
         self.instance_verified.get_or_try_init(|| async {
-            let output = self.raw_api_output(&["meta".to_owned()], credential).await?;
-            let value: serde_json::Value = serde_json::from_slice(&output)
-                .map_err(|_| SourceDeliveryError::identity("GitHub Enterprise Server metadata was invalid"))?;
+            let reply = self.http().await?
+                .send(Request::get(&["meta"]), credential, (self.api_deadline(), super::super::ci_diagnostics::MAX_JOB_LOG_BYTES))
+                .await.map_err(|failure| self.http_failure(failure, credential))?;
+            let value = self.http_json(&reply, credential).map_err(|failure| failure.error)?;
             let version = value.get("installed_version").and_then(serde_json::Value::as_str)
                 .and_then(server_version)
                 .ok_or_else(|| SourceDeliveryError::identity("GitHub Enterprise Server version is unavailable; 3.22.2 or newer is required"))?;

@@ -359,7 +359,7 @@ describe('macOS regression coverage', () => {
     }
     assert.match(
       macosTests,
-      /^cargo test --locked --package zeroshot --features ui --test native_v2_local_delivery_gh_search_path checkpoint_resume_checks_the_restored_gh_once_before_agents_start$/m
+      /^cargo test --locked --package zeroshot --features ui --test native_v2_local_delivery_gh_search_path checkpoint_resume_checks_the_restored_certificate_once_before_agents_start$/m
     );
   });
 
