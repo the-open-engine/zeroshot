@@ -29,7 +29,7 @@ from .stacks import StackRunStatus, StackStatus
 from .targets import NamedTarget
 from .values import JsonValue
 
-_Phase: TypeAlias = Literal["admitted", "running", "stopping", "suspended", "finished"]
+_Phase: TypeAlias = Literal["queued", "admitted", "running", "stopping", "suspended", "finished"]
 _Level: TypeAlias = Literal["debug", "info", "error"]
 _MAX_JAVASCRIPT_SAFE_INTEGER = 9_007_199_254_740_991
 
@@ -56,7 +56,7 @@ def _status(value: object, *, watch: bool = False) -> RunStatus:
         _enum_string(
             native_status,
             "phase",
-            {"admitted", "running", "stopping", "suspended", "finished"},
+            {"queued", "admitted", "running", "stopping", "suspended", "finished"},
             "run status.status",
         ),
     )

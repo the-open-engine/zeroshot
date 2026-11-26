@@ -168,12 +168,12 @@ class RunStatus:
     Args:
         run_id: Public durable run identity.
         part_id: Part represented by this status.
-        current_part_id: Latest admitted part at lookup time. None for watch events.
+        current_part_id: Current part at lookup time. None for watch events.
         title: Immutable persisted title.
         source: Immutable Git source snapshot, or None when unavailable for a local run.
         size: Opaque size identifier accepted by the target.
         cursor: Opaque durable status cursor.
-        phase: admitted, running, stopping, suspended, or finished.
+        phase: queued, admitted, running, stopping, suspended, or finished.
         active_executions: Every currently active graph execution.
         result: Terminal result only when phase is finished.
         graph_result: Recorded graph result while running or stopping, before finalization ends.
@@ -198,7 +198,7 @@ class RunStatus:
     source: ResolvedSource | None
     size: str
     cursor: str
-    phase: Literal["admitted", "running", "stopping", "suspended", "finished"]
+    phase: Literal["queued", "admitted", "running", "stopping", "suspended", "finished"]
     active_executions: tuple[ActiveExecution, ...] = ()
     result: RunResult | None = None
     graph_result: RunResult | None = None
@@ -221,12 +221,12 @@ class RunSummary:
     Args:
         run_id: Public durable run identity.
         part_id: Part represented by this status.
-        current_part_id: Latest admitted part at lookup time.
+        current_part_id: Current part at lookup time.
         title: Immutable persisted title.
         source: Immutable Git source snapshot, or None when unavailable for a local run.
         size: Opaque size identifier accepted by the target.
         cursor: Opaque durable status cursor.
-        phase: admitted, running, stopping, suspended, or finished.
+        phase: queued, admitted, running, stopping, suspended, or finished.
         force_stop_requested: Whether the current projection reflects a force-stop request.
         graph_result: Recorded graph result while running or stopping, before finalization ends.
         controller: Availability observation, omitted for responding controllers and ended runs.
@@ -245,7 +245,7 @@ class RunSummary:
     source: ResolvedSource | None
     size: str
     cursor: str
-    phase: Literal["admitted", "running", "stopping", "suspended", "finished"]
+    phase: Literal["queued", "admitted", "running", "stopping", "suspended", "finished"]
     force_stop_requested: bool
     graph_result: RunResult | None = None
     controller: ControllerObservation | None = None

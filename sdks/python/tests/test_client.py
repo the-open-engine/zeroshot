@@ -1376,6 +1376,7 @@ def test_logical_history_crosses_suspension_and_wait_ignores_a_superseded_questi
             assert all(event.run_id == run.id and event.current_part_id is None for event in events)
             assert [(e.phase, e.part_id) for e in events] == [
                 ("suspended", "part-1"),
+                ("queued", "part-2"),
                 ("running", "part-2"),
                 ("finished", "part-2"),
             ]
@@ -1438,6 +1439,8 @@ def test_answers_guard_the_last_suspension_yielded_by_watch(
                 assert (await anext(stream)).part_id == "question-a"
                 with pytest.raises(InvalidRequestError, match="no longer current"):
                     await run.answer({"signals": {}, "output": {}})
+                assert (await anext(stream)).phase == "queued"
+                assert run.current_part_id == "question-a"
                 assert (await anext(stream)).phase == "running"
                 assert run.current_part_id == "question-a"
                 assert (await anext(stream)).part_id == "question-b"
@@ -1460,6 +1463,7 @@ def test_resuming_after_follow_uses_the_part_that_finished(
             events = [event async for event in run.watch(follow=True)]
             assert [(event.phase, event.part_id) for event in events] == [
                 ("suspended", "suspended-part"),
+                ("queued", "finished-part"),
                 ("running", "finished-part"),
                 ("finished", "finished-part"),
             ]
