@@ -58,7 +58,8 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
-        let root = tempfile::tempdir().assert_value();
+        let root =
+            tempfile::tempdir_in(std::env::temp_dir().canonicalize().assert_value()).assert_value();
         let directory = root.path().join("checkpoints");
         let workspace = root.path().join("workspace");
         fs::create_dir(&workspace).assert_value();
