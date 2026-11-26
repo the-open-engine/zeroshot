@@ -245,3 +245,179 @@ pub(super) fn workspace_seed(value: String) -> Result<FileSelection, NativeV2Cli
         member: path(member.into(), false)?,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn route(run: Option<&str>, target: Option<&str>) -> FileRouteArgs {
+        FileRouteArgs {
+            target: target.map(str::to_owned),
+            scope: None,
+            run: run.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn malformed_file_commands_cannot_select_a_run_or_escape_a_named_path() {
+        let source = PathBuf::from("source");
+        let output = PathBuf::from("output");
+        let invalid = vec![
+            FileCliCommand::Stage {
+                source: source.clone(),
+                target: Some(String::new()),
+                operation: None,
+                run_id: None,
+            },
+            FileCliCommand::Stage {
+                source: source.clone(),
+                target: None,
+                operation: Some(String::new()),
+                run_id: None,
+            },
+            FileCliCommand::List {
+                route: route(Some(""), None),
+                path: None,
+                member: None,
+            },
+            FileCliCommand::List {
+                route: route(None, Some("\n")),
+                path: None,
+                member: None,
+            },
+            FileCliCommand::List {
+                route: route(None, None),
+                path: Some("../escape".into()),
+                member: None,
+            },
+            FileCliCommand::List {
+                route: route(None, None),
+                path: Some("folder".into()),
+                member: Some("../escape".into()),
+            },
+            FileCliCommand::Upload {
+                route: route(Some("run"), None),
+                source: source.clone(),
+                path: "file".into(),
+                operation: None,
+            },
+            FileCliCommand::Upload {
+                route: route(None, None),
+                source: source.clone(),
+                path: "file".into(),
+                operation: Some(String::new()),
+            },
+            FileCliCommand::Upload {
+                route: route(None, None),
+                source: source.clone(),
+                path: String::new(),
+                operation: None,
+            },
+            FileCliCommand::Download {
+                route: route(Some("run"), None),
+                path: "../escape".into(),
+                output: output.clone(),
+                member: String::new(),
+            },
+            FileCliCommand::Download {
+                route: route(None, None),
+                path: "file".into(),
+                output,
+                member: "../escape".into(),
+            },
+            FileCliCommand::Remove {
+                route: route(Some("run"), None),
+                path: "file".into(),
+            },
+            FileCliCommand::Remove {
+                route: route(None, None),
+                path: String::new(),
+            },
+        ];
+        for command in invalid {
+            assert!(command.into_command().is_err());
+        }
+    }
+
+    #[test]
+    fn workspace_seed_requires_a_library_scope_and_portable_member() {
+        for selection in ["file", "run:file", "user:", "org:folder#../escape"] {
+            assert!(workspace_seed(selection.into()).is_err(), "{selection}");
+        }
+        let selection = workspace_seed("org:folder#nested/data.csv".into()).unwrap();
+        assert!(matches!(selection.address.scope, FileScope::Org));
+        assert_eq!(selection.address.path.as_str(), "folder");
+        assert_eq!(selection.member.as_str(), "nested/data.csv");
+    }
+
+    #[test]
+    fn file_commands_keep_library_writes_and_run_publication_reads_in_their_scopes() {
+        let org = || FileRouteArgs {
+            target: None,
+            scope: Some(ConnectionScopeArg::Org),
+            run: None,
+        };
+        let file = |command: FileCliCommand| {
+            let NativeV2CliCommand::File(file) = command.into_command().unwrap() else {
+                unreachable!()
+            };
+            file
+        };
+        let listed = file(FileCliCommand::List {
+            route: org(),
+            path: None,
+            member: None,
+        });
+        assert!(matches!(
+            listed.request,
+            FileRequest::List {
+                scope: FileScope::Org,
+                ..
+            }
+        ));
+        let members = file(FileCliCommand::List {
+            route: route(Some("run"), None),
+            path: Some("folder".into()),
+            member: Some("nested/data.csv".into()),
+        });
+        assert!(
+            matches!(members.request, FileRequest::ListMembers { selection }
+            if matches!(selection.address.scope, FileScope::Run { .. })
+                && selection.member.as_str() == "nested/data.csv")
+        );
+        let uploaded = file(FileCliCommand::Upload {
+            route: org(),
+            source: PathBuf::from("source"),
+            path: "folder".into(),
+            operation: Some("replace".into()),
+        });
+        assert!(
+            matches!(uploaded.request, FileRequest::Replace { address, .. }
+            if matches!(address.scope, FileScope::Org))
+        );
+        assert_eq!(
+            uploaded.transfer,
+            FileCommandTransfer::Upload(PathBuf::from("source"))
+        );
+        let downloaded = file(FileCliCommand::Download {
+            route: route(Some("run"), None),
+            path: "folder".into(),
+            output: PathBuf::from("output"),
+            member: String::new(),
+        });
+        assert!(
+            matches!(downloaded.request, FileRequest::Download { selection }
+            if matches!(selection.address.scope, FileScope::Run { .. }))
+        );
+        assert_eq!(
+            downloaded.transfer,
+            FileCommandTransfer::Download(PathBuf::from("output"))
+        );
+        let removed = file(FileCliCommand::Remove {
+            route: org(),
+            path: "folder".into(),
+        });
+        assert!(matches!(removed.request, FileRequest::Remove { address }
+            if matches!(address.scope, FileScope::Org)));
+    }
+}

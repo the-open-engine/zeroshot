@@ -4,25 +4,6 @@ use crate::native_v2_platform::CapsuleAllocator;
 use openengine_cluster_protocol::PayloadType;
 use serde_json::json;
 
-async fn move_workspace_after_monitor_drop(workspace: &std::path::Path, moved: &std::path::Path) {
-    // This in-process fixture keeps the workspace monitor alive briefly after the controller
-    // is dropped. Windows cannot rename a directory until that monitor releases its handle.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        match std::fs::rename(workspace, moved) {
-            Ok(()) => break,
-            Err(error)
-                if cfg!(windows)
-                    && error.raw_os_error() == Some(32)
-                    && std::time::Instant::now() < deadline =>
-            {
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            }
-            Err(error) => panic!("move workspace after completion failed: {error}"),
-        }
-    }
-}
-
 #[tokio::test]
 async fn completed_run_reopens_without_recreating_released_inputs_or_its_workspace() {
     let root =
@@ -80,12 +61,8 @@ async fn completed_run_reopens_without_recreating_released_inputs_or_its_workspa
         )))
     })
     .await;
-    assert!(
-        controller.is_ok(),
-        "controller start failed: {:?}",
-        controller.as_ref().err()
-    );
-    let controller = controller.assert_value();
+    let controller =
+        controller.unwrap_or_else(|error| panic!("controller start failed: {error:?}"));
     controller.wait_terminal().await.assert_value();
     let ledger = SqliteRunLedger::open_read_only(controller.paths().ledger()).assert_value();
     let before = ledger.get(&run).await.assert_value().assert_value();
@@ -96,8 +73,16 @@ async fn completed_run_reopens_without_recreating_released_inputs_or_its_workspa
     assert!(!accepted.exists());
     assert!(files.file_input_roots(&run).assert_value().is_empty());
     drop(controller);
-    let moved = root.path().join("moved-workspace");
-    move_workspace_after_monitor_drop(&workspace, &moved).await;
+    #[cfg(unix)]
+    let retained_workspace = {
+        let moved = root.path().join("moved-workspace");
+        std::fs::rename(&workspace, &moved).assert_value();
+        moved
+    };
+    #[cfg(windows)]
+    let workspace_identity = WorkspaceIdentity::capture(&workspace).assert_value();
+    #[cfg(windows)]
+    let retained_workspace = workspace.clone();
 
     let reopened = PortableRunController::reopen(bootstrap())
         .await
@@ -105,12 +90,15 @@ async fn completed_run_reopens_without_recreating_released_inputs_or_its_workspa
     reopened.wait_terminal().await.assert_value();
     let after = ledger.get(&run).await.assert_value().assert_value();
     assert_eq!(after.snapshot, before.snapshot);
+    #[cfg(unix)]
     assert!(!workspace.exists());
+    #[cfg(windows)]
+    assert!(workspace_identity.is_current(&workspace));
     assert!(!accepted.exists());
     assert!(files.file_input_roots(&run).assert_value().is_empty());
     assert_eq!(std::fs::read(original).assert_value(), b"later user bytes");
     assert_eq!(
-        std::fs::read(moved.join("output")).assert_value(),
+        std::fs::read(retained_workspace.join("output")).assert_value(),
         b"live output"
     );
 }

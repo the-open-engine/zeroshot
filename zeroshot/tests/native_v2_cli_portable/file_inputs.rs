@@ -29,7 +29,13 @@ fn settled(fixture: &Fixture, id: &str, phase: &str) -> Value {
 fn await_file(path: &Path) {
     let deadline = Instant::now() + Duration::from_secs(60);
     while !path.exists() {
-        assert!(Instant::now() < deadline, "{}", path.display());
+        assert!(
+            Instant::now() < deadline,
+            "{}; {}",
+            path.display(),
+            fs::read_to_string(path.with_file_name("input-path-diagnostic.json"))
+                .unwrap_or_default()
+        );
         std::thread::sleep(Duration::from_millis(25));
     }
 }
@@ -73,12 +79,23 @@ fn configure(fixture: &Fixture, request: bool) {
     let node = String::from_utf8(node.stdout).unwrap();
     let output = serde_json::to_string(&fixture.root.path("observed.json")).unwrap();
     let ready = serde_json::to_string(&fixture.root.path("ready")).unwrap();
+    let diagnostic =
+        serde_json::to_string(&fixture.root.path("input-path-diagnostic.json")).unwrap();
     let release = serde_json::to_string(&fixture.root.path("release")).unwrap();
     let fail = serde_json::to_string(&fixture.root.path("fail-once")).unwrap();
     let script = format!(
         r#"
-        const fs=require('node:fs'); const v=JSON.parse(fs.readFileSync(0,'utf8')).payload;
-        if(!process.env.ZEROSHOT_INPUTS || !v.left.startsWith(process.env.ZEROSHOT_INPUTS)) process.exit(41);
+        const fs=require('node:fs'); const path=require('node:path');
+        const v=JSON.parse(fs.readFileSync(0,'utf8')).payload;
+        try {{
+          if(!process.env.ZEROSHOT_INPUTS) throw new Error('missing input authority');
+          const relative=path.relative(fs.realpathSync(process.env.ZEROSHOT_INPUTS),fs.realpathSync(v.left));
+          if(!relative || relative.startsWith('..') || path.isAbsolute(relative))
+            throw new Error('input outside authority: '+relative);
+        }} catch(error) {{
+          fs.writeFileSync({diagnostic},JSON.stringify({{root:process.env.ZEROSHOT_INPUTS,left:v.left,error:String(error)}}));
+          process.exit(41);
+        }}
         fs.writeFileSync({ready},'ready');
         const timer=setInterval(()=>{{ if(!fs.existsSync({release})) return; clearInterval(timer);
           const result={{paths:v,left:fs.readFileSync(v.left,'utf8'),right:fs.readFileSync(v.right,'utf8')}};

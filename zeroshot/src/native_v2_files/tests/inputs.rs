@@ -783,6 +783,140 @@ fn damaged_input_manifests_block_replay_and_cleanup_without_losing_accepted_byte
 }
 
 #[test]
+fn failed_input_acquisition_does_not_turn_a_missing_file_or_upload_into_run_authority() {
+    let root = tempdir();
+    let files = files(root.path());
+    let missing_run = RunId::new("missing-file-run");
+    let run = RunId::new("present-file-run");
+    let source = root.path().join("data.csv");
+    let local = json!("data.csv");
+    let admit_local = |run: &RunId, key: &str| {
+        files.freeze_file_inputs(InputAdmission {
+            run_id: run,
+            owner: run,
+            key: &operation(key),
+            schema: &PayloadType::Filepath,
+            value: &local,
+            local_root: Some(root.path()),
+        })
+    };
+    assert!(admit_local(&missing_run, "missing-file").is_err());
+    assert!(files.file_input_roots(&missing_run).unwrap().is_empty());
+    std::fs::write(&source, "accepted bytes").unwrap();
+    let accepted = admit_local(&run, "present-file").unwrap();
+    files.materialize_file_inputs(&run, false).unwrap();
+    assert_eq!(
+        std::fs::read(accepted.value.as_str().unwrap()).unwrap(),
+        b"accepted bytes"
+    );
+
+    let absent_upload = serde_json::to_value(RunFileInput::Staged {
+        run_id: RunId::new("missing-upload"),
+        operation: operation("missing-upload"),
+    })
+    .unwrap();
+    assert!(
+        files
+            .freeze_file_inputs(InputAdmission {
+                run_id: &RunId::new("second"),
+                owner: &RunId::new("second"),
+                key: &operation("missing-upload"),
+                schema: &PayloadType::Filepath,
+                value: &absent_upload,
+                local_root: None,
+            })
+            .is_err()
+    );
+    assert!(
+        files
+            .file_input_roots(&RunId::new("second"))
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        std::fs::read(accepted.value.as_str().unwrap()).unwrap(),
+        b"accepted bytes"
+    );
+    files.release_file_inputs(&run).unwrap();
+}
+
+#[test]
+fn released_input_key_and_mismatched_manifest_cannot_reclaim_accepted_files() {
+    let root = tempdir();
+    let files = files(root.path());
+    let source = root.path().join("data.csv");
+    std::fs::write(&source, "accepted bytes").unwrap();
+    let value = json!({"left":staged(&files, &source, "left"),
+        "right":staged(&files, &source, "right")});
+    let (run, projected) = admit(&files, &value, ("run", "run", "key")).unwrap();
+    files.materialize_file_inputs(&run, false).unwrap();
+    let manifest = std::fs::read_dir(files.directory.join("file-inputs"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| {
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("run-")
+        })
+        .unwrap();
+    let original = std::fs::read(&manifest).unwrap();
+    let mut wrong: Value = serde_json::from_slice(&original).unwrap();
+    wrong["run_id"] = json!("other-run");
+    std::fs::write(&manifest, serde_json::to_vec(&wrong).unwrap()).unwrap();
+    assert!(files.release_file_input_part(&run).is_err());
+    assert_eq!(read(&projected, "left"), "accepted bytes");
+    std::fs::write(&manifest, original).unwrap();
+    files.release_file_inputs(&run).unwrap();
+    assert!(admit(&files, &value, ("retry", "run", "key")).is_err());
+    assert!(files.file_input_roots(&run).unwrap().is_empty());
+    assert!(!Path::new(projected["left"].as_str().unwrap()).exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn redirected_input_state_blocks_every_authority_and_cleanup_entrypoint() {
+    use std::os::unix::fs::symlink;
+    let root = tempdir();
+    let files = files(root.path());
+    let outside = root.path().join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("sentinel"), "unrelated bytes").unwrap();
+    std::fs::create_dir_all(&files.directory).unwrap();
+    symlink(&outside, files.directory.join("file-inputs")).unwrap();
+    let run = RunId::new("run");
+    let value = json!("data.csv");
+    let request = InputAdmission {
+        run_id: &run,
+        owner: &run,
+        key: &operation("key"),
+        schema: &PayloadType::Filepath,
+        value: &value,
+        local_root: Some(root.path()),
+    };
+    assert!(files.project_input_value(&request).is_err());
+    assert!(files.freeze_file_inputs(request).is_err());
+    assert!(files.file_input_roots(&run).is_err());
+    assert!(files.file_input_authority_roots(&run).is_err());
+    assert!(files.materialize_file_inputs(&run, false).is_err());
+    assert!(files.release_file_input_part(&run).is_err());
+    assert!(files.release_file_inputs(&run).is_err());
+    assert_eq!(
+        std::fs::read(outside.join("sentinel")).unwrap(),
+        b"unrelated bytes"
+    );
+
+    let mut redirected_parent = files.clone();
+    symlink(&outside, root.path().join("alias")).unwrap();
+    redirected_parent.directory = root.path().join("alias/inputs");
+    assert!(redirected_parent.input_location(&run).is_err());
+    assert_eq!(
+        std::fs::read(outside.join("sentinel")).unwrap(),
+        b"unrelated bytes"
+    );
+}
+
+#[test]
 fn rollback_claim_belongs_only_to_the_attempt_that_created_the_manifest() {
     let root = tempdir();
     let files = files(root.path());
