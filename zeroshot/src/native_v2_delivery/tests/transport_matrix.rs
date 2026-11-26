@@ -449,7 +449,9 @@ async fn execute_mode(
                 as Arc<dyn crate::native_v2_runner::RuntimeEnvironmentRefresh>
         }),
     };
-    tokio::time::timeout(Duration::from_secs(20), run_with_adapter(request, adapter))
+    // A progress bound, not a timing assertion: contained delivery confines the workspace's
+    // Git configuration before each command, which adds processes under parallel test load.
+    tokio::time::timeout(Duration::from_secs(60), run_with_adapter(request, adapter))
         .await
         .assert_value_with("transport delivery must make bounded progress")
 }
@@ -1039,7 +1041,13 @@ async fn repeated_push_rejection_refuses_and_resume_publishes_the_retained_candi
 async fn repeated_push_rejection_with_followed_tags_refuses_the_branch() {
     let repo = TempRepo::delivery();
     let revision = commit_file(&repo.workspace, "result.txt", "reviewed\n");
-    git(&repo.workspace, &["config", "push.followTags", "true"]);
+    // Contained delivery removes `push.followTags` from workspace config, so the fixture adds it
+    // to the authenticated push as command-scope configuration instead.
+    fs::write(
+        repo.workspace.join(".git/zeroshot-test-push-follow-tags"),
+        "",
+    )
+    .assert_value();
     git(
         &repo.workspace,
         &[

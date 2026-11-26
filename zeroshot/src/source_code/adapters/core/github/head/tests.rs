@@ -195,13 +195,19 @@ impl SeparateHistory {
                 external.to_str().assert_value(),
             ],
         );
-        git(
-            &repository.workspace,
-            &[
-                "config",
-                &format!("url.{}.insteadOf", repository.remote.display()),
-                "https://github.com/acme/project.git",
-            ],
+        // Contained delivery removes URL rewrites from the workspace configuration, so the
+        // fixture remote is the transport's own remote rather than a rewritten GitHub URL.
+        let transport = crate::native_v2_delivery::transport::GitTransport::new(
+            crate::native_v2_delivery::transport::GitTransportConfig {
+                git_program: "git".into(),
+                workspace: repository.workspace.clone(),
+                home_directory: repository.root.path().to_owned(),
+                private_directory: repository.root.path().to_owned(),
+                identity: None,
+                local_environment: None,
+                deadline: Duration::from_secs(5),
+            },
+            &repository.remote,
         );
         let authority = GhCliDeliveryAuthority::new(GhCliAuthorityConfig {
             git_identity: None,
@@ -210,7 +216,8 @@ impl SeparateHistory {
             home_directory: repository.root.path().to_owned(),
             api_deadline: Duration::from_secs(5),
             push_deadline: Duration::from_secs(5),
-        });
+        })
+        .with_git_transport(transport);
         Self {
             repository,
             external,

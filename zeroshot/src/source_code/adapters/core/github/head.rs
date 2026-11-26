@@ -155,21 +155,12 @@ async fn require_local_head(
     context: HeadUpdateContext<'_>,
     expected: &str,
 ) -> Result<(), SourceDeliveryError> {
-    let head = git_output(
-        git_command(context.authority, context.workspace, context.credential)
-            .args(["rev-parse", "HEAD"]),
-        context.authority.config.api_deadline,
-    )
-    .await?;
-    let status = git_output(
-        git_command(context.authority, context.workspace, context.credential).args([
-            "status",
-            "--porcelain=v1",
-            "--untracked-files=all",
-        ]),
-        context.authority.config.api_deadline,
-    )
-    .await?;
+    let mut head = head_command(context).await?;
+    head.args(["rev-parse", "HEAD"]);
+    let head = git_output(head).await?;
+    let mut status = head_command(context).await?;
+    status.args(["status", "--porcelain=v1", "--untracked-files=all"]);
+    let status = git_output(status).await?;
     if head.stdout().trim() == expected && status.stdout().is_empty() {
         return Ok(());
     }
@@ -218,17 +209,19 @@ async fn adopt_fetched_head(
     if !local_transition_required(context, previous, updated).await? {
         return Ok(());
     }
-    let mut ancestor = head_command(context);
+    let mut ancestor = head_command(context).await?;
     ancestor.args([
         "merge-base",
         "--is-ancestor",
         &previous.head_revision,
         &updated.head_revision,
     ]);
-    bounded_status(ancestor, context.authority.config.api_deadline).await?;
-    let mut fast_forward = head_command(context);
+    let (ancestor, deadline) = ancestor.into_parts();
+    bounded_status(ancestor, deadline).await?;
+    let mut fast_forward = head_command(context).await?;
     fast_forward.args(["merge", "--ff-only", &updated.head_revision]);
-    bounded_status(fast_forward, context.authority.config.api_deadline).await?;
+    let (fast_forward, deadline) = fast_forward.into_parts();
+    bounded_status(fast_forward, deadline).await?;
     require_local_head(context, &updated.head_revision).await
 }
 
@@ -247,17 +240,18 @@ async fn local_transition_required(
     Ok(true)
 }
 
-async fn git_output(
-    command: &mut Command,
-    deadline: Duration,
-) -> Result<GitCommandOutput, SourceDeliveryError> {
-    bounded_git_output(command, deadline, MAX_GIT_OUTPUT_BYTES).await
+/// Workspace Git output within what confinement left of the API deadline.
+async fn git_output(command: ConfinedCommand) -> Result<GitCommandOutput, SourceDeliveryError> {
+    let (mut command, deadline) = command.into_parts();
+    bounded_git_output(&mut command, deadline, MAX_GIT_OUTPUT_BYTES).await
 }
 
 #[cfg(test)]
 #[path = "head/tests.rs"]
 mod tests;
 
-fn head_command(context: HeadUpdateContext<'_>) -> Command {
-    git_command(context.authority, context.workspace, context.credential)
+async fn head_command(
+    context: HeadUpdateContext<'_>,
+) -> Result<ConfinedCommand, crate::source_code_provider::GitCommandFailure> {
+    git_command(context.authority, context.workspace, context.credential).await
 }
