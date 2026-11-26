@@ -20,7 +20,7 @@ pub(crate) async fn generate_admission_goldens() -> Vec<Artifact> {
     let lifecycle_requests = vec![
         json!({
             "jsonrpc":"2.0","id":"admission-init","method":"initialize",
-            "params":{"protocolVersion":"openengine.cluster/v3"}
+            "params":{"protocolVersion":"openengine.cluster/v4"}
         }),
         json!({
             "jsonrpc":"2.0","id":"admission-plan","method":"plan",

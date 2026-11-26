@@ -49,7 +49,9 @@ async fn graph(delivery: TemplateDelivery) -> VerifiedGraph {
         ));
     }
     let runtime = with_host_size(runtime);
-    let admitted = NativeV2Admission.admit_with_policy(RunSubmission { context_sources: Vec::new(),
+    let admitted = NativeV2Admission.admit_with_policy(RunSubmission {
+    workspace: None,
+ context_sources: Vec::new(),
         title: RunTitle::new("PR review").assert_value(),
         graph: pr_review_graph(delivery).assert_value(),
         initial_input: input(), runtime,

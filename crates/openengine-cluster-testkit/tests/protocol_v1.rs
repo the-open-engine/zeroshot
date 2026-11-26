@@ -37,7 +37,7 @@ async fn assert_admission_effects(store: &InMemoryAdmissionStore) {
 
 #[test]
 fn protocol_version_is_exact() {
-    assert_eq!(PROTOCOL_VERSION, "openengine.cluster/v3");
+    assert_eq!(PROTOCOL_VERSION, "openengine.cluster/v4");
 }
 
 #[test]
@@ -54,7 +54,7 @@ fn canonical_empty_results_have_exact_wire_shape() {
     assert_eq!(
         serde_json::to_value(initialize).assert_value(),
         serde_json::json!({
-            "protocolVersion": "openengine.cluster/v3",
+            "protocolVersion": "openengine.cluster/v4",
             "capabilities": { "graphProfiles": [], "logs": false, "agentAttach": false },
             "status": {
                 "phase": "empty",
@@ -320,25 +320,28 @@ async fn unknown_methods_ignore_parameter_shape() {
 
 #[tokio::test]
 async fn unsupported_protocol_version_has_stable_domain_code() {
-    let dispatcher = Dispatcher::new(EmptyBackend, ConnectionContext::default());
-    let client = ClusterClient::new(InProcessTransport::new(dispatcher));
+    for version in [
+        "openengine.cluster/v0",
+        "openengine.cluster/v1",
+        "openengine.cluster/v2",
+    ] {
+        let dispatcher = Dispatcher::new(EmptyBackend, ConnectionContext::default());
+        let client = ClusterClient::new(InProcessTransport::new(dispatcher));
 
-    let error = client
-        .initialize_with_version("openengine.cluster/v0")
-        .await
-        .assert_error();
-    match error {
-        ClientError::Rpc(error) => {
-            assert_eq!(error.code, -32000);
-            assert_eq!(
-                error.data.assert_value().code,
-                "UNSUPPORTED_PROTOCOL_VERSION"
-            );
+        let error = client.initialize_with_version(version).await.assert_error();
+        match error {
+            ClientError::Rpc(error) => {
+                assert_eq!(error.code, -32000);
+                assert_eq!(
+                    error.data.assert_value().code,
+                    "UNSUPPORTED_PROTOCOL_VERSION"
+                );
+            }
+            other => assert!(
+                matches!(other, ClientError::Rpc(_)),
+                "expected a JSON-RPC error"
+            ),
         }
-        other => assert!(
-            matches!(other, ClientError::Rpc(_)),
-            "expected a JSON-RPC error"
-        ),
     }
 }
 
@@ -417,7 +420,7 @@ async fn dispatcher_rejects_a_backend_response_with_the_wrong_protocol_version()
     let response: serde_json::Value = serde_json::from_str(
         &dispatcher
             .dispatch(
-                r#"{"jsonrpc":"2.0","id":10,"method":"initialize","params":{"protocolVersion":"openengine.cluster/v3"}}"#,
+                r#"{"jsonrpc":"2.0","id":10,"method":"initialize","params":{"protocolVersion":"openengine.cluster/v4"}}"#,
             )
             .await,
     )
@@ -442,7 +445,7 @@ async fn stdio_emits_protocol_frames_only() {
     stdin
         .write_all(
             concat!(
-                "{\"jsonrpc\":\"2.0\",\"id\":\"init\",\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"openengine.cluster/v3\"}}\n",
+                "{\"jsonrpc\":\"2.0\",\"id\":\"init\",\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"openengine.cluster/v4\"}}\n",
                 "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"get\",\"params\":{}}\n"
             )
             .as_bytes(),

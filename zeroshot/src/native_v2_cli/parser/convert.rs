@@ -518,7 +518,35 @@ impl RunArgs {
         })?;
         Ok(NativeV2CliCommand::Run(Box::new(RunCommand {
             controller: self.controller.controller.unwrap_or_default(),
-            target: route.target,
+            target: route.target.clone(),
+            workspace: if self.workspace {
+                use openengine_cluster_protocol::{RunWorkspace, WorkspacePlacement};
+                let placement = match self.workspace_placement.as_deref() {
+                    Some("in-place") => WorkspacePlacement::InPlace,
+                    Some("managed") => WorkspacePlacement::Managed,
+                    _ if route.target.is_some()
+                        || self.copy_workspace
+                        || !self.workspace_seed.is_empty() =>
+                    {
+                        WorkspacePlacement::Managed
+                    }
+                    _ => WorkspacePlacement::InPlace,
+                };
+                let workspace = RunWorkspace {
+                    placement,
+                    local_directory: None,
+                    seeds: self
+                        .workspace_seed
+                        .into_iter()
+                        .map(super::files::workspace_seed)
+                        .collect::<Result<_, _>>()?,
+                    copy_root: self.copy_workspace,
+                };
+                workspace.validate().map_err(usage)?;
+                Some(workspace)
+            } else {
+                None
+            },
             cwd: self.cwd,
             worktree: self.worktree.then_some(
                 self.worktree_base

@@ -1,6 +1,7 @@
 mod context;
 mod conversations;
 mod delivery_recovery;
+mod file_workspaces;
 mod workspace_storage;
 
 use std::sync::Arc;

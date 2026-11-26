@@ -783,6 +783,9 @@ mod history_identity;
 #[path = "initialization/source_basis.rs"]
 mod source_basis;
 
+#[path = "initialization/workspaces.rs"]
+mod workspaces;
+
 #[tokio::test]
 async fn legacy_response_revisions_cannot_select_a_newer_version_or_publish_partially() {
     let case = case().await;

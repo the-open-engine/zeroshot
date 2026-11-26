@@ -61,14 +61,18 @@ impl PreparedActiveMemory {
         // Bootstrap/config paths are host-owned. Still reject accidental placement in the checkout.
         crate::native_v2_local::validate_workspace_state(request.workspace, storage)
             .map_err(|_| ActiveMemoryError::UnsafeStorage)?;
-        let repository = Some(repository_key(request.admitted, request.workspace));
+        let repository = request
+            .admitted
+            .workspace
+            .is_none()
+            .then(|| repository_key(request.admitted, request.workspace));
         let graph_hash = authored_graph_hash(request.admitted)?;
         let store = ActiveMemoryStore::open(storage)?;
         let snapshot = store.snapshot(&ScopeQuery {
             repository: repository.clone(),
             graph_hash: Some(graph_hash.clone()),
             node_id: None,
-            repository_lessons: config.repository,
+            repository_lessons: config.repository && repository.is_some(),
             graph_lessons: config.graph,
         })?;
         Self::from_snapshot(
@@ -97,13 +101,17 @@ impl PreparedActiveMemory {
         config
             .validate()
             .map_err(|_| ActiveMemoryError::Invalid("context token limits".into()))?;
-        let repository = Some(repository_key(request.admitted, request.workspace));
+        let repository = request
+            .admitted
+            .workspace
+            .is_none()
+            .then(|| repository_key(request.admitted, request.workspace));
         let graph_hash = authored_graph_hash(request.admitted)?;
         let scope = ScopeQuery {
             repository: repository.clone(),
             graph_hash: Some(graph_hash.clone()),
             node_id: None,
-            repository_lessons: config.repository,
+            repository_lessons: config.repository && repository.is_some(),
             graph_lessons: config.graph,
         };
         let snapshot = backend.snapshot(run, &scope).await?;
@@ -134,7 +142,7 @@ impl PreparedActiveMemory {
                 * crate::active_memory::ESTIMATED_BYTES_PER_TOKEN,
             hook_budget: config.hook_injection_tokens as usize
                 * crate::active_memory::ESTIMATED_BYTES_PER_TOKEN,
-            repository_enabled: config.repository,
+            repository_enabled: config.repository && repository.is_some(),
             graph_enabled: config.graph,
             nodes: request
                 .admitted

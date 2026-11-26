@@ -11,6 +11,9 @@ use openengine_cluster_protocol::{
 };
 use serde_json::{json, Value};
 
+#[path = "tests/workspaces.rs"]
+mod workspaces;
+
 fn null_verifier(name: &str, worker: &str) -> Value {
     let mut node = null_executable("verifier", name, worker);
     let fields = node.as_object_mut().assert_value_with("verifier fixture");
@@ -129,6 +132,7 @@ fn resolved_source() -> ResolvedSource {
 
 fn submission(graph: GraphSpec, nodes: BTreeMap<NodeName, NodeRuntimeBinding>) -> RunSubmission {
     RunSubmission {
+        workspace: None,
         context_sources: Vec::new(),
         environment: None,
         title: RunTitle::new("Admission test").assert_value(),
@@ -366,6 +370,7 @@ async fn rejects_inconsistent_worker_reuse() {
 async fn admits_bedrock_for_both_harnesses_and_preserves_provider_owned_models() {
     let graph = graph(vec![null_step("work", "agent.work@1"), succeed("done")]);
     let codex_runtime = RunSubmission {
+        workspace: None,
         context_sources: Vec::new(),
         environment: None,
         title: RunTitle::new("Opaque Codex model").assert_value(),
@@ -514,6 +519,7 @@ mod concurrency;
 
 fn submission_intent(request: &RunSubmission) -> RunSubmissionIntent {
     RunSubmissionIntent {
+        workspace: None,
         environment: request.environment.clone(),
         title: request.title.clone(),
         graph: request.graph.clone(),

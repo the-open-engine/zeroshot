@@ -215,8 +215,33 @@ async fn qualify(
         return Err(invalid("graph is ignored"));
     }
     ensure_collectible(&loaded)?;
-    let checkout = resolve_checkout(context, &loaded, cache).await?;
+    let projection: WorkspaceProjection = files::read(
+        &context
+            .root
+            .join("runs")
+            .join(run_id.as_str())
+            .join("workspace-recovery.json"),
+    )?;
     let config = admitted.runtime.active_memory();
+    if admitted.workspace.is_some() {
+        if !projection.workspace.is_absolute() {
+            return Err(invalid("recorded workspace must be absolute"));
+        }
+        return Ok(HistoricalRun {
+            run_id: run_id.clone(),
+            title: admitted.title.as_str().to_owned(),
+            graph_hash,
+            graph_name,
+            workspace: projection.workspace,
+            repository: None,
+            remote_key: None,
+            repository_aliases: Default::default(),
+            repository_enabled: false,
+            graph_enabled: config.graph,
+            tasks: Vec::new(),
+        });
+    }
+    let checkout = resolve_checkout(context, &loaded, &projection.workspace, cache).await?;
     Ok(HistoricalRun {
         run_id: run_id.clone(),
         title: admitted.title.as_str().to_owned(),
@@ -235,29 +260,18 @@ async fn qualify(
 async fn resolve_checkout(
     context: &InventoryContext<'_>,
     loaded: &LoadedRun,
+    workspace: &Path,
     cache: &mut super::checkouts::Cache,
 ) -> Result<super::checkouts::Checkout> {
-    let projection: WorkspaceProjection = files::read(
-        &context
-            .root
-            .join("runs")
-            .join(loaded.run_id.as_str())
-            .join("workspace-recovery.json"),
-    )?;
     let admitted = &loaded.stored.admitted;
-    let mut aliases =
-        super::filters::repository_aliases(&projection.workspace, admitted.source.as_ref());
-    let historical_key = repository_key(admitted, &projection.workspace);
+    let mut aliases = super::filters::repository_aliases(workspace, admitted.source.as_ref());
+    let historical_key = repository_key(admitted, workspace);
     aliases.insert(historical_key.clone());
     if context.filters.excludes_repository(&aliases) {
         return Err(invalid("repository is ignored"));
     }
-    let mut checkout = super::checkouts::resolve(
-        &projection.workspace,
-        (context.root, context.directory),
-        cache,
-    )
-    .await?;
+    let mut checkout =
+        super::checkouts::resolve(workspace, (context.root, context.directory), cache).await?;
     if admitted.source.is_some() && !checkout.aliases.contains(&historical_key) {
         return Err(invalid(
             "recorded checkout now has a different repository identity",
@@ -273,7 +287,7 @@ async fn resolve_checkout(
 fn ensure_collectible(loaded: &LoadedRun) -> Result<()> {
     let admitted = &loaded.stored.admitted;
     let config = admitted.runtime.active_memory();
-    if !config.enabled() {
+    if !config.graph && (!config.repository || admitted.workspace.is_some()) {
         return Err(invalid("repository and graph memory were opted out"));
     }
     if !loaded.stored.snapshot.executions.values().any(|node| {

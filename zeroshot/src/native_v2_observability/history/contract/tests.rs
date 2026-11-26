@@ -311,3 +311,37 @@ async fn context_sources_are_retained_in_history_definition() {
         json!([pin])
     );
 }
+
+#[tokio::test]
+async fn workspace_identity_is_retained_in_history_without_a_repository_source() {
+    let run_id = RunId::new(uuid::Uuid::now_v7().to_string());
+    let ledger = Arc::new(FakeRunLedger::new());
+    let mut admitted = crate::native_v2_runner::test_support::admitted();
+    admitted.source = None;
+    let workspace = openengine_cluster_protocol::RunWorkspace {
+        placement: openengine_cluster_protocol::WorkspacePlacement::InPlace,
+        local_directory: Some("/selected/folder".into()),
+        seeds: vec![],
+        copy_root: false,
+    };
+    admitted.workspace = Some(workspace.clone());
+    ledger
+        .create_or_get(CreateRun {
+            run_id: run_id.clone(),
+            submission_key: IdempotencyKey::new("workspace-history").assert_value(),
+            submission_digest: Sha256Digest::new("b".repeat(64)).assert_value(),
+            admitted,
+        })
+        .await
+        .assert_value();
+    let definition = super::super::RunHistoryService::with_sources(
+        ledger,
+        super::super::ControlCache::default(),
+        None,
+    )
+    .definition(&run_id)
+    .await
+    .assert_value();
+    assert!(definition.source.is_none());
+    assert_eq!(definition.workspace, Some(workspace));
+}

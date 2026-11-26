@@ -51,6 +51,8 @@ pub struct RunSubmissionIntent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<openengine_cluster_protocol::RuntimeEnvironment>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<openengine_cluster_protocol::RunWorkspace>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<SourceBranchId>,
     pub submission_key: IdempotencyKey,
 }
@@ -63,6 +65,7 @@ impl From<&RunSubmission> for RunSubmissionIntent {
             initial_input: submission.initial_input.clone(),
             runtime: submission.runtime.clone(),
             environment: submission.environment.clone(),
+            workspace: submission.workspace.clone(),
             branch: None,
             submission_key: submission.submission_key.clone(),
         }
@@ -80,6 +83,8 @@ pub struct AdmittedRun {
     pub runtime: RuntimePlan,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<openengine_cluster_protocol::RuntimeEnvironment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<openengine_cluster_protocol::RunWorkspace>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<ResolvedSource>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

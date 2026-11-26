@@ -89,6 +89,7 @@ impl RepositoryFixture {
 
 pub(super) fn hosting_config(storage_root: PathBuf) -> ProductionHostingConfig {
     ProductionHostingConfig {
+        workspace_files: None,
         file_store: None,
         suspension: None,
         request_ask: false,
@@ -135,6 +136,7 @@ pub(in crate::native_v2_hosting) fn capsule_allocator(
 
 pub(super) fn submission(runtime: RuntimePlan, revision: &str, key: &str) -> RunSubmission {
     RunSubmission {
+        workspace: None,
         context_sources: Vec::new(),
         environment: None,
         title: RunTitle::new("Hosting test run").assert_value_with("title"),

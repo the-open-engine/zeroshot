@@ -834,3 +834,5 @@ mod regressions;
 
 #[path = "tests/publications.rs"]
 mod publications;
+#[path = "tests/workspaces.rs"]
+mod workspaces;

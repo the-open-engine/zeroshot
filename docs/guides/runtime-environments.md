@@ -40,6 +40,14 @@ The CLI can collect hook credentials for a definition you supply. When a host se
 its connection store must supply those credentials; the CLI does not inspect saved environments
 to discover additional secrets in your shell.
 
+For a delivery-free file run, select `--workspace`. Locally, setup and startup run in the selected
+in-place folder or the prepared managed workspace. On targets, setup runs in the run root before
+workspace inputs are materialized; startup runs in the workspace after the inputs are ready. An
+empty environment is supported; workspace mode refuses `contextRepositories`. In-place resume
+reruns local hooks against the folder's current contents without restoring a snapshot. A managed
+fresh restart without checkpoints reconstructs the original pinned inputs before startup. See
+[File workspaces](../concepts/execution.md#file-workspaces) for placement and cleanup behavior.
+
 ## Read-only context repositories
 
 `contextRepositories` lists up to 16 extra repositories that agents can inspect and build against.

@@ -83,6 +83,7 @@ pub(super) fn contract_status(
     failed: bool,
 ) -> RunStatusResult {
     RunStatusResult {
+        workspace: None,
         steering: Default::default(),
         context_sources: Vec::new(),
         part_id: run_id.clone(),
@@ -146,6 +147,7 @@ fn prepared_local_run(
     workspace: PathBuf,
 ) -> PreparedLocalRun {
     PreparedLocalRun {
+        managed_restart: false,
         local_branch: None,
         invoking_workspace: None,
         request_digest: None,
@@ -182,6 +184,7 @@ fn prepared_request(run_id: RunId, submission_key: &str) -> PreparedRunRequest {
 
         run_id,
         intent: TargetRunIntent {
+            workspace: None,
             environment: None,
             title: submission.title,
             graph: submission.graph,

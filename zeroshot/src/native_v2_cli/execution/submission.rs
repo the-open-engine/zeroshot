@@ -367,6 +367,9 @@ async fn resolve_named_source<F>(
 where
     F: Fn(&str) -> Option<OsString>,
 {
+    if params.intent.workspace.is_some() {
+        return Ok(());
+    }
     let required_capabilities =
         crate::native_v2_admission::delivery_capabilities(&params.intent.graph.root);
     let lookup_token = branch_tip_lookup_token(run, params, shell)?;
@@ -462,6 +465,7 @@ where
     W: Write,
     D: Future<Output = ()> + ?Sized,
 {
+    validate_workspace_options(run)?;
     let params = tokio::select! {
         biased;
         () = detach.as_mut() => return Ok(RunSubmission::Interrupted),
@@ -611,6 +615,15 @@ fn prepare_intent(
     initial_input: serde_json::Value,
     environment: Option<openengine_cluster_protocol::RuntimeEnvironment>,
 ) -> Result<TargetRunIntent, NativeV2CliError> {
+    validate_workspace_options(run)?;
+    if let Some(workspace) = &run.workspace {
+        crate::native_v2_admission::validate_workspace_mode(
+            Some(workspace),
+            &resolved.graph,
+            environment.as_ref(),
+        )
+        .map_err(NativeV2CliError::InvalidRun)?;
+    }
     validate_graph_profile(&resolved.graph)?;
     resolved
         .graph
@@ -627,9 +640,41 @@ fn prepare_intent(
         initial_input,
         runtime: resolved.runtime,
         environment,
+        workspace: run.workspace.clone(),
         branch: run.branch.clone(),
         submission_key,
     })
+}
+
+fn validate_workspace_options(run: &RunCommand) -> Result<(), NativeV2CliError> {
+    let Some(workspace) = &run.workspace else {
+        return Ok(());
+    };
+    workspace
+        .validate()
+        .map_err(|error| NativeV2CliError::Usage(error.into()))?;
+    if run.repository.is_some()
+        || run.branch.is_some()
+        || run.revision.is_some()
+        || run.source_connection.is_some()
+        || run.source_forge.is_some()
+        || run.worktree.is_some()
+        || run.forward_github_token
+        || matches!(run.input, super::super::RunInput::TaskFrom(_))
+    {
+        return Err(NativeV2CliError::Usage(
+            "workspace mode rejects Git source, worktree and delivery flags".into(),
+        ));
+    }
+    if run.target.is_some()
+        && (workspace.is_in_place()
+            || workspace.copy_root
+            || run.cwd.is_some()
+            || workspace.local_directory.is_some())
+    {
+        return Err(NativeV2CliError::Usage("named workspace targets require managed placement and target file seeds; --cwd and copyRoot are local only".into()));
+    }
+    Ok(())
 }
 
 fn read_run_environment(

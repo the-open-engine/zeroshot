@@ -593,7 +593,12 @@ async fn boundary_contract_empty_ledger_has_no_existing_run_and_storage_rejects_
  {
     let run_id = RunId::new("run-empty-ledger");
     let ledger = FakeRunLedger::new();
-    assert!(!validate_existing_run(&ledger, &run_id).await.assert_value());
+    assert!(
+        validate_existing_run(&ledger, &run_id)
+            .await
+            .assert_value()
+            .is_none()
+    );
 
     assert!(matches!(
         open_controller_storage(Path::new("relative")),
@@ -818,6 +823,7 @@ async fn coverage_contract_existing_ledger_requires_one_exact_run_identity() {
         validate_existing_run(&ledger, &expected)
             .await
             .assert_value()
+            .is_some()
     );
     assert!(matches!(
         validate_existing_run(&ledger, &RunId::new("foreign-run")).await,

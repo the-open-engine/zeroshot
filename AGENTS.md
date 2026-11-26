@@ -235,6 +235,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Source-only historical admissions match repository IDs independently resolved from the current
   checkout/registered remote; historical or folder aliases never prove identity, and remote-bearing
   admissions retain their stronger remote-derived proof.
+  Historical workspace-mode runs retain graph-only memory authority, including outside Git or after
+  managed-folder disposal. They have no repository identity or tasks and grant no current-source
+  authority or fingerprints; repository-mode histories retain checkout identity and source validation.
   The file bridge exports the runtime prompts and reuses its admission validators, never recovers old
   controllers, resolves provider credentials, or writes historical run ledgers. Digest-bound responses,
   source fingerprints, complete coverage, expected revisions and retained tombstones gate publication.
@@ -1988,17 +1991,69 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 
 ## CLI and target contracts
 
-- OECP uses `openengine.cluster/v3`. Direct and hosted HTTP discovery use
-  `zeroshot.native-v2-target/v4`, with `zeroshot.hosted-runs/v3` for hosted observation.
+- Optional `workspace` on ordinary and saved-profile submissions explicitly selects source-free,
+  delivery-free execution; omission preserves repository behavior. Validate expanded graphs and
+  reject Git source options and context repositories before source access or allocation. Named
+  targets negotiate `openengine.run-workspaces/v1` and accept managed placement only. Local
+  workspace runs default to the exact invoking/selected folder in place, without Git-root expansion;
+  explicit managed copies and file selections use immutable file-store admission pins. The
+  host-owned `WorkspaceFiles` namespace retains the first submission identity and original inputs
+  across lost acknowledgements, library replacement and restart. Its admission lock checks existing
+  submission and run manifests before publishing either identity or any pins; a new submission key
+  cannot claim a recorded run, and a replay never replaces its frozen run manifest.
+  Local root-copy pins retain executable bits in private workspace metadata and restore them on
+  materialization/restart without changing the file-transfer wire format. Success, explicit stop
+  and confirmed pre-admission refusal release seed pins with durable tombstones; failures and
+  suspensions retain them for recovery, while small submission/run identities remain for replay.
+  Every local preparation failure after pinning uses the same cleanup as controller-start refusal;
+  release pins and disposable folders only when neither a live controller nor admission owns them.
+  Unknown ownership retains recovery inputs.
+  The production factory serializes workspace pin preparation through admission/refusal cleanup
+  across its clones, so rejected retries cannot release inputs of an overlapping acceptance.
+  Materialize before startup, keep
+  managed roots disjoint from sources/state, and dispose only managed roots. Workspace identity
+  travels with admitted definitions, status, history and recovery. In-place progress uses durable
+  metadata without snapshotting, resetting or deleting the user's folder; file restore is refused.
+  Failed CLI resumes keep the latest-checkpoint default; in-place runs have no restorable entries
+  and require explicit `--restart`, while suspended continuation still uses the current folder.
+  Checkpoint-free fresh managed local restarts rebuild the original pins only with an empty
+  starting execution seed; successors retaining completed work keep the corresponding live copy.
+  Defer launcher executable preflight for reconstruction, as for checkpoint restore; the controller
+  validates executables after restoring under its workspace lease, before admission.
+  Box resume input-state inspection before constructing the large prepared run, and heap-pin
+  successor startup to keep checkpoint resume within the portable suite's 1 MiB stack budget.
+  Construct and box the selected public CLI command before polling it on the native stack.
+  Workspace mode has graph memory only and creates no repository-memory identity.
+  Workspace folders, input ownership and artifact addresses remain physical-part state; logical
+  status projects the selected part's workspace alongside the canonical run and current-part IDs.
+  Managed root copies and every pinned file selection validate captured bytes, including each
+  destination basename, before admission. Recognize Git administrative layouts by HEAD plus
+  objects/refs or commondir regardless of directory name, including layouts assembled from multiple
+  seeds; collect their markers from immutable pins before validating config and links. Refuse
+  external Git administrative links and Git config
+  worktree/include identifiers conservatively (also in comments/values); never follow includes or
+  require Git to validate file-only inputs. Keyed workspace
+  replay checks the original request fingerprint before requiring a live source folder. Recoverable
+  controller shutdown preserves managed folders; explicit force-stop also disposes retained managed
+  folders after suspension/reconstruction under the folder lease.
+
+- OECP uses `openengine.cluster/v4`. Direct and hosted HTTP discovery use
+  `zeroshot.native-v2-target/v5`, with `zeroshot.hosted-runs/v4` for hosted observation.
   Run and browser history routes group confirmed successors under the original run ID.
   The isolated `crates/openengine-cluster-testkit/tests/released-wire-contract` workspace pins
-  v17.1.1 to test version mismatch at initialization and reading its continuation records.
+  actual pre-workspace main `79ccf9e` (including run parts) and v17.1.1 to test bidirectional
+  version refusal before observation and stored continuation readability. The actual-main reader
+  controls retain part IDs while isolating incompatible workspace status/list/watch fields.
   The protocol's `native_v2_observation` integration suite invokes these controls and the current
   runtime/HTTP wire tests through the Linux, Windows and macOS CI entry points. Child Cargo
   commands clear the parent package's Cargo metadata and use independent build directories.
   Hosted observation and force use the canonical run in every phase. Live attachment and
   steering mint exact-part sessions after the host resolves membership. Steering retains
   the observed head guard.
+
+  These protocol-owned identifiers gate incompatible peers before submission or observation.
+  Upgrade clients (including Python wheels), targets and hosted gateways together. Keep the
+  strict timed payload format and existing protocol artifact locations.
 
 - `target list` and `target remove` manage local named-target state, including the built-in
   `platform` listing. Inventory exposes only name, origin and hosted/direct kind. Removal refuses
@@ -2491,6 +2546,8 @@ python -m mkdocs build --strict
   objects, preserving pins and receipts even when catalog replacement has an ambiguous sync result.
 - Local in-place `PublishedFile::Local` references retain the recorded working root and relative
   live path and recheck confinement on open. They never enter managed storage or its cleanup scope.
+  Explicit managed local workspaces use the local file store's managed publisher before cleanup,
+  so request attachments and final artifacts remain available after the disposable root is removed.
   Resolve against the frozen canonical root without rebasing it during publication or opening;
   refuse redirected roots and keep the existing no-follow transfer open.
   `HostFilePublication` remains the private low-level file-host publication API.
@@ -2552,6 +2609,8 @@ python -m mkdocs build --strict
   filenames keep both process (`%p`) and binary (`%m`) identities to avoid unrelated writers.
   Tests limiting a child's file size direct only that child's `LLVM_PROFILE_FILE` to `/dev/null`
   so the intentional write failure cannot corrupt collected profiles.
+  Environment-cleared portable CLI test fixtures preserve `LLVM_PROFILE_FILE` so submission coverage
+  survives disposal of their temporary workspaces.
   Local CLI fixture repositories exclude `*.profraw` through their shared Git exclude file,
   keeping profiles from environment-cleared instrumented processes out of delivery and status.
   Conversation and checkout-preservation fixtures launch outside their explicit `--cwd` workspace

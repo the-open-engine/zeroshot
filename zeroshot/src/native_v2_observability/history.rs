@@ -91,6 +91,9 @@ impl RunHistoryService {
         if !stored.admitted.context_sources.is_empty() {
             value["contextSources"] = json!(stored.admitted.context_sources);
         }
+        if let Some(workspace) = stored.admitted.workspace {
+            value["workspace"] = json!(workspace);
+        }
         if let Some(reader) = &self.status
             && let Some(status) = reader.status(id).await
             && (status.workspace_recovery.successor_run_id.is_some()

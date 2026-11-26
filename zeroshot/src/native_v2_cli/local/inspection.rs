@@ -368,7 +368,14 @@ impl LocalCliBackend {
                 )));
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let hint = if matches!(status.status, RunStatus::Suspended { .. }) {
+                let hint = if document
+                    .submission
+                    .workspace
+                    .as_ref()
+                    .is_some_and(|workspace| workspace.is_in_place())
+                {
+                    "; make the original folder available at that path, then resume with its current contents; in-place runs never snapshot or restore the folder".to_owned()
+                } else if matches!(status.status, RunStatus::Suspended { .. }) {
                     "; restore the original workspace at that path before resuming; \
                      suspended runs do not support checkpoint restoration"
                         .to_owned()

@@ -377,6 +377,7 @@ async fn run_contributed(
     let admitted = NativeV2Admission
         .admit_with_source_registry(
             RunSubmission {
+                workspace: None,
                 context_sources: Vec::new(),
                 environment: None,
                 title: RunTitle::new("Contributed forge").assert_value(),

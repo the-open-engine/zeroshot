@@ -1,7 +1,8 @@
 # Released wire-contract control
 
 This isolated Cargo workspace uses unmodified client, protocol and server crates from Zeroshot
-v17.1.1 (`15e17f792359cf6f6a0358918ad6146da57fb32f`). Keeping its lockfile separate avoids ambiguous
+v17.1.1 (`15e17f792359cf6f6a0358918ad6146da57fb32f`) and actual pre-workspace main
+(`79ccf9effe15a47cf44b893421320816f8c1ce6f`), which already supports run parts and artifacts. Keeping its lockfile separate avoids ambiguous
 package selectors in the product workspace. No provider credentials or live gateway are needed.
 
 From the repository root:
@@ -11,6 +12,9 @@ cargo test --locked --manifest-path crates/openengine-cluster-testkit/tests/rele
 ```
 
 The controls exercise version rejection at NDJSON and WebSocket initialization in both directions.
+Actual-main discovery identifiers also require bidirectional direct/hosted upgrades. Its strict
+status/list/watch readers reject workspace data while accepting the same payloads with only
+`workspace` removed; part identity remains intact. Same-version readers retain workspace fields.
 A stored continuation from the release round-trips through the current reader with its original ID
 and predecessor.
 

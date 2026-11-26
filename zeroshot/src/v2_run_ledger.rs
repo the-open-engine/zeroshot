@@ -126,6 +126,8 @@ pub struct RunSnapshot {
     pub title: RunTitle,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<ResolvedSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<openengine_cluster_protocol::RunWorkspace>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub context_sources: Vec<ResolvedSource>,
     pub size: RunSize,
@@ -207,6 +209,7 @@ impl RunSnapshot {
             admitted.source.clone(),
             size,
         );
+        snapshot.workspace = admitted.workspace.clone();
         snapshot.context_sources = admitted.context_sources.clone();
         Ok(snapshot)
     }
@@ -220,6 +223,7 @@ impl RunSnapshot {
             self.source.clone(),
             self.size.clone(),
         );
+        snapshot.workspace = self.workspace.clone();
         snapshot.context_sources = self.context_sources.clone();
         snapshot
     }
@@ -234,6 +238,7 @@ impl RunSnapshot {
             run_id,
             title,
             source,
+            workspace: None,
             context_sources: Vec::new(),
             size,
             cursor: initial_cursor(),
@@ -527,6 +532,8 @@ pub struct RunSummary {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<ResolvedSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<openengine_cluster_protocol::RunWorkspace>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub context_sources: Vec<ResolvedSource>,
     pub size: RunSize,
@@ -546,6 +553,7 @@ impl From<&RunSnapshot> for RunSummary {
             run_id: snapshot.run_id.clone(),
             title: snapshot.title.clone(),
             source: snapshot.source.clone(),
+            workspace: snapshot.workspace.clone(),
             context_sources: snapshot.context_sources.clone(),
             size: snapshot.size.clone(),
             cursor: snapshot.cursor.clone(),

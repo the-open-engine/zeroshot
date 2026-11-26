@@ -7,6 +7,31 @@ use sha2::{Digest, Sha256};
 use super::*;
 
 #[test]
+fn host_state_commits_preserve_file_store_ancestor_guards() {
+    let temp = tempdir();
+    let store = store(temp.path());
+    let destination = temp.path().join("ui-workspace-id");
+    for value in [b"first".as_slice(), b"replacement".as_slice()] {
+        let temporary = temp.path().join("state.tmp");
+        let mut staged = crate::execution::platform::private_file(
+            &temporary,
+            crate::execution::platform::FileAccess::CreateNew,
+        )
+        .unwrap();
+        staged.write_all(value).unwrap();
+        staged.sync_all().unwrap();
+        drop(staged);
+        crate::execution::platform::commit_file(&temporary, &destination, temp.path()).unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), value);
+        assert!(!temporary.exists());
+    }
+    // Publication must leave the file store's directory capabilities in force.
+    assert!(store.reclaim().is_ok());
+    #[cfg(windows)]
+    assert!(std::fs::rename(temp.path().join("store"), temp.path().join("moved")).is_err());
+}
+
+#[test]
 fn publication_keeps_parent_guards_and_cleans_stages_after_collisions() {
     let temp = tempdir();
     let directory = paths::Directory::open(temp.path()).unwrap();

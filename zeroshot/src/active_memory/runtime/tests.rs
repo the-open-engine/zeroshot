@@ -587,6 +587,59 @@ fn prepared_memory_keeps_a_frozen_snapshot_after_another_run_updates_the_store()
     assert_eq!(next.snapshot.lessons[0].revision, 2);
 }
 
+#[test]
+fn workspace_memory_recalls_graph_lessons_without_inventing_a_repository_scope() {
+    let directory = tempfile::tempdir().unwrap();
+    let workspace = directory.path().join("files");
+    std::fs::create_dir(&workspace).unwrap();
+    let storage = directory.path().join("memory/lessons.sqlite3");
+    let mut admitted = crate::native_v2_runner::test_support::admitted();
+    admitted.source = None;
+    admitted.workspace = Some(openengine_cluster_protocol::RunWorkspace {
+        placement: openengine_cluster_protocol::WorkspacePlacement::InPlace,
+        local_directory: Some(workspace.to_str().unwrap().into()),
+        seeds: vec![],
+        copy_root: false,
+    });
+    let mut repository = repository_lesson().draft();
+    if let LessonScope::Repository {
+        repository: key, ..
+    } = &mut repository.scope
+    {
+        *key = repository_key(&admitted, &workspace);
+    }
+    let mut graph = graph_lesson().draft();
+    if let LessonScope::Graph { graph_hash, .. } = &mut graph.scope {
+        *graph_hash = authored_graph_hash(&admitted).unwrap();
+    }
+    ActiveMemoryStore::open(&storage)
+        .unwrap()
+        .apply_batch(
+            &[repository, graph]
+                .into_iter()
+                .map(|draft| crate::active_memory::LessonMutation::Upsert {
+                    expected_revision: None,
+                    draft: Box::new(draft),
+                })
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+    let prepared = PreparedActiveMemory::prepare(MemoryPreparation {
+        admitted: &admitted,
+        workspace: &workspace,
+        storage: Some(&storage),
+    })
+    .unwrap()
+    .unwrap();
+    assert!(prepared.repository.is_none());
+    assert_eq!(prepared.snapshot.lessons.len(), 1);
+    assert!(matches!(
+        prepared.snapshot.lessons[0].scope,
+        LessonScope::Graph { .. }
+    ));
+    assert!(prepared.source.tool_context(&query("workspace")).is_empty());
+}
+
 struct NoModelStartup;
 
 #[test]
@@ -768,6 +821,7 @@ async fn steer_whole_text_precedes_memory_without_spending_either_injection_limi
             submission_key: IdempotencyKey::new("steer-memory-budgets").unwrap(),
             submission_digest: Sha256Digest::new("a".repeat(64)).unwrap(),
             admitted: crate::native_v2_contract::AdmittedRun {
+                workspace: None,
                 context_sources: Vec::new(),
                 title: openengine_cluster_protocol::RunTitle::new("Steer memory budgets").unwrap(),
                 graph: serde_json::from_str(include_str!(

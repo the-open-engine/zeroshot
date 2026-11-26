@@ -15,7 +15,11 @@ pub(super) struct Fixture {
 impl Fixture {
     pub(super) fn new() -> Self {
         // Keep the state root short enough for the controller's Unix-domain socket path.
-        let root = TemporaryDirectory::for_test("pc");
+        let temporary_root = std::env::temp_dir();
+        // macOS can report /var under TMPDIR, which guarded file operations refuse.
+        #[cfg(unix)]
+        let temporary_root = temporary_root.canonicalize().unwrap();
+        let root = TemporaryDirectory::new_in("pc", &temporary_root).unwrap();
         let workspace = root.path("workspace space-é & (native)");
         let bin = root.path("bin space-é");
         std::fs::create_dir(&workspace).unwrap();
@@ -128,6 +132,8 @@ impl Fixture {
             .env("OPENAI_API_KEY", "fixture-key")
             .env("UNDECLARED_SECRET", "must-not-inherit");
         for name in [
+            // Keep instrumented CLI profiles outside this disposable workspace.
+            "LLVM_PROFILE_FILE",
             "SystemRoot",
             "WINDIR",
             "COMSPEC",

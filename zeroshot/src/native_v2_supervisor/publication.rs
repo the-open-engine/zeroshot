@@ -43,6 +43,7 @@ pub(super) fn final_preflight(
         current_part_id: snapshot.run_id.clone(),
         title: snapshot.title.clone(),
         source: snapshot.source.clone(),
+        workspace: snapshot.workspace.clone(),
         context_sources: snapshot.context_sources.clone(),
         size: snapshot.size.clone(),
         // Later finalization may advance the cursor; reserve its full existing integer width.

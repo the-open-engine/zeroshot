@@ -46,6 +46,7 @@ if (process.argv.includes('--version')) {
     }
     if (completedStep) fs.writeFileSync('completed.txt', 'retained work');
     if (mode === 'fail' || model === 'retired-model') process.exit(1);
+    if (model === 'requires-completed-work' && !fs.existsSync('completed.txt')) process.exit(44);
     if (process.env.RESUME_RECEIPTS && process.env.ZEROSHOT_NODE_NAME === 'worker' && !prompt.includes('preserved-output')) process.exit(43);
     if (mode === 'volume' && inputBytes < 256 * 1024) process.exit(42);
     fs.writeFileSync('mutation.txt', 'native worker ran');

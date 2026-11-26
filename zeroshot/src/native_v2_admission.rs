@@ -323,6 +323,13 @@ impl NativeV2Admission {
                 "the target must resolve a concrete run size before admission".to_owned(),
             ));
         }
+        if submission.workspace.is_some()
+            && (submission.source.is_some() || !submission.context_sources.is_empty())
+        {
+            return Err(NativeV2AdmissionError::InvalidEnvironment(
+                "workspace mode rejects repository source and context repositories".into(),
+            ));
+        }
         let RunSubmission {
             title,
             graph,
@@ -331,6 +338,7 @@ impl NativeV2Admission {
             environment,
             source,
             context_sources,
+            workspace,
             submission_key,
         } = submission;
         let prepared = prepare_submission(
@@ -340,6 +348,7 @@ impl NativeV2Admission {
                 initial_input,
                 runtime,
                 environment,
+                workspace: workspace.clone(),
                 branch: None,
                 submission_key,
             },
@@ -370,6 +379,7 @@ impl NativeV2Admission {
             environment: prepared.environment,
             source,
             context_sources,
+            workspace,
         })
     }
 
@@ -476,9 +486,16 @@ fn prepare_submission(
         initial_input,
         mut runtime,
         environment,
-        branch: _,
+        branch,
+        workspace,
         submission_key: _,
     } = intent;
+    validate_workspace_mode(workspace.as_ref(), &graph, environment.as_ref())?;
+    if workspace.is_some() && branch.is_some() {
+        return Err(NativeV2AdmissionError::InvalidEnvironment(
+            "workspace mode rejects a Git branch".into(),
+        ));
+    }
     validate_run_environment(&runtime, environment.as_ref())?;
     validate_graph_input(&graph, &initial_input)?;
     loop_limits::bind_input_limits(&mut graph.root, &initial_input)?;
@@ -728,3 +745,28 @@ fn runtime_role(binding: &NodeRuntimeBinding) -> RuntimeRole {
 }
 
 mod wait;
+
+/// Workspace mode is checked after profile expansion and before any source or allocation work.
+pub fn validate_workspace_mode(
+    workspace: Option<&openengine_cluster_protocol::RunWorkspace>,
+    graph: &GraphSpec,
+    environment: Option<&openengine_cluster_protocol::RuntimeEnvironment>,
+) -> Result<(), NativeV2AdmissionError> {
+    let Some(workspace) = workspace else {
+        return Ok(());
+    };
+    workspace
+        .validate()
+        .map_err(|error| NativeV2AdmissionError::InvalidEnvironment(error.into()))?;
+    if !delivery_capabilities(&graph.root).is_empty() || comment_node(&graph.root).is_some() {
+        return Err(NativeV2AdmissionError::InvalidEnvironment(
+            "workspace mode does not support delivery".into(),
+        ));
+    }
+    if environment.is_some_and(|environment| !environment.context_repositories.is_empty()) {
+        return Err(NativeV2AdmissionError::InvalidEnvironment(
+            "workspace mode rejects contextRepositories".into(),
+        ));
+    }
+    Ok(())
+}

@@ -69,6 +69,8 @@ pub struct HostedRunStatusResult {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<ResolvedSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<crate::RunWorkspace>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub context_sources: Vec<ResolvedSource>,
     pub size: RunSize,
@@ -92,6 +94,7 @@ macro_rules! hosted_status_from {
                     current_part_id: result.current_part_id,
                     title: result.title,
                     source: result.source,
+                    workspace: result.workspace,
                     context_sources: result.context_sources,
                     size: result.size,
                     at_cursor: result.at_cursor,
@@ -138,6 +141,8 @@ pub struct HostedRunWatchEventNotification {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<ResolvedSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<crate::RunWorkspace>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub context_sources: Vec<ResolvedSource>,
     pub size: RunSize,
@@ -154,6 +159,7 @@ impl From<RunWatchEventNotification> for HostedRunWatchEventNotification {
             part_id: event.part_id,
             title: event.title,
             source: event.source,
+            workspace: event.workspace,
             context_sources: event.context_sources,
             size: event.size,
             cursor: event.cursor,

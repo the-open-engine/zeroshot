@@ -186,7 +186,11 @@ fn apply_restore(
     sync_directory(workspace)
 }
 
-fn replace_children(tree: &Path, workspace: &Path, preserve_git: bool) -> io::Result<()> {
+pub(crate) fn replace_children(
+    tree: &Path,
+    workspace: &Path,
+    preserve_git: bool,
+) -> io::Result<()> {
     clear_workspace(workspace, preserve_git)?;
     install_children(tree, workspace, preserve_git)
 }

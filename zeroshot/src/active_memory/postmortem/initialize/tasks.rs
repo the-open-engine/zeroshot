@@ -133,7 +133,7 @@ async fn maintenance(
             .map(crate::active_memory::Lesson::version)
             .collect(),
     };
-    let source = SourceGuard::capture(&run.workspace, &snapshot.lessons).await;
+    let source = run.source_guard(&snapshot.lessons).await;
     let definition_file = loaded.export_definition(directory)?;
     let context = loaded
         .proposal_context(
@@ -173,7 +173,7 @@ pub(super) async fn discovery(
 ) -> Result<Vec<TaskRef>> {
     let loaded = history::discovery(session, run).await?;
     let definition_file = loaded.export_definition(directory)?;
-    let source = SourceGuard::capture(&run.workspace, &[]).await;
+    let source = run.source_guard(&[]).await;
     let context = loaded
         .context(session, run)
         .with_source(&source)

@@ -18,7 +18,9 @@ cargo test --locked --package zeroshot --lib --features ui -- \
 
 # Context repositories and environment
 cargo test --locked --package zeroshot --lib --features ui -- \
-  native_v2_admission::tests::context caller_git_config context_git_trust context_path_is_reserved
+  native_v2_admission::tests::context native_v2_admission::tests::workspaces caller_git_config context_git_trust context_path_is_reserved
+cargo test --locked --package zeroshot --lib --features ui -- \
+  active_memory::postmortem::tests::initialization
 cargo test --locked --package openengine-cluster-protocol --test native_v2_run --test native_v2_observation
 cargo test --locked --package openengine-cluster-protocol --lib native_v2_run::environment::tests
 
@@ -88,7 +90,9 @@ cargo test --locked --package zeroshot --features ui --test native_v2_cli_local 
 # Controller shutdown and tool activity
 cargo test --locked --package zeroshot --features ui --test native_v2_cli_portable unix_controller
 cargo test --locked --package zeroshot --features ui --test native_v2_cli_portable tool_activity
-cargo test --locked --package zeroshot --features ui --lib native_v2_portable_controller::process::shutdown_tests
+cargo test --locked --package zeroshot --features ui --lib -- \
+  native_v2_portable_controller::process::shutdown_tests \
+  managed_cleanup_distinguishes_explicit_stop_from_recoverable_shutdown
 
 # Read-only controller inspection and local startup
 cargo test --locked --package zeroshot --features ui --lib -- \

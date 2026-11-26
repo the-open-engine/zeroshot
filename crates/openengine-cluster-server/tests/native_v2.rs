@@ -54,6 +54,8 @@ fn title() -> RunTitle {
 
 fn status(phase: RunStatus, at: u64) -> RunStatusResult {
     RunStatusResult {
+        workspace: None,
+
         steering: Default::default(),
         context_sources: Vec::new(),
         part_id: run_id(),
@@ -146,6 +148,8 @@ impl ClusterBackend for FakeBackend {
             },
             stream(vec![
                 RunSubscriptionItem::Event(RunWatchEventNotification {
+                    workspace: None,
+
                     part_id: run_id(),
                     recorded_at: None,
                     context_sources: Vec::new(),
@@ -165,6 +169,8 @@ impl ClusterBackend for FakeBackend {
                     reason: SubscriptionCloseReason::Done,
                 },
                 RunSubscriptionItem::Event(RunWatchEventNotification {
+                    workspace: None,
+
                     part_id: run_id(),
                     recorded_at: None,
                     context_sources: Vec::new(),
@@ -256,6 +262,8 @@ impl ClusterBackend for FakeBackend {
             5,
         );
         Ok(RunForceResult {
+            workspace: None,
+
             steering: Default::default(),
             context_sources: Vec::new(),
             part_id: result.run_id.clone(),

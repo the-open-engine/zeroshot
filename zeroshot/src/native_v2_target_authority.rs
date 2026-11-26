@@ -147,6 +147,10 @@ pub trait TargetControllerFactory: Send + Sync {
         false
     }
 
+    fn supports_run_workspaces(&self) -> bool {
+        false
+    }
+
     /// Reports support for generic source metadata and private HTTPS/SSH authority.
     fn supports_git_transport(&self) -> bool {
         false
@@ -263,6 +267,10 @@ impl NativeV2TargetAuthority {
 
     fn supports_workspace_checkpoint_opt_out(&self) -> bool {
         self.factory.supports_workspace_checkpoint_opt_out()
+    }
+
+    fn supports_run_workspaces(&self) -> bool {
+        self.factory.supports_run_workspaces()
     }
 
     fn supports_git_transport(&self) -> bool {

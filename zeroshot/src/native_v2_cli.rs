@@ -180,6 +180,7 @@ pub struct RunCommand {
     pub submission_key: Option<IdempotencyKey>,
     /// Send the caller's `GH_TOKEN` with a named-target submission.
     pub forward_github_token: bool,
+    pub workspace: Option<openengine_cluster_protocol::RunWorkspace>,
 }
 
 /// Explicit instance selection for a credential-free Git remote.

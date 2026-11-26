@@ -357,6 +357,7 @@ async fn live_scenarios_are_admissible_full_graphs() {
             let admission = NativeV2Admission
                 .validate_intent(
                     &TargetRunIntent {
+                        workspace: None,
                         environment: None,
                         title: RunTitle::new("Live matrix admission").assert_value(),
                         graph: graph.clone(),

@@ -476,6 +476,7 @@ async fn wave5_cli_contract_default_backend_bounds_recovery_and_redacts_requests
 
         run_id,
         intent: TargetRunIntent {
+            workspace: None,
             environment: None,
             title: RunTitle::new("Redacted request").assert_value(),
             graph,

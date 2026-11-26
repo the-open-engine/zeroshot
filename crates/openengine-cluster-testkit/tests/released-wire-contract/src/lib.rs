@@ -1,4 +1,6 @@
-//! Immutable v17.1.1 initialization controls. No released Rust source is copied or modified.
+//! Immutable pre-workspace main and v17.1.1 controls; pinned sources stay unmodified.
+#[cfg(test)]
+mod pre_workspace_main;
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

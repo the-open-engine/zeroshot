@@ -144,6 +144,8 @@ pub struct RunHistorySummary {
     pub cursor: Option<Cursor>,
     pub terminal: Option<RunHistoryTerminalSynopsis>,
     pub source: Option<ResolvedSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<openengine_cluster_protocol::RunWorkspace>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub context_sources: Vec<ResolvedSource>,
     pub created_at: Option<u64>,
@@ -185,6 +187,8 @@ pub struct RunDefinition {
     pub initial_input: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<ResolvedSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<openengine_cluster_protocol::RunWorkspace>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub context_sources: Vec<ResolvedSource>,
     /// Accepts pre-v1 archives that embedded the unbounded accumulated snapshot. New producers

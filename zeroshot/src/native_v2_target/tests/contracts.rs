@@ -33,13 +33,14 @@ fn profile_operations() -> (
         set_default: true,
     };
     let run = RunProfileRunRequest {
+        workspace: None,
         context_sources: Vec::new(),
         environment: prepared.intent.environment.clone(),
         run_id: prepared.run_id,
         profile: selector.clone(),
         title: prepared.intent.title,
         initial_input: prepared.intent.initial_input,
-        source: prepared.source.assert_value().resolved,
+        source: Some(prepared.source.assert_value().resolved),
         submission_key: prepared.intent.submission_key,
         connections: prepared.connections,
         github_token: prepared.github_token,
@@ -540,6 +541,77 @@ async fn connector_delegates_login_and_rejects_an_unresolved_source_before_submi
         authority.calls().as_slice(),
         [AuthorityCall::Login(_)]
     ));
+}
+
+mod wire_contract {
+    use super::*;
+
+    #[tokio::test]
+    async fn inline_direct_workspace_needs_no_source_or_source_connection() {
+        use zeroshot_engine::native_v2_cli::{execute_native_v2_cli, parse_native_v2_args, NeverDetach};
+        use zeroshot_engine::native_v2_cli::oecp::NamedTargetCliBackend;
+        let root = super::super::fixtures::temp_root();
+        let request = run_request();
+        std::fs::write(
+            root.path("graph.json"),
+            serde_json::to_vec(&request.intent.graph).assert_value(),
+        )
+        .assert_value();
+        std::fs::write(
+            root.path("runtime.json"),
+            serde_json::to_vec(&request.intent.runtime).assert_value(),
+        )
+        .assert_value();
+        std::fs::write(root.path("input.json"), b"null").assert_value();
+        assert!(!root.path(".git").exists());
+        let registry = MemoryRegistry::default();
+        registry
+            .insert(direct_target("http://127.0.0.1:8080"))
+            .assert_value();
+        let authority = FakeAuthority::new("ws://127.0.0.1:8080/native-v2/oecp");
+        let backend = NamedTargetCliBackend::new(NativeV2TargetConnector::new(
+            registry,
+            authority.clone(),
+            FakeDialer::default(),
+        ));
+        let args = [
+            "run",
+            "--target",
+            "vm",
+            "--title",
+            "File workspace",
+            "--graph",
+            root.path("graph.json").to_str().unwrap(),
+            "--runtime-config",
+            root.path("runtime.json").to_str().unwrap(),
+            "--input",
+            root.path("input.json").to_str().unwrap(),
+            "--workspace",
+            "--no-environment",
+            "--detach",
+        ]
+        .map(std::ffi::OsString::from);
+        execute_native_v2_cli(
+            parse_native_v2_args(args).assert_value(),
+            &backend,
+            &mut NeverDetach,
+            &mut Vec::new(),
+        )
+        .await
+        .assert_value();
+        let calls = authority.calls();
+        let AuthorityCall::Submit(_, request) = calls.last().assert_value() else {
+            panic!("no submission");
+        };
+        assert!(request.submission.source.is_none());
+        assert!(request.git_credentials.is_none());
+        assert!(request.connection_resolver.is_none());
+        assert!(request.submission.context_sources.is_empty());
+        assert_eq!(
+            request.submission.workspace.as_ref().unwrap().placement,
+            openengine_cluster_protocol::WorkspacePlacement::Managed
+        );
+    }
 }
 
 #[test]

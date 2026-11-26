@@ -28,6 +28,7 @@ pub(super) fn comment_submission() -> RunSubmission {
         },
     );
     RunSubmission {
+        workspace: None,
         context_sources: Vec::new(),
         title: RunTitle::new("Source-less comment").assert_value(),
         graph,

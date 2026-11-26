@@ -34,9 +34,9 @@ pub const TARGET_SESSION_PATH: &str = "/native-v2/oecp-session";
 pub const TARGET_OECP_PATH: &str = "/native-v2/oecp";
 pub const TARGET_PRIVATE_BOOTSTRAP_PATH: &str = "/native-v2/private-bootstrap";
 pub const TARGET_OPERATOR_DIAGNOSTICS_PATH_PREFIX: &str = "/native-v2/operator-diagnostics/";
-pub const TARGET_DISCOVERY_KIND: &str = "zeroshot.native-v2-target/v4";
+pub const TARGET_DISCOVERY_KIND: &str = "zeroshot.native-v2-target/v5";
 pub const TARGET_CONTROLLER_AUDIENCE: &str = "controller";
-pub const HOSTED_RUNS_KIND: &str = "zeroshot.hosted-runs/v3";
+pub const HOSTED_RUNS_KIND: &str = "zeroshot.hosted-runs/v4";
 pub const RUN_HISTORY_KIND: &str = "zeroshot.run-history/v1";
 pub const CONNECTIONS_KIND: &str = "zeroshot.connections/v1";
 pub const STATIC_CONNECTION_KIND: &str = "static";
@@ -725,6 +725,8 @@ pub struct TargetTaskResolutionDiscovery {
 #[serde(default, rename_all = "snake_case")]
 pub struct TargetDiscoveryExtensions {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_workspaces: Option<crate::RunWorkspacesDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub files: Option<crate::TargetFilesDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resume_runtime: Option<TargetResumeRuntimeDiscovery>,
@@ -838,6 +840,7 @@ impl TargetDiscoveryExtensions {
             && self.runtime_harnesses.is_none()
             && self.run_size_catalog.is_none()
             && self.decision_models.is_none()
+            && self.run_workspaces.is_none()
             && self.git_transport.is_none()
             && self.comment_delivery.is_none()
             && self.task_resolution.is_none()
@@ -845,6 +848,13 @@ impl TargetDiscoveryExtensions {
 }
 
 impl TargetDiscoveryDocument {
+    pub fn with_run_workspaces(mut self) -> Self {
+        self.extensions.run_workspaces = Some(crate::RunWorkspacesDiscovery {
+            kind: crate::RUN_WORKSPACES_KIND.into(),
+        });
+        self
+    }
+
     /// Advertises explicit host support; omission preserves required workspace checkpoints.
     #[must_use]
     pub fn with_workspace_checkpoint_opt_out(mut self) -> Self {

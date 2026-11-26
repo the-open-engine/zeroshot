@@ -74,6 +74,7 @@ pub struct TargetHttpControlAuthority {
 struct RequestCapabilities<'a> {
     runtime: Option<&'a RuntimePlan>,
     git_transport: bool,
+    run_workspaces: bool,
     task_resolution: bool,
     request_ask: bool,
     request_wait: bool,
@@ -466,6 +467,7 @@ impl TargetHttpControlAuthority {
             RequestCapabilities {
                 runtime: Some(&request.submission.runtime),
                 git_transport: request.requires_git_transport(),
+                run_workspaces: request.submission.workspace.is_some(),
                 task_resolution: false,
                 request_ask: graph_has_worker(
                     &request.submission.graph.root,
@@ -614,6 +616,11 @@ fn require_request_capabilities(
     controller: &ControllerDescriptor,
     capabilities: RequestCapabilities<'_>,
 ) -> Result<(), TargetAuthorityError> {
+    if capabilities.run_workspaces && !controller.run_workspaces {
+        return Err(authority_error(
+            "target does not advertise openengine.run-workspaces/v1",
+        ));
+    }
     if capabilities.request_ask && !controller.request_ask {
         return Err(authority_error(
             "target does not advertise openengine.request-ask/v1",

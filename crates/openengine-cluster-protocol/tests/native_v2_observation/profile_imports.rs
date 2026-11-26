@@ -6,6 +6,37 @@ use serde::Deserialize;
 use serde_json::json;
 
 #[test]
+fn workspace_discovery_is_optional_and_has_a_strict_independent_marker() {
+    for authentication in [
+        TargetAuthentication::None,
+        TargetAuthentication::HostedOauth,
+    ] {
+        let original = TargetDiscoveryDocument::direct(authentication);
+        assert!(original.extensions.run_workspaces.is_none());
+        let advertised = original.clone().with_run_workspaces();
+        assert_eq!(advertised.extensions.files, original.extensions.files);
+        assert_eq!(
+            advertised.extensions.saved_profile_imports,
+            original.extensions.saved_profile_imports
+        );
+        assert_eq!(
+            serde_json::to_value(advertised).unwrap()["extensions"]["run_workspaces"],
+            json!({"kind":openengine_cluster_protocol::RUN_WORKSPACES_KIND})
+        );
+    }
+    for marker in [
+        json!({}),
+        json!({"kind":true}),
+        json!({"kind":openengine_cluster_protocol::RUN_WORKSPACES_KIND,"extra":true}),
+    ] {
+        assert!(
+            serde_json::from_value::<TargetDiscoveryExtensions>(json!({"run_workspaces":marker}))
+                .is_err()
+        );
+    }
+}
+
+#[test]
 fn saved_profile_imports_is_an_optional_independent_strict_marker() {
     for authentication in [
         TargetAuthentication::None,

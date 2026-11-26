@@ -281,6 +281,7 @@ async fn admitted_with_output(
         BTreeMap::from([(NodeName::new("work").assert_value(), binding)]),
     );
     admit(RunSubmission {
+        workspace: None,
         context_sources: Vec::new(),
         environment: None,
         title: RunTitle::new("Codex adapter test").assert_value(),

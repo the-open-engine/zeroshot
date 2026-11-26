@@ -80,6 +80,7 @@ async fn admitted_for(
         success_node(),
     ]);
     admit(RunSubmission {
+        workspace: None,
         context_sources: Vec::new(),
         environment: None,
         title: RunTitle::new("Copilot contract test").assert_value(),

@@ -90,6 +90,8 @@ fn graph_result_round_trips_only_in_unfinished_started_phases() {
 #[test]
 fn status_exposes_every_parallel_execution_without_private_identity() {
     let mut result = RunStatusResult {
+        workspace: None,
+
         steering: Default::default(),
         context_sources: Vec::new(),
         part_id: RunId::new("run-1"),
@@ -228,6 +230,8 @@ fn durable_events_carry_run_and_stable_cursor() {
         "passed": true
     });
     let watch = RunWatchEventNotification {
+        workspace: None,
+
         recorded_at: None,
         context_sources: Vec::new(),
         subscription_id: SubscriptionId::new("watch-1"),
@@ -352,6 +356,8 @@ fn force_is_the_only_stop_shape_and_returns_durable_status() {
     );
 
     let result = RunForceResult {
+        workspace: None,
+
         steering: Default::default(),
         context_sources: Vec::new(),
         part_id: RunId::new("run-1"),
@@ -393,6 +399,8 @@ fn controller_availability_is_optional_observation_metadata() {
     use openengine_cluster_protocol::{ControllerObservation, ControllerState};
     for state in [ControllerState::Lost, ControllerState::Unknown] {
         let result = RunStatusResult {
+            workspace: None,
+
             steering: Default::default(),
             context_sources: Vec::new(),
             part_id: RunId::new("run-1"),
@@ -552,46 +560,58 @@ fn logical_publication_status_keeps_the_receipt_and_newest_steers_when_the_physi
 
     let root = "0199f33f-3b44-7d21-9000-000000000031";
     let part = "0199f33f-3b44-7d21-9000-000000000032";
-    let mut physical = publication_with_steers(part);
-    let spare = MAX_REQUEST_RESPONSE_BYTES - 8 - serde_json::to_vec(&physical).assert_value().len();
-    // Distribute padding across portable file names so every publication and steer remains
-    // individually admissible. The qualified cursor alone will use more than the eight bytes left.
-    let RunStatus::Finished { metadata, .. } = &mut physical.status else {
-        unreachable!()
-    };
-    let count = metadata.artifacts.len();
-    for (index, file) in metadata.artifacts.values_mut().enumerate() {
-        let openengine_cluster_protocol::PublishedFile::Managed { address, .. } = file else {
+    for workspace in [
+        None,
+        Some(openengine_cluster_protocol::RunWorkspace {
+            placement: openengine_cluster_protocol::WorkspacePlacement::Managed,
+            local_directory: Some(format!("/selected/{}", "folder-é/".repeat(200))),
+            seeds: Vec::new(),
+            copy_root: true,
+        }),
+    ] {
+        let mut physical = publication_with_steers(part);
+        physical.workspace = workspace;
+        let spare =
+            MAX_REQUEST_RESPONSE_BYTES - 8 - serde_json::to_vec(&physical).assert_value().len();
+        // Distribute padding across portable file names so every publication and steer remains
+        // individually admissible. The qualified cursor alone will use more than the eight bytes left.
+        let RunStatus::Finished { metadata, .. } = &mut physical.status else {
             unreachable!()
         };
-        let pad = spare / count + usize::from(index < spare % count);
-        address.path = openengine_cluster_protocol::FilePath::new(format!(
-            "{}{}",
-            address.path.as_str(),
-            "a".repeat(pad)
-        ))
-        .assert_value();
-    }
-    assert_eq!(
-        serde_json::to_vec(&physical).assert_value().len(),
-        MAX_REQUEST_RESPONSE_BYTES - 8
-    );
-    physical.fit_published_steering().assert_value();
-    assert_eq!(physical.steering.steers.len(), 56);
-    let mut grouped = physical.clone();
-    grouped.run_id = RunId::new(root);
-    grouped.at_cursor = Cursor::new(format!("{part}@v2:1234"));
-    assert!(serde_json::to_vec(&grouped).assert_value().len() > MAX_REQUEST_RESPONSE_BYTES);
-    let mut hosted = HostedRunStatusResult::from(grouped.clone());
-    grouped.fit_published_steering().assert_value();
-    hosted.fit_published_steering().assert_value();
+        let count = metadata.artifacts.len();
+        for (index, file) in metadata.artifacts.values_mut().enumerate() {
+            let openengine_cluster_protocol::PublishedFile::Managed { address, .. } = file else {
+                unreachable!()
+            };
+            let pad = spare / count + usize::from(index < spare % count);
+            address.path = openengine_cluster_protocol::FilePath::new(format!(
+                "{}{}",
+                address.path.as_str(),
+                "a".repeat(pad)
+            ))
+            .assert_value();
+        }
+        assert_eq!(
+            serde_json::to_vec(&physical).assert_value().len(),
+            MAX_REQUEST_RESPONSE_BYTES - 8
+        );
+        physical.fit_published_steering().assert_value();
+        assert_eq!(physical.steering.steers.len(), 56);
+        let mut grouped = physical.clone();
+        grouped.run_id = RunId::new(root);
+        grouped.at_cursor = Cursor::new(format!("{part}@v2:1234"));
+        assert!(serde_json::to_vec(&grouped).assert_value().len() > MAX_REQUEST_RESPONSE_BYTES);
+        let mut hosted = HostedRunStatusResult::from(grouped.clone());
+        grouped.fit_published_steering().assert_value();
+        hosted.fit_published_steering().assert_value();
 
-    assert_eq!(grouped.status, physical.status);
-    assert_eq!(grouped.steering.steers, physical.steering.steers[1..]);
-    assert_eq!(grouped.steering.omitted_steers, 10);
-    let serialized = serde_json::to_vec(&grouped).assert_value();
-    assert!(serialized.len() <= MAX_REQUEST_RESPONSE_BYTES);
-    assert_eq!(serialized, serde_json::to_vec(&hosted).assert_value());
+        assert_eq!(grouped.status, physical.status);
+        assert_eq!(grouped.steering.steers, physical.steering.steers[1..]);
+        assert_eq!(grouped.steering.omitted_steers, 10);
+        let serialized = serde_json::to_vec(&grouped).assert_value();
+        assert!(serialized.len() <= MAX_REQUEST_RESPONSE_BYTES);
+        assert_eq!(serialized, serde_json::to_vec(&hosted).assert_value());
+    }
 }
 
 fn publication_with_steers(part: &str) -> RunStatusResult {

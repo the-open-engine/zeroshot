@@ -5,7 +5,8 @@ description: 'Understand local folders, Git transport and forge delivery as sepa
 # Source-code adapters
 
 Local folders, Git transport, and forge delivery are separate concerns. A local graph without
-delivery needs no source identity. Contained runs require an exact Git source. The existing push,
+delivery needs no source identity. Contained repository runs require an exact Git source;
+explicit [workspace runs](../concepts/execution.md#file-workspaces) use pinned files instead. The existing push,
 PR, and merge nodes keep their receipt, repair, cancellation, and recovery behavior across providers.
 
 | Operation                                    | Required implementation  |

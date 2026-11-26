@@ -22,9 +22,9 @@ async fn wire_contract_mismatch_stops_submission_and_observation_at_http_discove
                 serde_json::from_str::<serde_json::Value>(&hosted_discovery(origin)).assert_value()
             };
             if variant == "hosted-runs" {
-                wire["extensions"]["hosted_runs"]["kind"] = json!("zeroshot.hosted-runs/v2");
+                wire["extensions"]["hosted_runs"]["kind"] = json!("zeroshot.hosted-runs/v3");
             } else {
-                wire["kind"] = json!("zeroshot.native-v2-target/v3");
+                wire["kind"] = json!("zeroshot.native-v2-target/v4");
             }
             ("200 OK", wire.to_string())
         })
@@ -99,7 +99,7 @@ fn assert_incompatibility(message: &str) {
 }
 
 /// Produce the HTTP payloads from the runtime ledger/projector, including a finished notification.
-async fn produced_observation() -> (serde_json::Value, serde_json::Value, String) {
+async fn produced_observation(workspace: bool) -> (serde_json::Value, serde_json::Value, String) {
     use openengine_cluster_protocol::{
         HostedRunStatusResult, HostedRunWatchEventNotification, IdempotencyKey, NodeName,
         PositiveInteger, Sha256Digest, TerminalResult, UnixTimestampMillis,
@@ -112,8 +112,14 @@ async fn produced_observation() -> (serde_json::Value, serde_json::Value, String
     let ledger = Arc::new(FakeRunLedger::new().with_wall_clock(Arc::new(move || {
         UnixTimestampMillis::new(clock.load(Ordering::SeqCst)).assert_value()
     })));
+    let mut submission = exact_run_request().submission;
+    if workspace {
+        submission.source = None;
+        submission.workspace =
+            Some(serde_json::from_value(json!({"placement":"managed"})).assert_value());
+    }
     let admitted = zeroshot_engine::native_v2_admission::NativeV2Admission
-        .admit(exact_run_request().submission)
+        .admit(submission)
         .await
         .assert_value();
     let run_id = RunId::new("active");
@@ -253,7 +259,27 @@ async fn produced_observation() -> (serde_json::Value, serde_json::Value, String
 
 #[tokio::test]
 async fn matching_hosted_wire_contract_preserves_producer_status_mixed_list_and_watch_timing() {
-    let (status, list, stream) = produced_observation().await;
+    matching_hosted_observation(false).await;
+}
+
+#[tokio::test]
+async fn matching_hosted_workspace_wire_contract_preserves_status_list_watch_and_part_identity() {
+    matching_hosted_observation(true).await;
+}
+
+async fn matching_hosted_observation(workspace: bool) {
+    let (status, list, stream) = produced_observation(workspace).await;
+    assert_eq!(status["partId"], "active");
+    assert_eq!(status["currentPartId"], "active");
+    assert_eq!(status.get("workspace").is_some(), workspace);
+    for row in list["runs"].as_array().assert_value() {
+        assert_eq!(row.get("workspace").is_some(), workspace);
+    }
+    for line in stream.lines() {
+        let value: serde_json::Value = serde_json::from_str(line).assert_value();
+        assert_eq!(value["event"].get("workspace").is_some(), workspace);
+        assert_eq!(value["event"]["partId"], "active");
+    }
     assert_eq!(status["status"]["activeExecutions"][0]["startedAt"], 10_000);
     assert_eq!(list["runs"][0]["status"]["phase"], "admitted");
     assert_eq!(list["runs"][1]["status"]["phase"], "running");

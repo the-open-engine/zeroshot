@@ -39,7 +39,7 @@ This page is generated from the checked-in OpenRPC document. Method names, param
 
 | Name | Required | Schema |
 | --- | --- | --- |
-| <code>protocolVersion</code> | Yes | <code>{&quot;const&quot;:&quot;openengine.cluster/v3&quot;,&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>protocolVersion</code> | Yes | <code>{&quot;const&quot;:&quot;openengine.cluster/v4&quot;,&quot;type&quot;:&quot;string&quot;}</code> |
 
 #### Result
 

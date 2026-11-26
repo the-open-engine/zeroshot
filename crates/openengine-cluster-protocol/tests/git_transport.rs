@@ -120,6 +120,7 @@ fn source_omission_and_null_never_materialize_a_dummy_repository() {
         );
     }
     let mut projection = serde_json::to_value(RunStatusResult {
+        workspace: None,
         steering: Default::default(),
         context_sources: Vec::new(),
         part_id: openengine_cluster_protocol::RunId::new("local-folder").clone(),

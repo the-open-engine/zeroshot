@@ -81,7 +81,7 @@ pub(crate) fn materialize_contained_provider_access_with_registry(
     materialize_provider_access_with_registry(runtime, ProviderAccessPlacement::Contained, registry)
 }
 
-/// Composes the production target around exact sourceful run requests.
+/// Composes repository and explicitly source-free workspace runs through ordinary allocation.
 pub async fn build_production_target_authority(
     config: ProductionHostingConfig,
 ) -> Result<NativeV2TargetAuthority, ProductionHostingError> {
@@ -116,6 +116,8 @@ pub struct ProductionHostingConfig {
     /// Private diagnostics collection; the host owns the receiver and durable storage.
     pub operator_diagnostic_output: Option<OperatorDiagnosticOutput>,
     pub workspace_storage: Option<Arc<dyn HostedWorkspaceStorage>>,
+    /// Authenticated file store used to freeze managed workspace inputs before acknowledgement.
+    pub workspace_files: Option<crate::native_v2_files::WorkspaceFiles>,
     /// Allow per-run workspace checkpoint opt-out with host-owned storage. Defaults to false.
     /// The storage callback must honor `HostedWorkspaceRequest::workspace_checkpoints` while
     /// retaining durable histories and delivery state independently of workspace snapshots.
@@ -160,6 +162,8 @@ impl fmt::Debug for ProductionHostingConfig {
 pub struct ProductionTargetControllerFactory {
     config: Arc<ProductionHostingConfig>,
     operator_diagnostics: Arc<OperatorDiagnosticStore>,
+    // Keep freezing and confirmed refusal cleanup atomic with respect to same-key retries.
+    workspace_admission: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl ProductionTargetControllerFactory {
@@ -171,6 +175,7 @@ impl ProductionTargetControllerFactory {
         Self {
             config: Arc::new(config),
             operator_diagnostics,
+            workspace_admission: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -277,6 +282,10 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
         self.config.workspace_checkpoint_opt_out && self.config.workspace_storage.is_some()
     }
 
+    fn supports_run_workspaces(&self) -> bool {
+        true
+    }
+
     fn supports_git_transport(&self) -> bool {
         true
     }
@@ -302,6 +311,28 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
             commit_identity,
             commit_co_author,
         } = request;
+        let workspace_files = submission
+            .workspace
+            .as_ref()
+            .and(self.config.workspace_files.as_ref());
+        let _workspace_admission = if submission.workspace.is_some() {
+            Some(self.workspace_admission.lock().await)
+        } else {
+            None
+        };
+        if submission.workspace.is_some()
+            && (github_token.is_some()
+                || git_credentials.is_some()
+                || commit_identity.is_some()
+                || commit_co_author.is_some()
+                || connection_resolver
+                    .as_ref()
+                    .is_some_and(|resolver| resolver.source_connection.is_some()))
+        {
+            return Err(TargetAuthorityError::invalid(
+                "workspace mode rejects Git source credentials and commit identities",
+            ));
+        }
         prepare_contained_submission(
             &mut submission,
             self.supports_workspace_checkpoint_opt_out(),
@@ -318,17 +349,66 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
                 run_id: receipt.run_id,
             });
         }
-        let environment = match connection_resolver {
-            Some(wire) => {
-                let resolution = build_connection_resolver(run_id.clone(), wire)?;
-                RunEnvironment::with_resolver_for_submission(&submission, connections, resolution)
+        let run_id = if let Some(workspace) = &submission.workspace {
+            if let Some(files) = &self.config.workspace_files {
+                let files = files.clone();
+                let workspace = workspace.clone();
+                let key = submission.submission_key.clone();
+                let run_id = run_id.clone();
+                tokio::task::spawn_blocking(move || {
+                    files.freeze(crate::native_v2_files::FreezeWorkspace {
+                        run_id: &run_id,
+                        submission_key: &key,
+                        workspace: &workspace,
+                        local_root: None,
+                    })
+                })
+                .await
+                .map_err(|_| {
+                    TargetAuthorityError::unavailable("workspace input preparation failed")
+                })?
+                .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?
+            } else if workspace.seeds.is_empty() {
+                run_id
+            } else {
+                return Err(TargetAuthorityError::invalid(
+                    "this host has no authenticated workspace file store",
+                ));
             }
-            None => RunEnvironment::exact_for_submission(&submission, connections),
-        }
-        .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
+        } else {
+            run_id
+        };
+        let environment = (|| {
+            match connection_resolver {
+                Some(wire) => {
+                    let resolution = build_connection_resolver(run_id.clone(), wire)?;
+                    RunEnvironment::with_resolver_for_submission(
+                        &submission,
+                        connections,
+                        resolution,
+                    )
+                }
+                None => RunEnvironment::exact_for_submission(&submission, connections),
+            }
+            .map_err(|error| TargetAuthorityError::invalid(error.to_string()))
+        })();
+        let environment = match environment {
+            Ok(environment) => environment,
+            Err(error) => {
+                if let Some(files) = workspace_files {
+                    files.release(&run_id).map_err(|_| {
+                        TargetAuthorityError::unavailable("workspace input release failed")
+                    })?;
+                }
+                return Err(error);
+            }
+        };
         let receipt = controller
             .submit_with_exact_environment_and_source_credentials(
-                RunSubmitParams { run_id, submission },
+                RunSubmitParams {
+                    run_id: run_id.clone(),
+                    submission,
+                },
                 environment,
                 crate::native_v2_platform::RunSourceCredentials {
                     github_token,
@@ -337,8 +417,27 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
                     commit_co_author,
                 },
             )
-            .await
-            .map_err(project_platform_error)?;
+            .await;
+        // These refusals precede durable acceptance. Ambiguous storage/runtime failures retain
+        // pins so that lost-ack replay and accepted-run recovery never depend on mutable inputs.
+        if let Err(
+            crate::native_v2_platform::NativeV2PlatformError::Admission(_)
+            | crate::native_v2_platform::NativeV2PlatformError::Environment(_)
+            | crate::native_v2_platform::NativeV2PlatformError::PreparationTimeout
+            | crate::native_v2_platform::NativeV2PlatformError::InvalidRequest(_)
+            | crate::native_v2_platform::NativeV2PlatformError::Ledger(
+                crate::v2_run_ledger::RunLedgerError::RunIdConflict
+                | crate::v2_run_ledger::RunLedgerError::SubmissionConflict { .. }
+                | crate::v2_run_ledger::RunLedgerError::AdmittedRunTooLarge { .. },
+            ),
+        ) = &receipt
+            && let Some(files) = workspace_files
+        {
+            files
+                .release(&run_id)
+                .map_err(|_| TargetAuthorityError::unavailable("workspace input release failed"))?;
+        }
+        let receipt = receipt.map_err(project_platform_error)?;
         Ok(TargetRunReceipt {
             current_part_id: receipt.run_id.clone(),
             run_id: receipt.run_id,
@@ -353,7 +452,25 @@ fn prepare_contained_submission(
     crate::native_v2_admission::validate_target_environment(submission.environment.as_ref())
         .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
     validate_contained_runtime(&submission.runtime, workspace_checkpoint_opt_out)?;
-    if submission.source.is_none() {
+    crate::native_v2_admission::validate_workspace_mode(
+        submission.workspace.as_ref(),
+        &submission.graph,
+        submission.environment.as_ref(),
+    )
+    .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
+    if let Some(workspace) = &submission.workspace {
+        if workspace.is_in_place()
+            || workspace.copy_root
+            || workspace.local_directory.is_some()
+            || submission.source.is_some()
+            || !submission.context_sources.is_empty()
+        {
+            return Err(TargetAuthorityError::invalid(
+                "target workspace mode requires managed placement without a Git source or local copyRoot",
+            ));
+        }
+    }
+    if submission.source.is_none() && submission.workspace.is_none() {
         return Err(TargetAuthorityError::invalid(
             "contained runs require a resolved Git source",
         ));
@@ -533,6 +650,7 @@ impl Default for ProductionHostingConfig {
             memory_backend: None,
             operator_diagnostic_output: None,
             workspace_storage: None,
+            workspace_files: None,
             workspace_checkpoint_opt_out: false,
             suspension: None,
             request_ask: false,

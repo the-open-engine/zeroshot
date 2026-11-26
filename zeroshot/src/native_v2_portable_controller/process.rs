@@ -46,6 +46,8 @@ struct PortableBootstrapDocument {
     delivery_receipt: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     checkpoint: Option<crate::native_v2_supervisor::checkpoints::CheckpointRestore>,
+    #[serde(default)]
+    managed_restart: bool,
     preparation_timeout_ms: u64,
     run_id: RunId,
     delivery_run_id: RunId,
@@ -103,6 +105,7 @@ impl PortableBootstrapDocument {
             return Err(PortableControllerError::Bootstrap);
         }
         Ok(PortableControllerBootstrap {
+            managed_restart: self.managed_restart,
             predecessor: self.predecessor,
             request_resolution: self.request_resolution,
             delivery_receipt: self.delivery_receipt,
@@ -239,6 +242,7 @@ async fn start_controller_process(
                     Some(preparation),
                 )
                 .await?;
+                let file_publisher = local_file_publisher(admitted, &workspace, &storage)?;
                 crate::native_v2_local::build_local_process_candidate(
                     crate::native_v2_local::LocalProcessCandidateRequest {
                         delivery_receipt,
@@ -258,11 +262,7 @@ async fn start_controller_process(
                 )
                 .map(|runner| {
                     let mut runtime = PortableRuntime::new(runner);
-                    runtime.file_publisher = Some(Arc::new(
-                        crate::native_v2_files::publication::LocalFilePublisher {
-                            workspace: workspace.clone(),
-                        },
-                    ));
+                    runtime.file_publisher = Some(file_publisher);
                     runtime
                 })
             },
@@ -271,6 +271,40 @@ async fn start_controller_process(
         .await?,
     );
     controller.bind().await
+}
+
+fn local_file_publisher(
+    admitted: &crate::native_v2_contract::AdmittedRun,
+    workspace: &Path,
+    storage: &Path,
+) -> Result<
+    Arc<dyn crate::native_v2_files::publication::RunFilePublisher>,
+    crate::native_v2_local::LocalCompositionError,
+> {
+    use crate::native_v2_files::publication::{LocalFilePublisher, ManagedFilePublisher};
+    use crate::native_v2_local::LocalCompositionError;
+
+    if admitted
+        .workspace
+        .as_ref()
+        .is_some_and(|workspace| !workspace.is_in_place())
+    {
+        let state = storage
+            .parent()
+            .and_then(Path::parent)
+            .ok_or(LocalCompositionError::Storage)?;
+        let (store, identity, _) = crate::native_v2_cli::files::local_file_store_at(state)
+            .map_err(|_| LocalCompositionError::Storage)?;
+        Ok(Arc::new(ManagedFilePublisher {
+            workspace: workspace.to_owned(),
+            store: Arc::new(store),
+            identity,
+        }))
+    } else {
+        Ok(Arc::new(LocalFilePublisher {
+            workspace: workspace.to_owned(),
+        }))
+    }
 }
 
 pub fn load_bootstrap_file(
@@ -313,6 +347,7 @@ fn encode_bootstrap(
         .filter(|milliseconds| *milliseconds > 0)
         .ok_or(PortableControllerError::Bootstrap)?;
     let document = PortableBootstrapDocument {
+        managed_restart: bootstrap.managed_restart,
         predecessor: bootstrap.predecessor.clone(),
         request_resolution: bootstrap.request_resolution.clone(),
         delivery_receipt: bootstrap.delivery_receipt.clone(),

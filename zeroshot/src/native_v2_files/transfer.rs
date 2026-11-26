@@ -174,6 +174,14 @@ pub fn validate_transfer(input: &mut dyn Read) -> Result<Vec<FileEntry>> {
 
 /// Encode one regular file or directory tree; links and special files are rejected.
 pub fn pack(source: &Path, output: &mut dyn Write) -> Result<()> {
+    pack_with_permissions(source, output).map(|_| ())
+}
+
+// Workspace root copies retain executable bits privately without changing the file wire format.
+pub(super) fn pack_with_permissions(
+    source: &Path,
+    output: &mut dyn Write,
+) -> Result<Vec<(FilePath, u32)>> {
     let source = std::path::absolute(source)?;
     let _ancestors = paths::guard_ancestors(&source)?;
     let file = paths::open_source(&source)?;
@@ -182,15 +190,18 @@ pub fn pack(source: &Path, output: &mut dyn Write) -> Result<()> {
         entries: 1,
         metadata: 0,
         bytes: 12,
+        executable: Vec::new(),
     };
     pack_entry((&source, file), "", output, &mut budget)?;
-    output.write_all(&0_u32.to_be_bytes())
+    output.write_all(&0_u32.to_be_bytes())?;
+    Ok(budget.executable)
 }
 
 struct PackBudget {
     entries: usize,
     metadata: usize,
     bytes: u64,
+    executable: Vec<(FilePath, u32)>,
 }
 
 fn pack_entry(
@@ -207,6 +218,14 @@ fn pack_entry(
     }
     let metadata = file.metadata()?;
     let path = FilePath::new(member).map_err(invalid)?;
+    #[cfg(unix)]
+    if metadata.is_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let executable = metadata.permissions().mode() & 0o111;
+        if executable != 0 {
+            budget.executable.push((path.clone(), executable));
+        }
+    }
     let kind = if metadata.is_dir() {
         FileEntryKind::Directory
     } else {

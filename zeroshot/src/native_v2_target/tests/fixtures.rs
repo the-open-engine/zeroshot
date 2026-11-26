@@ -504,6 +504,7 @@ pub(super) fn exact_run_request() -> TargetRunRequest {
     TargetRunRequest {
         run_id: request.run_id,
         submission: openengine_cluster_protocol::RunSubmission {
+            workspace: None,
             context_sources: Vec::new(),
             environment: None,
             title: request.intent.title,

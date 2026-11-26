@@ -342,6 +342,28 @@ impl ProductionCapsuleAllocator {
         } else {
             Vec::new()
         };
+        if request.install_source
+            && request.admitted.workspace.is_some()
+            && request.retained_restore.is_none()
+        {
+            if let Some(files) = self.config.workspace_files.clone() {
+                let run_id = request.delivery_run_id.clone();
+                let workspace = filesystem.workspace.clone();
+                // Like filesystem preparation, finish before yielding cleanup authority. A
+                // cancelled allocation must not leave a background workspace writer.
+                files
+                    .materialize(&run_id, &workspace)
+                    .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+                transfer_retained_workspace_to_writer(&filesystem.workspace, active_process_pool)?;
+            } else if request
+                .admitted
+                .workspace
+                .as_ref()
+                .is_some_and(|workspace| !workspace.seeds.is_empty())
+            {
+                return Err(CapsuleAllocationUnavailable::Runtime);
+            }
+        }
         self.install_capsule_source(request, &filesystem, active_process_pool)
             .await?;
         let hosted_workspace = self
@@ -479,6 +501,7 @@ impl ProductionCapsuleAllocator {
             state._loss_sender.clone(),
         );
         let cleanup = Arc::new(ProductionCapsuleCleanup {
+            workspace_files: self.config.workspace_files.clone(),
             run_id: run_id.clone(),
             state,
             active: Arc::downgrade(&self.active),
@@ -499,13 +522,7 @@ impl ProductionCapsuleAllocator {
             }
         }
         Ok(AllocatedCapsule {
-            file_publisher: self.config.file_store.as_ref().map(|(store, identity)| {
-                Arc::new(crate::native_v2_files::publication::ManagedFilePublisher {
-                    workspace: paths.workspace.clone(),
-                    store: store.clone(),
-                    identity: identity.clone(),
-                }) as Arc<dyn crate::native_v2_files::publication::RunFilePublisher>
-            }),
+            file_publisher: self.file_publisher(&paths.workspace),
             node_instance_floor: Default::default(),
             runner,
             cleanup,
@@ -516,40 +533,15 @@ impl ProductionCapsuleAllocator {
         })
     }
 
-    fn prepare_capsule_workspace(
-        &self,
-        pending: &PendingCapsule<'_>,
-        request: &CapsuleBuildRequest<'_>,
-        paths: &CapsuleBuildPaths,
-    ) -> Result<CapsuleFilesystem, CapsuleAllocationUnavailable> {
-        if request.install_source {
-            pending.state.create_run_directory()?;
-        } else {
-            pending.state.capture_run_directory()?;
-        }
-        if request.transfer_retained_workspace {
-            transfer_retained_workspace_to_writer(&paths.workspace, pending.process_pool)?;
-        }
-        let filesystem =
-            (self.prepare_filesystem)(&paths.workspace, &paths.runtime_home, pending.process_pool)?;
-        let identity = pending
-            .process_pool
-            .identity(HostedProcessScope::Environment)
-            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
-        #[cfg(test)]
-        let owner = (!self.portable_test_processes()).then_some(identity);
-        #[cfg(not(test))]
-        let owner = Some(identity);
-        environment::prepare_tools(&pending.state.run_root, owner)?;
-        Ok(filesystem)
-    }
-
     async fn install_capsule_source(
         &self,
         request: &CapsuleBuildRequest<'_>,
         filesystem: &CapsuleFilesystem,
         process_pool: HostedProcessPool,
     ) -> Result<(), CapsuleAllocationUnavailable> {
+        if request.admitted.workspace.is_some() {
+            return Ok(());
+        }
         let resolved = request
             .admitted
             .source
@@ -740,6 +732,9 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
         exit: RunRuntimeExit,
     ) -> Result<CapsuleDestroyed, CapsuleCleanupUnavailable> {
         let _turn = self.allocation_turns.lock(run_id).await;
+        let origin = read_recovery(&recovery_path(&self.config.storage_root, run_id))
+            .and_then(|document| document.delivery_run_id)
+            .unwrap_or_else(|| run_id.clone());
         let state = self.active.lock().await.get(run_id).cloned();
         if let Some(state) = state {
             cleanup_state(run_id, &state, &self.active, exit).await?;
@@ -785,6 +780,15 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
                     exit,
                 })?;
             }
+        }
+        if matches!(
+            exit,
+            RunRuntimeExit::Completed | RunRuntimeExit::ForceStopped
+        ) && let Some(files) = &self.config.workspace_files
+        {
+            files
+                .release(&origin)
+                .map_err(|_| CapsuleCleanupUnavailable)?;
         }
         Ok(CapsuleDestroyed::confirmed())
     }
@@ -973,6 +977,11 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
         )
         .map_err(|_| CapsuleCleanupUnavailable)?;
         remove_run_directory(&root)?;
+        if let Some(files) = &self.config.workspace_files {
+            files
+                .release(delivery_run_id)
+                .map_err(|_| CapsuleCleanupUnavailable)?;
+        }
         document.recoverable = false;
         write_recovery(&metadata_path, &document)?;
         Ok(true)
@@ -1093,6 +1102,7 @@ pub(super) fn monitor_workspace_identity(
 }
 
 struct ProductionCapsuleCleanup {
+    workspace_files: Option<crate::native_v2_files::WorkspaceFiles>,
     run_id: RunId,
     state: Arc<ProductionCapsuleState>,
     active: Weak<Mutex<BTreeMap<RunId, Arc<ProductionCapsuleState>>>>,
@@ -1108,6 +1118,15 @@ impl CapsuleCleanup for ProductionCapsuleCleanup {
             return Err(CapsuleCleanupUnavailable);
         };
         cleanup_state(&self.run_id, &self.state, &active, exit).await?;
+        if matches!(
+            exit,
+            RunRuntimeExit::Completed | RunRuntimeExit::ForceStopped
+        ) && let Some(files) = &self.workspace_files
+        {
+            files
+                .release(&self.state.delivery_run_id)
+                .map_err(|_| CapsuleCleanupUnavailable)?;
+        }
         Ok(CapsuleDestroyed::confirmed())
     }
 }

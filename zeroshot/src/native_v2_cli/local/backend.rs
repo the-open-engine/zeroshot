@@ -60,6 +60,15 @@ fn local_restore_selection(
     recovery: &LocalRecoveryDocument,
     discard_workspace_changes: bool,
 ) -> Result<Option<CheckpointRestoreSelection>, NativeV2CliError> {
+    if recovery
+        .submission
+        .workspace
+        .as_ref()
+        .is_some_and(|workspace| workspace.is_in_place())
+        && (discard_workspace_changes || matches!(from, Some(RunResumeFrom::Checkpoint { .. })))
+    {
+        return Err(NativeV2CliError::Usage("in-place workspaces cannot restore snapshots; use --restart to keep the current folder contents after a failed run".into()));
+    }
     if !recovery.workspace_checkpoints_enabled()
         && (discard_workspace_changes || matches!(from, Some(RunResumeFrom::Checkpoint { .. })))
     {
@@ -375,8 +384,9 @@ impl LocalCliBackend {
             }
             (recovery, claim)
         };
-        self.start_local_successor(params, recovery, discard_workspace_changes)
-            .await
+        // Successor startup carries the prepared graph and checkpoint state; keep its large
+        // future out of the native CLI's bounded resume stack.
+        Box::pin(self.start_local_successor(params, recovery, discard_workspace_changes)).await
     }
 
     async fn retain_predecessor_delivery(
@@ -676,6 +686,9 @@ impl LocalCliBackend {
             &recovery.workspace,
         )
         .map_err(local_error)?;
+        // Keep recovery inspection off the native CLI's bounded stack, before constructing
+        // the large prepared run (including its graph, environment and native configuration).
+        let managed_restart = Box::pin(self.managed_restart_required(params, recovery)).await?;
         Ok(PreparedLocalRun {
             local_branch: recovery.local_branch.clone(),
             invoking_workspace: recovery.invoking_workspace.clone(),
@@ -691,6 +704,7 @@ impl LocalCliBackend {
             git_credentials,
             workspace: recovery.workspace.clone(),
             native_environment,
+            managed_restart,
         })
     }
 }

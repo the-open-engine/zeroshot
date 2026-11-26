@@ -676,6 +676,7 @@ pub(super) async fn steer_record() -> (
             submission_digest: openengine_cluster_protocol::Sha256Digest::new("a".repeat(64))
                 .assert_value(),
             admitted: crate::native_v2_contract::AdmittedRun {
+                workspace: None,
                 context_sources: Vec::new(),
                 title: openengine_cluster_protocol::RunTitle::new("Steer hook").assert_value(),
                 graph,

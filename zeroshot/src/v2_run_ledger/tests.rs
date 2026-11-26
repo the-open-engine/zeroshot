@@ -34,6 +34,7 @@ fn admitted_run() -> AdmittedRun {
     ))
     .assert_value();
     AdmittedRun {
+        workspace: None,
         context_sources: Vec::new(),
         environment: None,
         title: RunTitle::new("Ledger test").assert_value(),

@@ -712,6 +712,7 @@ async fn submit_through_cli(
     let mut output = Vec::new();
     let outcome = execute_native_v2_cli_with_context(
         NativeV2CliCommand::Run(Box::new(RunCommand {
+            workspace: None,
             controller: Default::default(),
             cwd: None,
             worktree: None,

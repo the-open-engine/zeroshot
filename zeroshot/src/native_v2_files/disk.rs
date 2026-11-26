@@ -742,6 +742,16 @@ impl TargetFileHost for DiskFileStore {
         Ok(pin.clone())
     }
 
+    fn pin_exists(&self, access: &FileAccess<'_>, pin: &FilePin) -> Result<bool> {
+        self.member_authority(access, &Self::staged_source(pin)?, FileAction::Pin)?;
+        let (_lock, catalog) = self.load()?;
+        if !catalog.pins.contains_key(&self.pin_key(access, pin)?) {
+            return Ok(false);
+        }
+        self.retained_pin(access, pin, &catalog)?;
+        Ok(true)
+    }
+
     fn read_pin(
         &self,
         access: &FileAccess<'_>,

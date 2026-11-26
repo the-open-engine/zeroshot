@@ -166,6 +166,7 @@ pub(crate) fn replacement_submission(
     };
     let runtime = resolve(config, &graph);
     let mut submission = openengine_cluster_protocol::RunSubmission {
+        workspace: admitted.workspace.clone(),
         title: admitted.title.clone(),
         graph,
         initial_input: admitted.initial_input.clone(),

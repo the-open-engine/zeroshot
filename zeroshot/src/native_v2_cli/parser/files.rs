@@ -195,3 +195,26 @@ fn writable(scope: &FileScope) -> Result<(), NativeV2CliError> {
     }
     Ok(())
 }
+
+pub(super) fn workspace_seed(value: String) -> Result<FileSelection, NativeV2CliError> {
+    let (scope, value) = value
+        .split_once(':')
+        .ok_or_else(|| convert::usage("workspace seed must use user:PATH or org:PATH"))?;
+    let scope = match scope {
+        "user" => FileScope::User,
+        "org" => FileScope::Org,
+        _ => {
+            return Err(convert::usage(
+                "workspace seed must use user:PATH or org:PATH",
+            ));
+        }
+    };
+    let (selected, member) = value.split_once('#').unwrap_or((value, ""));
+    Ok(FileSelection {
+        address: FileAddress {
+            scope,
+            path: path(selected.into(), true)?,
+        },
+        member: path(member.into(), false)?,
+    })
+}

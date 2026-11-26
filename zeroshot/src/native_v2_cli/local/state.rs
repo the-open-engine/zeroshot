@@ -1,12 +1,15 @@
 use std::ffi::OsString;
 use std::path::Path;
 
-use openengine_cluster_protocol::{RunId, is_canonical_uuid_v7};
+use openengine_cluster_protocol::{RunId, RunResumeFrom, is_canonical_uuid_v7};
 use tokio::process::Command;
 
 use crate::execution::platform::{FileAccess, private_file};
 use super::super::support::{CommitPaths, cleanup_temporary, write_and_commit};
-use super::{LocalRecoveryDocument, NativeV2CliError, local_io, local_message};
+use super::{
+    LocalRecoveryDocument, NativeV2CliError, RunLedger, SqliteRunLedger, local_error, local_io,
+    local_message,
+};
 
 pub(super) fn validate_local_run_id(run_id: &RunId) -> Result<(), NativeV2CliError> {
     is_canonical_uuid_v7(run_id)
@@ -176,3 +179,35 @@ impl LocalRecoveryDocument {
 #[cfg(test)]
 #[path = "state/tests.rs"]
 mod tests;
+
+impl super::LocalCliBackend {
+    pub(super) async fn managed_restart_required(
+        &self,
+        params: &openengine_cluster_protocol::RunResumeParams,
+        recovery: &LocalRecoveryDocument,
+    ) -> Result<bool, NativeV2CliError> {
+        if !matches!(params.from, None | Some(RunResumeFrom::Restart {}))
+            || !recovery
+                .submission
+                .workspace
+                .as_ref()
+                .is_some_and(|workspace| !workspace.is_in_place())
+            || recovery.workspace_checkpoints_enabled()
+        {
+            return Ok(false);
+        }
+        let ledger = SqliteRunLedger::open_read_only(self.paths(&params.run_id)?.ledger())
+            .map_err(local_error)?;
+        let stored = ledger
+            .get(&params.run_id)
+            .await
+            .map_err(local_error)?
+            .ok_or_else(|| local_message("predecessor ledger is unavailable"))?;
+        // A successor restarts at its original execution seed. Keep the corresponding live
+        // files when completed work is retained; original inputs only match an empty seed.
+        Ok(
+            stored.snapshot.phase != crate::v2_run_ledger::RunPhase::Suspended
+                && stored.snapshot.execution_seed.is_empty(),
+        )
+    }
+}

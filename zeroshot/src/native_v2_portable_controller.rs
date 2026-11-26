@@ -135,6 +135,7 @@ pub(crate) struct RuntimePreparation {
 }
 
 pub struct PortableControllerBootstrap {
+    pub managed_restart: bool,
     pub predecessor: Option<RunId>,
     pub request_resolution: Option<openengine_cluster_protocol::RequestResolution>,
     pub delivery_receipt: Option<serde_json::Value>,

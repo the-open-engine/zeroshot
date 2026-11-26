@@ -494,6 +494,7 @@ fn live_submission(
     (title, run): (&str, &str),
 ) -> RunSubmission {
     RunSubmission {
+        workspace: None,
         context_sources: Vec::new(),
         title: RunTitle::new(title).assert_value(),
         graph,

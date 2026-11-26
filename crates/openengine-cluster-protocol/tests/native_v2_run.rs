@@ -241,6 +241,7 @@ fn submit_and_list_results_expose_only_public_run_identity_and_status() {
 
     let result = RunListResult {
         runs: vec![RunStatusResult {
+            workspace: None,
             part_id: run_id.clone(),
             current_part_id: run_id.clone(),
             steering: Default::default(),

@@ -110,15 +110,22 @@ impl PortableRunController {
         expected: Option<super::PortableControllerReady>,
     ) -> Result<Self, PortableControllerError> {
         let (lease, ledger) = open_observer_storage(&paths, expected.as_ref())?;
-        if !validate_existing_run(ledger.as_ref(), &run_id).await? {
-            return Err(PortableControllerError::DurableIdentity);
-        }
-        let allocator = Arc::new(SingleRunAllocator::new(
+        let existing = validate_existing_run(ledger.as_ref(), &run_id)
+            .await?
+            .ok_or(PortableControllerError::DurableIdentity)?;
+        let mut allocator = SingleRunAllocator::new(
             run_id.clone(),
             None,
             lease.clone(),
             paths.storage().join("checkpoints"),
-        ));
+        );
+        allocator.managed_workspace = existing
+            .workspace
+            .as_ref()
+            .filter(|workspace| !workspace.is_in_place())
+            .and_then(|workspace| workspace.local_directory.as_ref())
+            .map(PathBuf::from);
+        let allocator = Arc::new(allocator);
         let inner = Arc::new(
             NativeV2PlatformController::new(ledger, allocator)
                 .await?
@@ -172,6 +179,14 @@ impl PortableRunController {
             prepared.lease.clone(),
             prepared.paths.storage().join("checkpoints"),
         );
+        allocator.stopping = prepared.stopping.clone();
+        allocator.workspace_lease = prepared_runtime.workspace_lease.clone();
+        allocator.managed_workspace = prepared
+            .admitted
+            .workspace
+            .as_ref()
+            .filter(|workspace| !workspace.is_in_place())
+            .map(|_| bootstrap.workspace.clone());
         allocator.hooks = EnvironmentHooks::for_run(
             &bootstrap,
             prepared_runtime.workspace_identity.as_ref(),
@@ -395,7 +410,9 @@ async fn prepare_controller_start(
         .environment
         .for_runtime(&admitted.runtime, admitted.environment.as_ref())?;
     let (paths, lease, ledger) = open_controller_storage(&bootstrap.storage)?;
-    let existing = validate_existing_run(ledger.as_ref(), &bootstrap.run_id).await?;
+    let existing = validate_existing_run(ledger.as_ref(), &bootstrap.run_id)
+        .await?
+        .is_some();
     Ok(PreparedControllerStart {
         stopping: None,
         admitted,
@@ -681,8 +698,20 @@ fn configure_workspace_checkpoints(
         inner: runtime.cleanup,
         directory: prepared.paths.storage().join("checkpoints"),
         repository: bootstrap.checkpoint_repository.clone(),
+        managed_workspace: prepared
+            .admitted
+            .workspace
+            .as_ref()
+            .filter(|workspace| !workspace.is_in_place())
+            .map(|_| bootstrap.workspace.clone()),
     });
-    if prepared.admitted.runtime.workspace_checkpoints {
+    if prepared.admitted.runtime.workspace_checkpoints
+        && !prepared
+            .admitted
+            .workspace
+            .as_ref()
+            .is_some_and(|workspace| workspace.is_in_place())
+    {
         use crate::native_v2_supervisor::checkpoints::{
             ResticCheckpointStore, ResticCheckpointStoreRequest,
         };
@@ -733,6 +762,16 @@ async fn restore_execution_seed(
     use crate::native_v2_supervisor::checkpoints::{RestoreAttempt, RestoreOptions, restore_with};
     match &bootstrap.checkpoint {
         Some(selection) => {
+            if bootstrap
+                .submission
+                .workspace
+                .as_ref()
+                .is_some_and(|workspace| workspace.is_in_place())
+            {
+                return Err(PortableControllerError::Restore(std::io::Error::other(
+                    "in-place workspaces cannot be restored; resume with the current folder contents",
+                )));
+            }
             // Selection was authorized against the predecessor's retained checkpoint. The
             // successor's policy controls future captures, not availability of that snapshot.
             restore_with(
@@ -750,7 +789,33 @@ async fn restore_execution_seed(
             .await
             .map_err(|error| PortableControllerError::Restore(error.0))
         }
-        None => Ok(Vec::new()),
+        None => {
+            if bootstrap.managed_restart {
+                if !bootstrap
+                    .submission
+                    .workspace
+                    .as_ref()
+                    .is_some_and(|workspace| !workspace.is_in_place())
+                {
+                    return Err(PortableControllerError::Bootstrap);
+                }
+                let state = bootstrap
+                    .storage
+                    .parent()
+                    .and_then(Path::parent)
+                    .ok_or(PortableControllerError::Bootstrap)?;
+                let files = crate::native_v2_cli::files::workspace_files(state)
+                    .map_err(|_| PortableControllerError::Bootstrap)?;
+                let origin = bootstrap.delivery_run_id.clone();
+                let workspace = bootstrap.workspace.clone();
+                // Hold both leases until an admitted replacement finishes, even if startup is
+                // cancelled. No background writer may outlive this preparation future.
+                files
+                    .restart(&origin, &workspace)
+                    .map_err(PortableControllerError::Restore)?;
+            }
+            Ok(Vec::new())
+        }
     }
 }
 
@@ -759,6 +824,7 @@ pub(super) struct PortableCheckpointCleanup {
     pub(super) inner: Arc<dyn CapsuleCleanup>,
     pub(super) directory: PathBuf,
     pub(super) repository: PathBuf,
+    pub(super) managed_workspace: Option<PathBuf>,
 }
 
 #[async_trait]
@@ -768,17 +834,22 @@ impl CapsuleCleanup for PortableCheckpointCleanup {
         exit: RunRuntimeExit,
     ) -> Result<CapsuleDestroyed, CapsuleCleanupUnavailable> {
         let destroyed = self.inner.destroy_or_confirm_absent(exit).await?;
+        let explicit_stop = explicit_force_stop(exit, self.stopping.as_ref());
+        if matches!(exit, RunRuntimeExit::Completed) || explicit_stop {
+            if let Some(workspace) = &self.managed_workspace {
+                remove_directory_if_present(workspace).map_err(|_| CapsuleCleanupUnavailable)?;
+                crate::native_v2_cli::local::release_workspace_inputs(
+                    self.directory.parent().ok_or(CapsuleCleanupUnavailable)?,
+                )
+                .map_err(|_| CapsuleCleanupUnavailable)?;
+            }
+        }
         // Provider cleanup is authoritative; checkpoint scratch collection is best effort.
         let _ = remove_directory_if_present(&self.directory.join("staging"));
         // Explicitly stopped runs have no durable terminal path that can perform post-terminal GC.
         // Stopping discards the whole lineage: every catalog naming the shared repository goes
         // before the repository, so no predecessor or successor lists deleted snapshots.
-        if matches!(exit, RunRuntimeExit::ForceStopped)
-            && !self
-                .stopping
-                .as_ref()
-                .is_some_and(|stopping| *stopping.borrow())
-        {
+        if explicit_stop {
             crate::native_v2_supervisor::checkpoints::discard_lineage(
                 &self.directory,
                 &self.repository,
@@ -793,8 +864,16 @@ fn remove_directory_if_present(path: &Path) -> io::Result<()> {
     crate::native_v2_supervisor::checkpoints::filesystem::remove_disposable_tree(path)
 }
 
+fn explicit_force_stop(exit: RunRuntimeExit, stopping: Option<&watch::Receiver<bool>>) -> bool {
+    matches!(exit, RunRuntimeExit::ForceStopped)
+        && !stopping.is_some_and(|stopping| *stopping.borrow())
+}
+
 struct SingleRunAllocator {
     checkpoint_directory: PathBuf,
+    managed_workspace: Option<PathBuf>,
+    workspace_lease: Option<Arc<ControllerLease>>,
+    stopping: Option<watch::Receiver<bool>>,
     run_id: RunId,
     runtime: Mutex<Option<PortableRuntime>>,
     hooks: Option<Arc<EnvironmentHooks>>,
@@ -813,6 +892,9 @@ impl SingleRunAllocator {
         let (loss_sender, loss_receiver) = watch::channel(false);
         Self {
             checkpoint_directory,
+            managed_workspace: None,
+            workspace_lease: None,
+            stopping: None,
             run_id,
             runtime: Mutex::new(runtime),
             hooks: None,
@@ -916,7 +998,34 @@ impl CapsuleAllocator for SingleRunAllocator {
         }
         if let Some(runtime) = self.runtime.lock().await.take() {
             runtime.cleanup.destroy_or_confirm_absent(exit).await?;
-        } else if matches!(exit, RunRuntimeExit::ForceStopped) {
+        } else if explicit_force_stop(exit, self.stopping.as_ref()) {
+            if let Some(workspace) = &self.managed_workspace {
+                // A reconstructed controller must exclude another folder owner too.
+                let _lease = if self.workspace_lease.is_none() && workspace.exists() {
+                    let state = self
+                        .checkpoint_directory
+                        .parent()
+                        .and_then(Path::parent)
+                        .and_then(Path::parent)
+                        .ok_or(CapsuleCleanupUnavailable)?;
+                    let path =
+                        crate::native_v2_cli::local::local_workspace_lease_path(state, workspace)
+                            .map_err(|_| CapsuleCleanupUnavailable)?;
+                    Some(
+                        ControllerLease::acquire_workspace(&path, workspace)
+                            .map_err(|_| CapsuleCleanupUnavailable)?,
+                    )
+                } else {
+                    None
+                };
+                remove_directory_if_present(workspace).map_err(|_| CapsuleCleanupUnavailable)?;
+                crate::native_v2_cli::local::release_workspace_inputs(
+                    self.checkpoint_directory
+                        .parent()
+                        .ok_or(CapsuleCleanupUnavailable)?,
+                )
+                .map_err(|_| CapsuleCleanupUnavailable)?;
+            }
             crate::native_v2_supervisor::checkpoints::discard_recorded_lineage(
                 &self.checkpoint_directory,
             )
@@ -987,12 +1096,12 @@ fn workspace_is_lost(
 async fn validate_existing_run(
     ledger: &dyn RunLedger,
     run_id: &RunId,
-) -> Result<bool, PortableControllerError> {
+) -> Result<Option<crate::v2_run_ledger::RunSummary>, PortableControllerError> {
     let runs = ledger.list().await?;
     if runs.len() > 1 || runs.first().is_some_and(|run| &run.run_id != run_id) {
         return Err(PortableControllerError::DurableIdentity);
     }
-    Ok(!runs.is_empty())
+    Ok(runs.into_iter().next())
 }
 
 #[derive(Clone, Debug)]

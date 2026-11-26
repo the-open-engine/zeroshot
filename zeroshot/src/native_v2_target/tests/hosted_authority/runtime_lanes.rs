@@ -633,6 +633,62 @@ async fn old_hosted_target_rejects_new_git_forms_before_access_token_or_body() {
     }
 }
 
+mod wire_contract {
+    use super::*;
+
+    #[tokio::test]
+    async fn workspace_routes_require_capability_before_credentials_or_submission() {
+        let (_root, target, record, authority) =
+            hosted_authority_with(HostedCapability::Git(None)).await;
+        let mut request = generic_git_request(false, false);
+        request.submission.source = None;
+        request.submission.workspace = Some(openengine_cluster_protocol::RunWorkspace {
+            placement: openengine_cluster_protocol::WorkspacePlacement::Managed,
+            local_directory: None,
+            seeds: vec![],
+            copy_root: false,
+        });
+        let error = authority.submit(&record, &request).await.assert_error();
+        assert!(
+            error
+                .to_string()
+                .contains(openengine_cluster_protocol::RUN_WORKSPACES_KIND),
+            "{error}"
+        );
+        let profile = openengine_cluster_protocol::RunProfileRunRequest {
+            run_id: request.run_id,
+            profile: openengine_cluster_protocol::RunProfileSelector {
+                scope: RunProfileScope::User,
+                name: RunProfileName::new("files").assert_value(),
+            },
+            title: request.submission.title,
+            initial_input: request.submission.initial_input,
+            workspace: request.submission.workspace,
+            source: None,
+            context_sources: vec![],
+            submission_key: request.submission.submission_key,
+            environment: None,
+            connections: request.connections,
+            github_token: None,
+            git_credentials: None,
+        };
+        let error = authority
+            .profile_run(&record, &profile)
+            .await
+            .assert_error();
+        assert!(
+            error
+                .to_string()
+                .contains(openengine_cluster_protocol::RUN_WORKSPACES_KIND),
+            "{error}"
+        );
+        assert_eq!(
+            routes(&target.stop()),
+            [DISCOVERY, OAUTH_METADATA, DISCOVERY, OAUTH_METADATA]
+        );
+    }
+}
+
 #[tokio::test]
 async fn another_git_marker_kind_does_not_authorize_the_new_wire_shape() {
     let (_root, target, record, authority) =
@@ -650,6 +706,7 @@ async fn old_hosted_target_refuses_profile_git_source_and_resume_credentials_bef
         hosted_authority_with(HostedCapability::Git(None)).await;
     let request = generic_git_request(true, false);
     let profile = openengine_cluster_protocol::RunProfileRunRequest {
+        workspace: None,
         context_sources: Vec::new(),
         run_id: request.run_id,
         profile: openengine_cluster_protocol::RunProfileSelector {
@@ -658,7 +715,7 @@ async fn old_hosted_target_refuses_profile_git_source_and_resume_credentials_bef
         },
         title: request.submission.title,
         initial_input: request.submission.initial_input,
-        source: request.submission.source.assert_value(),
+        source: request.submission.source,
         submission_key: request.submission.submission_key,
         environment: None,
         connections: request.connections,

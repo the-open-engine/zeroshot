@@ -28,6 +28,36 @@ bindings and input. For a target-stored profile, it fetches the profile first. A
 snapshot and performs complete admission. `--validate-only` checks profiles without starting a run;
 it refuses remote imports, which require host admission.
 
+## File workspaces
+
+Repository mode remains the default. Select `--workspace` for a graph without delivery or Git
+source requirements. Locally, this uses the exact current folder (or `--cwd DIR`) in place,
+including a subfolder inside a Git checkout. Your edits remain there after the run. Checkpoints
+retain graph progress separately: resume uses the same folder's current contents and cannot
+restore an earlier version of your files.
+
+Continue a suspended in-place run with `zeroshot resume RUN_ID`. After failure, use
+`zeroshot resume RUN_ID --restart` to keep the current folder contents; in-place runs have no
+restorable entry checkpoints. Managed runs use the latest-checkpoint recovery default, with
+`--discard-workspace-changes` required before restoring a local managed copy.
+
+Use `--workspace --copy-workspace` to freeze that folder's contents and executable bits into a
+disposable managed copy. Linked worktrees and other external Git administrative pointers are refused; use in-place
+placement or select files without Git metadata. To start empty, use
+`--workspace --workspace-placement managed`. Add repeated
+`--workspace-seed user:PATH` or `--workspace-seed org:PATH` options to seed it from target files;
+append `#MEMBER` to select a file or subfolder inside a stored folder. Each file keeps its basename,
+and each folder keeps its name and subtree. Duplicate basenames are refused. Accepted inputs stay
+available when the library changes or disappears.
+
+Named Docker and hosted targets use managed placement and require workspace capability support.
+Startup runs after inputs are installed. Managed checkpoints restore the selected run copy;
+checkpoint-free local restarts rebuild the original pinned inputs when starting at the graph root.
+Successors that retain completed work keep their live files. Successful or explicitly
+stopped managed runs dispose their copy and release input pins; failed and suspended runs retain
+the inputs needed for recovery. Workspace mode uses graph memory and rejects delivery,
+Git source flags and environment context repositories.
+
 ## Graph nodes
 
 `step` and `verifier` nodes do the work. Groups control their execution:

@@ -570,6 +570,7 @@ async fn remote_live_polling_backs_off_caps_resets_and_remains_demand_driven() {
 fn remote_list_requires_descending_unique_ids_and_an_exact_page_cursor() {
     fn queued(id: &str) -> RunHistorySummary {
         RunHistorySummary {
+            workspace: None,
             suspension: None,
             suspend_requested: false,
             workspace_recovery: None,
@@ -645,6 +646,7 @@ fn remote_summary_validation_preserves_terminal_authority() {
     let id = RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c992");
     let title = RunTitle::new("Remote run").assert_value();
     let queued = RunHistorySummary {
+        workspace: None,
         suspension: None,
         suspend_requested: false,
         workspace_recovery: None,
