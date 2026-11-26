@@ -11,7 +11,7 @@ fn workspace(seeds: Vec<FileSelection>) -> RunWorkspace {
         seeds,
     }
 }
-fn files(root: &Path) -> WorkspaceFiles {
+pub(super) fn files(root: &Path) -> WorkspaceFiles {
     WorkspaceFiles {
         host: Arc::new(store(root)),
         target: "target-one".into(),
@@ -29,7 +29,7 @@ fn freeze(files: &WorkspaceFiles, spec: &RunWorkspace, run: &str) -> RunId {
         })
         .assert_value()
 }
-fn seed(name: &str) -> FileSelection {
+pub(super) fn seed(name: &str) -> FileSelection {
     FileSelection {
         address: FileAddress {
             scope: FileScope::User,
@@ -38,7 +38,7 @@ fn seed(name: &str) -> FileSelection {
         member: path(""),
     }
 }
-fn upload(files: &WorkspaceFiles, selection: &FileSelection, source: &Path, op: &str) {
+pub(super) fn upload(files: &WorkspaceFiles, selection: &FileSelection, source: &Path, op: &str) {
     let mut transfer = Vec::new();
     pack(source, &mut transfer).assert_value();
     files
@@ -123,6 +123,96 @@ fn copied_root_executables_survive_source_deletion_and_pinned_restart() {
             std::fs::read(destination.join("proof")).assert_value(),
             b"original"
         );
+    }
+}
+
+#[test]
+fn workspace_seed_collisions_refuse_uploads_without_releasing_them() {
+    for copy_root in [false, true] {
+        for collision in [false, true] {
+            let temp = tempdir();
+            let files = files(temp.path());
+            let source = temp.path().join("source");
+            std::fs::create_dir(&source).assert_value();
+            std::fs::write(source.join("data"), b"accepted folder").assert_value();
+            let selected = seed("folder");
+            upload(&files, &selected, &source, "library");
+            let mut spec = workspace(if copy_root { vec![] } else { vec![selected] });
+            spec.copy_root = copy_root;
+            let run = RunId::new("chosen-run");
+            let upload_pin = FilePin {
+                run_id: run.clone(),
+                operation: operation(if collision {
+                    "workspace-seed-0"
+                } else {
+                    "upload"
+                }),
+            };
+            let access = FileAccess {
+                target: &files.target,
+                identity: &files.identity,
+            };
+            let content = bytes(b"unrelated private upload");
+            files
+                .host
+                .stage_upload(&access, &upload_pin, &mut Cursor::new(&content))
+                .assert_value();
+            let result = files.freeze(FreezeWorkspace {
+                run_id: &run,
+                submission_key: &operation("submission"),
+                workspace: &spec,
+                local_root: copy_root.then_some(source.as_path()),
+            });
+            if collision {
+                result.assert_error();
+                files.release(&run).assert_value();
+            } else {
+                assert_eq!(result.assert_value(), run);
+                let destination = temp.path().join("workspace");
+                let accepted = destination.join(if copy_root { "data" } else { "folder/data" });
+                std::fs::create_dir(&destination).assert_value();
+                files.materialize(&run, &destination).assert_value();
+                assert_eq!(std::fs::read(&accepted).assert_value(), b"accepted folder");
+                files
+                    .host
+                    .cleanup_publications(
+                        &access,
+                        &FileRetention {
+                            candidates: &Default::default(),
+                            protected: &std::collections::BTreeSet::from([run.clone()]),
+                            all: true,
+                            now: crate::native_v2_runner::current_timestamp(),
+                        },
+                    )
+                    .assert_value();
+                std::fs::write(source.join("data"), b"changed original").assert_value();
+                std::fs::remove_file(&accepted).assert_value();
+                files.restart(&run, &destination).assert_value();
+                assert_eq!(std::fs::read(&accepted).assert_value(), b"accepted folder");
+                files.release(&run).assert_value();
+                continue;
+            }
+            let mut retained = Vec::new();
+            files
+                .host
+                .read_pin(&access, &upload_pin, &mut retained)
+                .assert_value();
+            assert_eq!(retained, content);
+            files
+                .host
+                .release_upload(&access, &upload_pin)
+                .assert_value();
+            assert!(
+                files
+                    .host
+                    .read_pin(&access, &upload_pin, &mut Vec::new())
+                    .is_err()
+            );
+            assert_eq!(
+                std::fs::read(source.join("data")).assert_value(),
+                b"accepted folder"
+            );
+        }
     }
 }
 

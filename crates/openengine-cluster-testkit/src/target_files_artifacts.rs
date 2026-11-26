@@ -1,6 +1,6 @@
 //! Generated file-service contract, deliberately separate from OECP and worker artifact schemas.
 
-use openengine_cluster_protocol::{FileEntry, FileRequest, FileResponse};
+use openengine_cluster_protocol::{FileEntry, FileRequest, FileResponse, RunFileInput};
 use schemars::{JsonSchema, schema_for};
 
 use crate::artifacts::{Artifact, json_artifact};
@@ -11,6 +11,7 @@ pub struct TargetFilesSchema {
     pub request: FileRequest,
     pub response: FileResponse,
     pub entry: FileEntry,
+    pub input: RunFileInput,
 }
 
 pub(crate) fn artifacts() -> Vec<Artifact> {

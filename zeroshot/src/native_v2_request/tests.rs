@@ -90,3 +90,50 @@ fn invalid_answers_name_the_offending_path() {
         assert!(error.contains(path), "{error}");
     }
 }
+
+#[test]
+fn filepath_answers_share_required_field_and_expiry_validation() {
+    let mut suspension = suspension();
+    let RunSuspension::Request { request, .. } = &mut suspension else {
+        unreachable!()
+    };
+    request.output = serde_json::from_value(json!({"kind":"record","fields":{
+        "data":{"required":true,"type":{"kind":"filepath"}},
+        "optional":{"required":false,"type":{"kind":"filepath"}}
+    }}))
+    .unwrap();
+    let signals = json!({"decision":"approved"});
+    for data in [
+        json!("local.csv"),
+        json!({"kind":"staged","runId":"upload","operation":"upload"}),
+        json!({"kind":"target","selection":{"address":{"scope":{"kind":"user"},"path":"data.csv"},"member":""}}),
+    ] {
+        let from = answer(json!({"kind":"answer","signals":signals,"output":{"data":data}}));
+        assert!(
+            resolve(
+                &suspension,
+                Some(&from),
+                UnixTimestampMillis::new(1999).unwrap()
+            )
+            .is_ok()
+        );
+    }
+    let missing = answer(json!({"kind":"answer","signals":signals,"output":{}}));
+    assert!(
+        resolve(
+            &suspension,
+            Some(&missing),
+            UnixTimestampMillis::new(1999).unwrap()
+        )
+        .is_err()
+    );
+    assert_eq!(
+        resolve(
+            &suspension,
+            Some(&missing),
+            UnixTimestampMillis::new(2000).unwrap()
+        )
+        .unwrap(),
+        RequestResolution::Expiry {}
+    );
+}

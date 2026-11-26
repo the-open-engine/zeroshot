@@ -9,6 +9,7 @@ use crate::native_v2_runner::test_support::{CountingSession, request};
 fn invocation() -> DriverInvocation {
     let request = request("own-run", "worker", (17, 29));
     DriverInvocation {
+        file_roots: Vec::new(),
         dispatch: NodeDispatchMetadata {
             attempt: 2,
             iteration: 3,

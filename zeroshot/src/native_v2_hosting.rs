@@ -36,7 +36,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
-    RunSize, RunSizeDescriptor, RunSubmitParams, RuntimePlan, TargetRunSizesDiscovery,
+    RunId, RunSize, RunSizeDescriptor, RunSubmission, RunSubmitParams, RuntimePlan,
+    TargetRunSizesDiscovery,
 };
 use thiserror::Error;
 
@@ -301,6 +302,106 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
         controller: &NativeV2PlatformController,
         request: TargetRunRequest,
     ) -> Result<TargetRunReceipt, TargetAuthorityError> {
+        let uploads = request.submission.initial_input.clone();
+        let schema = request.submission.graph.initial_input.clone();
+        let result = self.submit_prepared_with_files(controller, request).await;
+        if let Some(files) = &self.config.workspace_files {
+            let _ = files.release_staged_inputs(&schema, &uploads);
+        }
+        result
+    }
+}
+
+impl ProductionTargetControllerFactory {
+    fn prepare_submission_files(
+        &self,
+        request: &mut TargetRunRequest,
+    ) -> Result<(), TargetAuthorityError> {
+        if request.submission.workspace.is_some()
+            && (request.github_token.is_some()
+                || request.git_credentials.is_some()
+                || request.commit_identity.is_some()
+                || request.commit_co_author.is_some()
+                || request
+                    .connection_resolver
+                    .as_ref()
+                    .is_some_and(|resolver| resolver.source_connection.is_some()))
+        {
+            return Err(TargetAuthorityError::invalid(
+                "workspace mode rejects Git source credentials and commit identities",
+            ));
+        }
+        prepare_contained_submission(
+            &mut request.submission,
+            self.supports_workspace_checkpoint_opt_out(),
+        )?;
+        Ok(())
+    }
+
+    fn project_submission_files(
+        &self,
+        run_id: &RunId,
+        submission: &mut RunSubmission,
+    ) -> Result<serde_json::Value, TargetAuthorityError> {
+        let original_input = submission.initial_input.clone();
+        if let Some(files) = &self.config.workspace_files {
+            submission.initial_input = files
+                .project_input_value(&crate::native_v2_files::inputs::InputAdmission {
+                    run_id,
+                    owner: run_id,
+                    key: &submission.submission_key,
+                    schema: &submission.graph.initial_input,
+                    value: &original_input,
+                    local_root: None,
+                })
+                .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
+        } else {
+            crate::native_v2_files::inputs::visit(
+                &submission.graph.initial_input,
+                &mut submission.initial_input,
+                "",
+                &mut |_, _| Err("this host has no authenticated input file store".to_owned()),
+            )
+            .map_err(TargetAuthorityError::invalid)?;
+        }
+        Ok(original_input)
+    }
+
+    fn freeze_submission_files(
+        &self,
+        run_id: RunId,
+        submission: &mut RunSubmission,
+        original_input: &serde_json::Value,
+    ) -> Result<RunId, TargetAuthorityError> {
+        let accepted = if let Some(files) = &self.config.workspace_files {
+            let frozen = files
+                .freeze_file_inputs(crate::native_v2_files::inputs::InputAdmission {
+                    run_id: &run_id,
+                    owner: &run_id,
+                    key: &submission.submission_key,
+                    schema: &submission.graph.initial_input,
+                    value: original_input,
+                    local_root: None,
+                })
+                .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
+            files
+                .release_staged_inputs(&submission.graph.initial_input, original_input)
+                .map_err(|_| TargetAuthorityError::unavailable("upload release failed"))?;
+            submission.initial_input = frozen.value;
+            frozen.run_id
+        } else {
+            run_id
+        };
+        Ok(accepted)
+    }
+
+    async fn submit_prepared_with_files(
+        &self,
+        controller: &NativeV2PlatformController,
+        request: TargetRunRequest,
+    ) -> Result<TargetRunReceipt, TargetAuthorityError> {
+        let mut request = request;
+        self.prepare_submission_files(&mut request)?;
         let TargetRunRequest {
             run_id,
             mut submission,
@@ -311,32 +412,13 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
             commit_identity,
             commit_co_author,
         } = request;
-        let workspace_files = submission
-            .workspace
-            .as_ref()
-            .and(self.config.workspace_files.as_ref());
-        let _workspace_admission = if submission.workspace.is_some() {
+        let workspace_files = self.config.workspace_files.as_ref();
+        let _workspace_admission = if workspace_files.is_some() {
             Some(self.workspace_admission.lock().await)
         } else {
             None
         };
-        if submission.workspace.is_some()
-            && (github_token.is_some()
-                || git_credentials.is_some()
-                || commit_identity.is_some()
-                || commit_co_author.is_some()
-                || connection_resolver
-                    .as_ref()
-                    .is_some_and(|resolver| resolver.source_connection.is_some()))
-        {
-            return Err(TargetAuthorityError::invalid(
-                "workspace mode rejects Git source credentials and commit identities",
-            ));
-        }
-        prepare_contained_submission(
-            &mut submission,
-            self.supports_workspace_checkpoint_opt_out(),
-        )?;
+        let original_input = self.project_submission_files(&run_id, &mut submission)?;
         let digest = submission_digest(&submission)
             .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
         if let Some(receipt) = controller
@@ -349,15 +431,20 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
                 run_id: receipt.run_id,
             });
         }
+        controller
+            .require_unused_run_id(&run_id)
+            .await
+            .map_err(project_platform_error)?;
+        let run_id = self.freeze_submission_files(run_id, &mut submission, &original_input)?;
         let run_id = if let Some(workspace) = &submission.workspace {
             if let Some(files) = &self.config.workspace_files {
                 let files = files.clone();
                 let workspace = workspace.clone();
                 let key = submission.submission_key.clone();
-                let run_id = run_id.clone();
-                tokio::task::spawn_blocking(move || {
+                let seed_run = run_id.clone();
+                let frozen = tokio::task::spawn_blocking(move || {
                     files.freeze(crate::native_v2_files::FreezeWorkspace {
-                        run_id: &run_id,
+                        run_id: &seed_run,
                         submission_key: &key,
                         workspace: &workspace,
                         local_root: None,
@@ -367,7 +454,16 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
                 .map_err(|_| {
                     TargetAuthorityError::unavailable("workspace input preparation failed")
                 })?
-                .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?
+                .map_err(|error| TargetAuthorityError::invalid(error.to_string()));
+                match frozen {
+                    Ok(id) => id,
+                    Err(error) => {
+                        if let Some(files) = workspace_files {
+                            let _ = files.release_file_input_part(&run_id);
+                        }
+                        return Err(error);
+                    }
+                }
             } else if workspace.seeds.is_empty() {
                 run_id
             } else {
@@ -396,6 +492,9 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
             Ok(environment) => environment,
             Err(error) => {
                 if let Some(files) = workspace_files {
+                    files.release_file_inputs(&run_id).map_err(|_| {
+                        TargetAuthorityError::unavailable("file input release failed")
+                    })?;
                     files.release(&run_id).map_err(|_| {
                         TargetAuthorityError::unavailable("workspace input release failed")
                     })?;
@@ -436,6 +535,9 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
             files
                 .release(&run_id)
                 .map_err(|_| TargetAuthorityError::unavailable("workspace input release failed"))?;
+            files
+                .release_file_inputs(&run_id)
+                .map_err(|_| TargetAuthorityError::unavailable("file input release failed"))?;
         }
         let receipt = receipt.map_err(project_platform_error)?;
         Ok(TargetRunReceipt {

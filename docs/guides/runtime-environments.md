@@ -210,3 +210,9 @@ an operator-provided daemon endpoint. Detached Docker containers belong to that 
 terminated by the target's process cleanup. Direct target operators or scripts must manage their
 names, reuse, and removal. When the daemon runs inside a disposable run machine, destroying that
 machine removes its Docker resources. The `teardown` field is for local execution.
+
+When a run accepts explicit filepath inputs, startup hooks and node processes receive
+`ZEROSHOT_INPUTS`, the run-owned input location outside the working folder. The input JSON contains
+the individual file/folder paths. Startup may prepare these copies; checkpoints retain changes and
+checkpoint-free restarts restore the originally accepted bytes. Input copies follow recovery
+lifetime independently of workspace placement and published outputs.

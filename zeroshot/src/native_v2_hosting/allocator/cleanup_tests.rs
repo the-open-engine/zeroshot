@@ -52,6 +52,7 @@ impl CleanupFixture {
             environment: EnvironmentProcesses::default(),
             restored_delivery_run_id: OnceLock::new(),
             conversation_restore: OnceLock::new(),
+            file_inputs: OnceLock::new(),
             endpoint: OnceLock::from(Arc::new(NativeCapsuleNodeEndpoint::new(Arc::new(
                 IdleRunner,
             )))),
@@ -93,6 +94,79 @@ impl CleanupFixture {
             .stderr(Stdio::null());
         self.identity.configure_command(&mut command);
         command.spawn().assert_value()
+    }
+
+    fn input(&self) -> PathBuf {
+        set_traversable_directory(self.directory.path()).assert_value();
+        let root = self.directory.child("input-data");
+        crate::execution::platform::private_directory(&root).assert_value();
+        let file = root.join("data");
+        std::fs::write(&file, "private input").assert_value();
+        transfer_workspace_ownership(&root, self.identity.uid(), self.identity.gid())
+            .assert_value();
+        self.state.file_inputs.set(vec![root]).assert_value();
+        file
+    }
+}
+
+async fn input_access(identity: HostedProcessIdentity, input: &Path, script: &str) -> bool {
+    let mut command = tokio::process::Command::new("/bin/sh");
+    command
+        .args(["-c", script, "input-access"])
+        .arg(input)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .current_dir("/");
+    identity.configure_command(&mut command);
+    command.output().await.assert_value().status.success()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn root_retained_inputs_deny_a_recycled_writer_uid() {
+    if unsafe { libc::geteuid() } != 0 {
+        eprintln!("root-only retained input ownership test skipped");
+        return;
+    }
+    for exit in [
+        RunRuntimeExit::Failed,
+        RunRuntimeExit::Suspended,
+        RunRuntimeExit::Completed,
+    ] {
+        let fixture = CleanupFixture::new();
+        std::fs::create_dir(fixture.state.run_root.join("workspace")).assert_value();
+        let input = fixture.input();
+        assert!(input_access(fixture.identity, &input, "cat \"$1\"").await);
+        assert!(input_access(fixture.identity, &input, "printf 'private input' > \"$1\"").await);
+        if exit == RunRuntimeExit::Failed {
+            let hidden = fixture.directory.child("temporarily-missing-inputs");
+            std::fs::rename(input.parent().unwrap(), &hidden).assert_value();
+            assert!(
+                cleanup_state(&fixture.run_id, &fixture.state, &fixture.active, exit)
+                    .await
+                    .is_err()
+            );
+            assert!(fixture.state.process_pool.lock().await.is_some());
+            std::fs::rename(&hidden, input.parent().unwrap()).assert_value();
+        }
+        cleanup_state(&fixture.run_id, &fixture.state, &fixture.active, exit)
+            .await
+            .assert_value();
+        assert!(fixture.state.process_pool.lock().await.is_none());
+        let lease = fixture.pools.acquire().assert_value();
+        let recycled = writer(lease.process_pool());
+        assert_eq!(recycled.uid(), fixture.identity.uid());
+        recycled.prepare_command_domain().assert_value();
+        assert!(!input_access(recycled, &input, "cat \"$1\"").await);
+        assert!(!input_access(recycled, &input, "printf changed > \"$1\"").await);
+        assert_eq!(std::fs::read(&input).assert_value(), b"private input");
+        use std::os::unix::fs::MetadataExt;
+        let metadata = std::fs::metadata(input.parent().unwrap()).assert_value();
+        assert_eq!(metadata.uid(), 0);
+        assert_eq!(metadata.mode() & 0o777, 0o700);
+        assert_eq!(
+            fixture.state.run_root.exists(),
+            exit != RunRuntimeExit::Completed
+        );
     }
 }
 

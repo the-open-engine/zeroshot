@@ -625,11 +625,8 @@ fn prepare_intent(
         .map_err(NativeV2CliError::InvalidRun)?;
     }
     validate_graph_profile(&resolved.graph)?;
-    resolved
-        .graph
-        .initial_input
-        .validate_value(&initial_input)
-        .map_err(|error| NativeV2CliError::InitialInput(error.to_string()))?;
+    crate::native_v2_files::inputs::validate_input(&resolved.graph.initial_input, &initial_input)
+        .map_err(NativeV2CliError::InitialInput)?;
     let submission_key = run
         .submission_key
         .clone()

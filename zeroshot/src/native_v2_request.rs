@@ -25,7 +25,7 @@ pub fn input_schema() -> Result<PayloadType, ContractValueError> {
 
 pub fn valid_output(output: &PayloadType) -> bool {
     matches!(output, PayloadType::Record { fields } if fields.values().all(|field| matches!(field.value_type,
-        PayloadType::Boolean | PayloadType::Integer | PayloadType::Number | PayloadType::String | PayloadType::Enum { .. })))
+        PayloadType::Boolean | PayloadType::Integer | PayloadType::Number | PayloadType::String | PayloadType::Filepath | PayloadType::Enum { .. })))
 }
 
 pub fn deadline(
@@ -121,9 +121,7 @@ pub fn resolve(
             return Err(format!("$.signals.{} is undeclared", name.as_str()));
         }
     }
-    request
-        .output
-        .validate_value(output)
+    crate::native_v2_files::inputs::validate_input(&request.output, output)
         .map_err(|error| format!("$.output: {error}"))?;
     let resolution = RequestResolution::Answer {
         answer: RequestAnswer {

@@ -121,6 +121,7 @@ async fn invocation(endpoint: &str, key: &str) -> DriverInvocation {
     let adapter = DecisionAdapter::new().unwrap();
     let session = adapter.open(&node, &environment).await.unwrap();
     DriverInvocation {
+        file_roots: Vec::new(),
         dispatch: Default::default(),
         host_context: None,
         node,

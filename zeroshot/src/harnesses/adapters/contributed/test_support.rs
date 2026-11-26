@@ -47,6 +47,7 @@ pub(super) fn invocation(
     }
     .into_request();
     DriverInvocation {
+        file_roots: Vec::new(),
         dispatch: Default::default(),
         host_context: None,
         node: request.invocation,

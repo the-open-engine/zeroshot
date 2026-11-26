@@ -337,6 +337,53 @@ fn incomplete_cancelled_corrupt_and_conflicting_uploads_preserve_the_prior_selec
 }
 
 #[test]
+fn temporary_uploads_cannot_replace_or_be_released_as_internal_pins() {
+    for upload_first in [false, true] {
+        let temp = tempdir();
+        let disk = store(temp.path());
+        let who = identity("user");
+        let access = FileAccess {
+            target: "target-one",
+            identity: &who,
+        };
+        let content = bytes(b"same bytes must still have separate ownership");
+        if upload_first {
+            disk.stage_upload(&access, &pin(), &mut Cursor::new(&content))
+                .assert_value();
+            assert!(
+                disk.stage(&access, &pin(), &mut Cursor::new(&content))
+                    .is_err()
+            );
+            assert!(disk.pin_exists(&access, &pin()).is_err());
+            // Refused managed admission must not release the independent upload.
+            disk.release(&access, &pin()).assert_value();
+        } else {
+            disk.stage(&access, &pin(), &mut Cursor::new(&content))
+                .assert_value();
+            assert!(
+                disk.stage_upload(&access, &pin(), &mut Cursor::new(&content))
+                    .is_err()
+            );
+            disk.release_upload(&access, &pin()).assert_value();
+            assert!(disk.pin_exists(&access, &pin()).assert_value());
+        }
+        let mut retained = Vec::new();
+        disk.read_pin(&access, &pin(), &mut retained).assert_value();
+        assert_eq!(retained, content);
+        if upload_first {
+            disk.stage_upload(&access, &pin(), &mut Cursor::new(&content))
+                .assert_value();
+            disk.release_upload(&access, &pin()).assert_value();
+        } else {
+            disk.stage(&access, &pin(), &mut Cursor::new(&content))
+                .assert_value();
+            disk.release(&access, &pin()).assert_value();
+        }
+        assert!(disk.read_pin(&access, &pin(), &mut Vec::new()).is_err());
+    }
+}
+
+#[test]
 fn staged_inputs_and_managed_publications_have_separate_idempotent_ownership() {
     let temp = tempdir();
     let disk = store(temp.path());
@@ -836,3 +883,5 @@ mod regressions;
 mod publications;
 #[path = "tests/workspaces.rs"]
 mod workspaces;
+
+mod inputs;

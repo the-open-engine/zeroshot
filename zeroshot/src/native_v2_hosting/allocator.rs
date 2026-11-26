@@ -265,6 +265,7 @@ impl ProductionCapsuleAllocator {
             delivery_run_id: request.delivery_run_id.clone(),
             restored_delivery_run_id: OnceLock::new(),
             conversation_restore: OnceLock::new(),
+            file_inputs: OnceLock::new(),
             inherited_retained_workspace: request.transfer_retained_workspace,
             host_owned_workspace: self.config.workspace_storage.is_some(),
             process_pool: Mutex::new(Some(process_pool)),
@@ -378,6 +379,7 @@ impl ProductionCapsuleAllocator {
                 redactions: &redactions,
             })
             .await?;
+        self.prepare_file_inputs(request, &state, active_process_pool)?;
         self.install_context_sources(request, &filesystem, active_process_pool)
             .await?;
         self.run_environment_hook(
@@ -463,6 +465,12 @@ impl ProductionCapsuleAllocator {
             trusted,
         )
         .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+        let candidate = candidate.with_file_inputs(match &self.config.workspace_files {
+            Some(files) => files
+                .file_input_authority_roots(request.delivery_run_id)
+                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,
+            None => Vec::new(),
+        });
         let candidate = candidate.with_agent_context(context::agent_context(
             request.admitted,
             &state.run_root,
@@ -781,15 +789,7 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
                 })?;
             }
         }
-        if matches!(
-            exit,
-            RunRuntimeExit::Completed | RunRuntimeExit::ForceStopped
-        ) && let Some(files) = &self.config.workspace_files
-        {
-            files
-                .release(&origin)
-                .map_err(|_| CapsuleCleanupUnavailable)?;
-        }
+        self.release_disposed_inputs(run_id, &origin, exit).await?;
         Ok(CapsuleDestroyed::confirmed())
     }
 
@@ -803,6 +803,28 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
     > {
         self.recover_committed_file_publication(stored, request)
             .await
+    }
+
+    async fn accept_answer_files(
+        &self,
+        request: crate::native_v2_files::inputs::InputAdmission<'_>,
+    ) -> Result<crate::native_v2_files::inputs::FrozenFileInputs, String> {
+        self.accept_request_files(request)
+    }
+
+    async fn release_unadmitted_answer(
+        &self,
+        claim: &crate::native_v2_files::inputs::FileInputClaim,
+    ) {
+        self.release_refused_answer(claim);
+    }
+
+    async fn release_answer_uploads(
+        &self,
+        schema: &openengine_cluster_protocol::PayloadType,
+        value: &serde_json::Value,
+    ) {
+        self.release_request_uploads(schema, value);
     }
 
     async fn reserve_retained_workspace(
@@ -961,30 +983,7 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
     }
 
     async fn discard_workspace(&self, run_id: &RunId) -> Result<bool, CapsuleCleanupUnavailable> {
-        let _turn = self.allocation_turns.lock(run_id).await;
-        let root = run_directory(&self.config.storage_root, run_id);
-        let metadata_path = recovery_path(&self.config.storage_root, run_id);
-        let Some(mut document) = read_recovery(&metadata_path) else {
-            return Ok(false);
-        };
-        if !document.recoverable {
-            return Ok(false);
-        }
-        let delivery_run_id = document.delivery_run_id.as_ref().unwrap_or(run_id);
-        checkpoints::discard_lineage(
-            &checkpoint_directory(&self.config.storage_root, run_id),
-            &checkpoint_repository(&self.config.storage_root, delivery_run_id),
-        )
-        .map_err(|_| CapsuleCleanupUnavailable)?;
-        remove_run_directory(&root)?;
-        if let Some(files) = &self.config.workspace_files {
-            files
-                .release(delivery_run_id)
-                .map_err(|_| CapsuleCleanupUnavailable)?;
-        }
-        document.recoverable = false;
-        write_recovery(&metadata_path, &document)?;
-        Ok(true)
+        self.discard_retained_workspace(run_id).await
     }
 }
 
@@ -1018,6 +1017,7 @@ struct ProductionCapsuleState {
     delivery_run_id: RunId,
     restored_delivery_run_id: OnceLock<RunId>,
     conversation_restore: OnceLock<CheckpointRestore>,
+    file_inputs: OnceLock<Vec<PathBuf>>,
     inherited_retained_workspace: bool,
     host_owned_workspace: bool,
     // Retains the run's disjoint Linux identities until endpoint and workspace cleanup complete.
@@ -1126,6 +1126,9 @@ impl CapsuleCleanup for ProductionCapsuleCleanup {
             files
                 .release(&self.state.delivery_run_id)
                 .map_err(|_| CapsuleCleanupUnavailable)?;
+            files
+                .release_file_inputs(&self.state.delivery_run_id)
+                .map_err(|_| CapsuleCleanupUnavailable)?;
         }
         Ok(CapsuleDestroyed::confirmed())
     }
@@ -1166,6 +1169,7 @@ async fn cleanup_state(
         return Err(CapsuleCleanupUnavailable);
     }
     state.environment.finish_output().await?;
+    state.reclaim_file_inputs()?;
     state.cleanup_owned_directory(run_id, exit)?;
     active.lock().await.remove(run_id);
     process_pool.take();

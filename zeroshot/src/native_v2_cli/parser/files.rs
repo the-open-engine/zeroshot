@@ -10,6 +10,17 @@ use crate::native_v2_cli::{FileCommand, FileCommandTransfer, NativeV2CliCommand,
 
 #[derive(Debug, Subcommand)]
 pub(super) enum FileCliCommand {
+    /// Stage a private file or folder; use the returned object as a filepath input or answer.
+    Stage {
+        source: PathBuf,
+        #[arg(long)]
+        target: Option<String>,
+        /// Retry the same private upload after a lost response.
+        #[arg(long)]
+        operation: Option<String>,
+        #[arg(long)]
+        run_id: Option<String>,
+    },
     /// List named paths, or list the members of one file/tree when PATH is supplied.
     List {
         #[command(flatten)]
@@ -93,6 +104,22 @@ fn path(value: String, named: bool) -> Result<FilePath, NativeV2CliError> {
 impl FileCliCommand {
     pub(super) fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
         let (target, request, transfer) = match self {
+            Self::Stage {
+                source,
+                target,
+                operation,
+                run_id,
+            } => (
+                convert::validated_target(target)?,
+                FileRequest::Stage {
+                    run_id: RunId::new(run_id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string())),
+                    operation: IdempotencyKey::new(
+                        operation.unwrap_or_else(|| uuid::Uuid::now_v7().to_string()),
+                    )
+                    .map_err(|error| convert::usage(error.to_string()))?,
+                },
+                FileCommandTransfer::Upload(source),
+            ),
             Self::List {
                 route,
                 path: selected,

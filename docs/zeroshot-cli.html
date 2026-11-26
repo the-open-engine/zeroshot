@@ -24,6 +24,7 @@ section { margin-block: 2.5rem; }
 <li><a href="#zeroshot"><code>zeroshot</code></a></li>
 <li><a href="#zeroshot-cleanup"><code>zeroshot cleanup</code></a></li>
 <li><a href="#zeroshot-file"><code>zeroshot file</code></a></li>
+<li><a href="#zeroshot-file-stage"><code>zeroshot file stage</code></a></li>
 <li><a href="#zeroshot-file-list"><code>zeroshot file list</code></a></li>
 <li><a href="#zeroshot-file-upload"><code>zeroshot file upload</code></a></li>
 <li><a href="#zeroshot-file-download"><code>zeroshot file download</code></a></li>
@@ -166,6 +167,7 @@ Options:
 Usage: zeroshot file &lt;COMMAND&gt;
 
 Commands:
+  stage     Stage a private file or folder; use the returned object as a filepath input or answer
   list      List named paths, or list the members of one file/tree when PATH is supplied
   upload    Upload a file or directory and atomically replace the complete named path
   download  Download a file or complete directory to a new local destination
@@ -173,6 +175,27 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
+  -h, --help
+          Print help</code></pre></section>
+<section id="zeroshot-file-stage"><h4><code>zeroshot file stage</code></h4>
+<pre><code>Stage a private file or folder; use the returned object as a filepath input or answer
+
+Usage: zeroshot file stage [OPTIONS] &lt;SOURCE&gt;
+
+Arguments:
+  &lt;SOURCE&gt;
+
+
+Options:
+      --target &lt;TARGET&gt;
+
+
+      --operation &lt;OPERATION&gt;
+          Retry the same private upload after a lost response
+
+      --run-id &lt;RUN_ID&gt;
+
+
   -h, --help
           Print help</code></pre></section>
 <section id="zeroshot-file-list"><h4><code>zeroshot file list</code></h4>
@@ -290,6 +313,7 @@ Options:
 Usage: zeroshot file help [COMMAND]
 
 Commands:
+  stage     Stage a private file or folder; use the returned object as a filepath input or answer
   list      List named paths, or list the members of one file/tree when PATH is supplied
   upload    Upload a file or directory and atomically replace the complete named path
   download  Download a file or complete directory to a new local destination

@@ -116,7 +116,7 @@ impl<'a> HermesConnection<'a> {
                 &invocation.response,
                 &message,
                 dialect,
-                Some(self.workspace),
+                Some(invocation.filepaths(self.workspace)),
             )?;
             feedback
                 .report_correction(self.control, &answer, response.corrections_exhausted())

@@ -115,6 +115,7 @@ fn invocation(
     environment: ResolvedEnvironment,
 ) -> DriverInvocation {
     DriverInvocation {
+        file_roots: Vec::new(),
         dispatch: Default::default(),
         host_context: None,
         node: NodeInvocation {

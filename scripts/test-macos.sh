@@ -53,6 +53,8 @@ ZEROSHOT_REQUIRE_APFS_CLONE=1 cargo test --locked --package zeroshot --lib --fea
 cargo test --locked --package openengine-cluster-protocol --test target_files
 cargo test --locked --package zeroshot --features ui --lib -- \
   native_v2_files::tests native_v2_target_authority::tests::files \
+  native_v2_target_authority::tests::requests \
+  native_v2_supervisor::checkpoints::tests::git_checkpoints_restore_mutable_inputs_without_staging_them \
   execution::platform::tests::private_state_round_trips_and_replaces_an_existing_file
 cargo test --locked --package zeroshot --features ui --bin zeroshot -- \
   native_v2_target::serve::tests::direct_serve_surfaces_hosting_preparation_failures --exact

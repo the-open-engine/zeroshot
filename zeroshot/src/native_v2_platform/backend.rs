@@ -341,9 +341,20 @@ impl ClusterBackend for NativeV2PlatformController {
         _context: &ConnectionContext,
         params: RunResumeParams,
     ) -> Result<RunResumeResult, BackendError> {
-        let (family, run_id) = self
+        let (family, run_id) = match self
             .current_target(&params.run_id, Some(&params.part_id))
-            .await?;
+            .await
+        {
+            Ok(target) => target,
+            Err(error) => {
+                if let Some(openengine_cluster_protocol::RunResumeFrom::Answer { output, .. }) =
+                    &params.from
+                {
+                    self.release_answer_uploads(&params.part_id, output).await;
+                }
+                return Err(error);
+            }
+        };
         let mut result = self
             .resume(RunResumeParams { run_id, ..params })
             .await

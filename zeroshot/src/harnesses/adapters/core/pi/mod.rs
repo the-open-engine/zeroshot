@@ -549,7 +549,7 @@ async fn resolve_pi_response(
         &turn.invocation.response,
         &result.message,
         state.dialect,
-        Some(turn.execution.workspace()),
+        Some(turn.invocation.filepaths(turn.execution.workspace())),
     )?;
     state
         .retry

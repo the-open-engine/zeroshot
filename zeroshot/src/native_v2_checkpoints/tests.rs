@@ -1092,3 +1092,83 @@ fn a_restart_starts_with_the_conversations_its_source_started_with() {
     fs::write(root.path().join("third/conversation-origin.json"), "{").assert_value();
     assert!(conversations("third", Latest, "fourth").is_err());
 }
+
+#[tokio::test]
+async fn git_checkpoints_restore_mutable_inputs_without_staging_them() {
+    let mut fixture = Fixture::new();
+    let inputs = fixture._root.path().join("run-inputs");
+    fs::create_dir(&inputs).unwrap();
+    fs::write(inputs.join("data.csv"), "accepted original").unwrap();
+    fixture.store = fixture.store.with_file_inputs(vec![inputs.clone()]);
+    let git = |args: &[&str]| {
+        let result = std::process::Command::new("git")
+            .current_dir(&fixture.workspace)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        result.stdout
+    };
+    git(&["init"]);
+    git(&[
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "add",
+        ".",
+    ]);
+    git(&[
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-m",
+        "seed",
+    ]);
+    fs::write(fixture.workspace.join("normal-edit"), "workspace edit").unwrap();
+    fs::write(inputs.join("data.csv"), "selected input edit").unwrap();
+    let checkpoint = fixture.input_checkpoint("writer").await;
+    fs::write(
+        fixture.workspace.join("normal-edit"),
+        "later workspace edit",
+    )
+    .unwrap();
+    fs::write(inputs.join("data.csv"), "later input edit").unwrap();
+    fixture.restore(&checkpoint).await;
+    assert_eq!(
+        fs::read_to_string(inputs.join("data.csv")).unwrap(),
+        "selected input edit"
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.workspace.join("normal-edit")).unwrap(),
+        "workspace edit"
+    );
+    git(&["add", "--all"]);
+    git(&[
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-m",
+        "delivery",
+    ]);
+    let files = String::from_utf8(git(&["ls-tree", "--name-only", "HEAD"])).unwrap();
+    assert_eq!(files, "normal-edit\nsource\n");
+    assert_eq!(
+        fs::read_to_string(inputs.join("data.csv")).unwrap(),
+        "selected input edit"
+    );
+}

@@ -332,6 +332,54 @@ async fn answer_preflight_errors_leave_no_successor_or_recovery_mutation() {
         .assert_value();
 }
 
+#[tokio::test]
+async fn refused_local_answer_preserves_files_owned_by_another_attempt() {
+    let root = TestDirectory::new("local-refused-answer-files");
+    let workspace = root.child("workspace");
+    std::fs::create_dir(&workspace).assert_value();
+    let backend = LocalCliBackend::new(
+        root.child("state"),
+        root.child("missing-controller"),
+        workspace.clone(),
+        "git".into(),
+    );
+    let (_, _ledger) = suspended_run(&backend, false).await;
+    let params = resume(Some(RunResumeFrom::Answer {
+        signals: Default::default(),
+        output: json!({"feedback": false}),
+    }));
+    let original = workspace.join("data");
+    std::fs::write(&original, "accepted bytes").assert_value();
+    let files = crate::native_v2_cli::files::workspace_files(&backend.state_root).assert_value();
+    let frozen = files
+        .freeze_file_inputs(crate::native_v2_files::inputs::InputAdmission {
+            run_id: &params.successor_run_id,
+            owner: &params.run_id,
+            key: &IdempotencyKey::new("earlier-answer").assert_value(),
+            schema: &openengine_cluster_protocol::PayloadType::Filepath,
+            value: &json!(original),
+            local_root: Some(&workspace),
+        })
+        .assert_value();
+    backend
+        .run_resume(None, params.clone(), false)
+        .await
+        .assert_error();
+    std::fs::write(&original, "user edit").assert_value();
+    assert_eq!(
+        files
+            .materialize_file_inputs(&params.run_id, true)
+            .assert_value()
+            .len(),
+        1
+    );
+    assert_eq!(
+        std::fs::read(frozen.value.as_str().unwrap()).assert_value(),
+        b"accepted bytes"
+    );
+    assert_eq!(std::fs::read(original).assert_value(), b"user edit");
+}
+
 pub(in crate::native_v2_cli::local) async fn assert_local_inbox_reads_do_not_continue_requests() {
     use openengine_cluster_protocol::{
         InboxListParams, RequestState, RunVectorsParams, RunVectorParams, VectorId,

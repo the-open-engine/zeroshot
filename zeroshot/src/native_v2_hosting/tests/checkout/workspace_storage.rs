@@ -53,8 +53,8 @@ impl HostedWorkspaceStorage for ExternalStorage {
             vector_seed: self.vectors.clone(),
             comment_publications: self.comment_publications.clone(),
             checkpoints: if request.workspace_checkpoints {
-                Arc::new(ResticCheckpointStore::with_program(
-                    ResticCheckpointStoreTestConfig {
+                Arc::new(
+                    ResticCheckpointStore::with_program(ResticCheckpointStoreTestConfig {
                         directory: request.checkpoint_directory.to_owned(),
                         repository: request.checkpoint_directory.join("repository"),
                         workspace: request.workspace.to_owned(),
@@ -65,8 +65,9 @@ impl HostedWorkspaceStorage for ExternalStorage {
                                     std::io::Error::other("workspace has no parent")
                                 })?,
                             )?,
-                    },
-                ))
+                    })
+                    .with_file_inputs(request.file_inputs.to_vec()),
+                )
             } else {
                 Arc::new(
                     crate::native_v2_supervisor::checkpoints::DeliveryCheckpointStore::new(

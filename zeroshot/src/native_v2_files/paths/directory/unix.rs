@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -124,6 +125,10 @@ impl Directory {
     pub fn remove_tree(&self, name: &OsStr) -> Result<()> {
         match self.child(name) {
             Ok(child) => {
+                // Only the pinned disposable directory is changed; links are never opened here.
+                child
+                    .0
+                    .set_permissions(std::fs::Permissions::from_mode(0o700))?;
                 for member in child.entries()? {
                     child.remove_tree(&member?)?;
                 }

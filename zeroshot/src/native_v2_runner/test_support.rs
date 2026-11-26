@@ -566,6 +566,7 @@ pub(crate) fn null_worker_invocation(
             request.invocation.reference.node_instance
         };
     DriverInvocation {
+        file_roots: Vec::new(),
         dispatch: request.dispatch,
         host_context: None,
         provider_session_slot: request.invocation.reference.node_instance,

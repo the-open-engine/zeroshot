@@ -461,6 +461,8 @@ impl ResolvedSource {
 
 mod source;
 pub use source::*;
+mod file_inputs;
+pub use file_inputs::*;
 
 #[derive(
     Clone, Copy, Debug, Deserialize, Eq, Hash, JsonSchema, Ord, PartialEq, PartialOrd, Serialize,

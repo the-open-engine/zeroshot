@@ -8,7 +8,7 @@ pub fn workspace_path(root: &Path, path: &str) -> io::Result<PathBuf> {
 }
 
 /// A live reference keeps the canonical root recorded at admission, even during redirection.
-pub(super) fn local_workspace_path(root: &Path, path: &str) -> io::Result<PathBuf> {
+pub(crate) fn local_workspace_path(root: &Path, path: &str) -> io::Result<PathBuf> {
     if root.canonicalize()? != root {
         return Err(super::denied());
     }

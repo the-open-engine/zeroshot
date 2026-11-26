@@ -79,6 +79,7 @@ Manage files and named directory trees on the selected target. Bytes stream outs
 Usage: zeroshot file <COMMAND>
 
 Commands:
+  stage     Stage a private file or folder; use the returned object as a filepath input or answer
   list      List named paths, or list the members of one file/tree when PATH is supplied
   upload    Upload a file or directory and atomically replace the complete named path
   download  Download a file or complete directory to a new local destination
@@ -86,6 +87,31 @@ Commands:
   help      Print this message or the help of the given subcommand(s)
 
 Options:
+  -h, --help
+          Print help
+```
+
+#### `zeroshot file stage`
+
+```text
+Stage a private file or folder; use the returned object as a filepath input or answer
+
+Usage: zeroshot file stage [OPTIONS] <SOURCE>
+
+Arguments:
+  <SOURCE>
+
+
+Options:
+      --target <TARGET>
+
+
+      --operation <OPERATION>
+          Retry the same private upload after a lost response
+
+      --run-id <RUN_ID>
+
+
   -h, --help
           Print help
 ```
@@ -223,6 +249,7 @@ Print this message or the help of the given subcommand(s)
 Usage: zeroshot file help [COMMAND]
 
 Commands:
+  stage     Stage a private file or folder; use the returned object as a filepath input or answer
   list      List named paths, or list the members of one file/tree when PATH is supplied
   upload    Upload a file or directory and atomically replace the complete named path
   download  Download a file or complete directory to a new local destination

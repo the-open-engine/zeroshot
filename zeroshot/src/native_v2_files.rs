@@ -14,6 +14,7 @@ use openengine_cluster_server::identity::ConnectionIdentity;
 use serde::{Deserialize, Serialize};
 
 mod disk;
+pub mod inputs;
 mod paths;
 pub mod publication;
 mod transfer;
@@ -21,6 +22,7 @@ mod workspaces;
 pub use workspaces::{WorkspaceFiles, FreezeWorkspace};
 mod workspace;
 pub use workspace::workspace_path;
+pub(crate) use workspace::local_workspace_path as input_workspace_path;
 pub use disk::DiskFileStore;
 pub use transfer::{pack, unpack, validate_transfer};
 
@@ -181,7 +183,20 @@ pub trait TargetFileHost: Send + Sync {
         pin: &FilePin,
         input: &mut dyn Read,
     ) -> Result<FilePin>;
-    /// Check an admission pin without rereading its mutable original.
+    /// A temporary private upload. Accepted run inputs copy it into independently retained pins.
+    fn stage_upload(
+        &self,
+        _access: &FileAccess<'_>,
+        _pin: &FilePin,
+        _input: &mut dyn Read,
+    ) -> Result<FilePin> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "host does not support private uploads",
+        ))
+    }
+    /// Check an admission pin without rereading its mutable original. A temporary upload with
+    /// the same caller-selected identity must be refused rather than reused as an admission pin.
     fn pin_exists(&self, access: &FileAccess<'_>, pin: &FilePin) -> Result<bool>;
     fn read_pin(
         &self,
@@ -197,6 +212,11 @@ pub trait TargetFileHost: Send + Sync {
         request: &FilePublishRequest,
     ) -> Result<HostFilePublication>;
     fn release_publication(&self, access: &FileAccess<'_>, address: &FileAddress) -> Result<bool>;
+    /// Release only an expiring upload handle, never an accepted input or workspace pin.
+    fn release_upload(&self, _access: &FileAccess<'_>, _pin: &FilePin) -> Result<()> {
+        Ok(())
+    }
+    /// Release an internal pin, preserving any colliding temporary upload.
     fn release(&self, access: &FileAccess<'_>, pin: &FilePin) -> Result<()>;
     /// Freeze eligible immutable identities before consulting the host's changing run state.
     fn select_publications(

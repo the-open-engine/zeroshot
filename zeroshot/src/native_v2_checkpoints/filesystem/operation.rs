@@ -45,7 +45,7 @@ impl SnapshotOperation {
         Ok(())
     }
 
-    pub(super) fn copy(&self, source: &Path, target: &Path) -> io::Result<()> {
+    pub(crate) fn copy(&self, source: &Path, target: &Path) -> io::Result<()> {
         self.check()?;
         let request = self
             .stopping
