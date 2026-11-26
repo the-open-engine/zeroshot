@@ -5,6 +5,98 @@ use openengine_cluster_protocol::PayloadType;
 use serde_json::json;
 
 #[tokio::test]
+async fn completed_run_reopens_without_recreating_released_inputs_or_its_workspace() {
+    let root =
+        tempfile::tempdir_in(std::env::temp_dir().canonicalize().assert_value()).assert_value();
+    let state = private_directory(root.path(), "state");
+    let runs = private_directory(&state, "runs");
+    let run = RunId::new("completed-input-recovery");
+    let storage = private_directory(&runs, run.as_str());
+    let workspace = private_directory(root.path(), "workspace");
+    std::fs::write(workspace.join("output"), "live output").assert_value();
+    let original = root.path().join("original.csv");
+    std::fs::write(&original, "accepted bytes").assert_value();
+    let files = crate::native_v2_cli::files::workspace_files(&state).assert_value();
+    let frozen = files
+        .freeze_file_inputs(InputAdmission {
+            run_id: &run,
+            owner: &run,
+            key: &IdempotencyKey::new("accepted-input").assert_value(),
+            schema: &PayloadType::Filepath,
+            value: &json!(original),
+            local_root: Some(root.path()),
+        })
+        .assert_value();
+    let accepted = PathBuf::from(frozen.value.as_str().assert_value());
+    files.materialize_file_inputs(&run, true).assert_value();
+    assert_eq!(std::fs::read(&accepted).assert_value(), b"accepted bytes");
+    std::fs::write(&original, "later user bytes").assert_value();
+    let mut submission = crate::native_v2_portable_controller::tests::submission(run.as_str());
+    submission.graph.initial_input = PayloadType::Filepath;
+    let openengine_cluster_protocol::GraphNode::Seq(root_group) = &mut submission.graph.root else {
+        panic!("fixture requires a sequential root");
+    };
+    root_group.state = PayloadType::Filepath;
+    submission.initial_input = frozen.value;
+    submission.runtime.workspace_checkpoints = false;
+    std::fs::write(
+        storage.join("workspace-recovery.json"),
+        serde_json::to_vec(&json!({
+            "submission":submission, "workspace":workspace, "deliveryRunId":run,
+        }))
+        .assert_value(),
+    )
+    .assert_value();
+    let bootstrap = || {
+        crate::native_v2_portable_controller::tests::bootstrap(
+            run.clone(),
+            submission.clone(),
+            workspace.clone(),
+            storage.clone(),
+        )
+    };
+    let controller = PortableRunController::start(bootstrap(), |_| {
+        Ok::<_, std::convert::Infallible>(PortableRuntime::new(Arc::new(
+            crate::native_v2_portable_controller::tests::NeverDispatched,
+        )))
+    })
+    .await;
+    assert!(
+        controller.is_ok(),
+        "controller start failed: {:?}",
+        controller.as_ref().err()
+    );
+    let controller = controller.assert_value();
+    controller.wait_terminal().await.assert_value();
+    let ledger = SqliteRunLedger::open_read_only(controller.paths().ledger()).assert_value();
+    let before = ledger.get(&run).await.assert_value().assert_value();
+    assert!(matches!(
+        before.snapshot.terminal,
+        Some(TerminalResult::Succeeded { .. })
+    ));
+    assert!(!accepted.exists());
+    assert!(files.file_input_roots(&run).assert_value().is_empty());
+    drop(controller);
+    let moved = root.path().join("moved-workspace");
+    std::fs::rename(&workspace, &moved).assert_value();
+
+    let reopened = PortableRunController::reopen(bootstrap())
+        .await
+        .assert_value();
+    reopened.wait_terminal().await.assert_value();
+    let after = ledger.get(&run).await.assert_value().assert_value();
+    assert_eq!(after.snapshot, before.snapshot);
+    assert!(!workspace.exists());
+    assert!(!accepted.exists());
+    assert!(files.file_input_roots(&run).assert_value().is_empty());
+    assert_eq!(std::fs::read(original).assert_value(), b"later user bytes");
+    assert_eq!(
+        std::fs::read(moved.join("output")).assert_value(),
+        b"live output"
+    );
+}
+
+#[tokio::test]
 async fn reconstructed_stop_releases_inputs_only_after_workspace_ownership_is_available() {
     for managed in [false, true] {
         let root =
