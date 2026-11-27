@@ -643,6 +643,8 @@
       
         
       
+        
+      
     
     
     
@@ -843,6 +845,34 @@
     
   
     Ask a person
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../file-workflows/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Work with files and folders
   
 
     
@@ -2532,6 +2562,11 @@ chosen worktree explicitly with <code>git worktree remove PATH</code>.</p>
 <code>DirectTarget</code> or <code>HostedTarget</code>, a base without <code>worktree=True</code>, and bases other than <code>local</code> or
 <code>remote</code>, before target contact or controller startup.</p>
 <h2 id="watch-a-submitted-run">Watch a submitted run<a class="headerlink" href="#watch-a-submitted-run" title="Permanent link">&para;</a></h2>
+<p>For delivery-free file work, use <code>RunRequest(workspace=True)</code> or the same <code>workspace=True</code> string
+submission option. Local placement defaults to the selected folder in place; <code>copy_workspace=True</code>
+uses a disposable managed copy, and <code>workspace_seeds=("user:PATH",)</code> seeds a managed workspace.
+Named targets use managed placement. See <a href="../file-workflows/">file workflows</a> for the complete
+example, async file operations, filepath answers, result artifacts and explicit disk cleanup.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">zeroshot</span><span class="w"> </span><span class="kn">import</span> <span class="n">Client</span><span class="p">,</span> <span class="n">UniformRuntime</span>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
@@ -2550,7 +2585,7 @@ Both use Unix milliseconds, remain <code>None</code> when unknown, and are not p
 Imported history reports its import time rather than its original execution time. Use <code>cursor</code> for
 ordering and resumption, and <code>execution</code> to distinguish retries and simultaneous mapped executions.</p>
 <h2 id="run-on-a-direct-target">Run on a direct target<a class="headerlink" href="#run-on-a-direct-target" title="Permanent link">&para;</a></h2>
-<p>Local execution uses <code>LocalTarget</code>. Docker/direct and hosted targets require a committed Git
+<p>Local execution uses <code>LocalTarget</code>. Repository-mode Docker/direct and hosted runs require a committed Git
 source, selected from the client workspace or per-run <code>repository=</code>, <code>branch=</code>, and <code>revision=</code>.
 <code>repository=</code> accepts a credential-free HTTPS/SSH Git URL or GitHub <code>owner/name</code> shorthand;
 <code>source_connection=</code> selects a named connection used only for Git checkout and delivery:</p>
@@ -2723,7 +2758,7 @@ UTF-8 bytes and is stored as given; do not include secrets. Existing SDK error t
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-25">25 November 2026</time>
+    Last updated <time datetime="2026-11-27">27 November 2026</time>
   </span>
 
     

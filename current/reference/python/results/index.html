@@ -641,6 +641,8 @@
       
         
       
+        
+      
     
     
     
@@ -841,6 +843,34 @@
     
   
     Ask a person
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guides/file-workflows/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Work with files and folders
   
 
     
@@ -3666,7 +3696,7 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
 
 
 <h2 id="zeroshot.RunResult" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunResult</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">part_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">succeeded</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span> <span class="n">output</span><span class="p">:</span> <span class="n">JsonValue</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">delivery_receipt</span><span class="p">:</span> <span class="n">JsonValue</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">failure</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">context</span><span class="p">:</span> <span class="n">FailureContext</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunResult</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">part_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">succeeded</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span> <span class="n">output</span><span class="p">:</span> <span class="n">JsonValue</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">delivery_receipt</span><span class="p">:</span> <span class="n">JsonValue</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">failure</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">context</span><span class="p">:</span> <span class="n">FailureContext</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">artifacts</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">JsonValue</span><span class="p">]</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">())</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
@@ -3760,6 +3790,21 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
             <p>Structured safe failure evidence, or None for older run data.</p>
           </div>
         </li>
+        <li class="doc-section-item field-body">
+            <b><code>artifacts</code></b>
+              (<code><span title="dict">dict</span>[<span title="str">str</span>, <a class="autorefs autorefs-internal" title="            JsonValue: TypeAlias = bool | int | float | str | list['JsonValue'] | dict[str, 'JsonValue'] | None
+
+  
+      module-attribute
+   (zeroshot.values.JsonValue)" href="../configuration/#zeroshot.JsonValue">JsonValue</a>]</code>, default:
+                  <code><span title="dict">dict</span>()</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Named explicit publications, with the unchanged CLI managed or live local
+references. Managed addresses use their producing part ID for file retrieval.</p>
+          </div>
+        </li>
     </ul>
 
 
@@ -3814,7 +3859,7 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
 
 
 <h2 id="zeroshot.RunStatus" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunStatus</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">part_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">current_part_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">source</span><span class="p">:</span> <span class="n">ResolvedSource</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">size</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">cursor</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">phase</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'queued'</span><span class="p">,</span> <span class="s1">'admitted'</span><span class="p">,</span> <span class="s1">'running'</span><span class="p">,</span> <span class="s1">'stopping'</span><span class="p">,</span> <span class="s1">'suspended'</span><span class="p">,</span> <span class="s1">'finished'</span><span class="p">],</span> <span class="n">active_executions</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">ActiveExecution</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span> <span class="n">result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">graph_result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">controller</span><span class="p">:</span> <span class="n">ControllerObservation</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">suspend_requested</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">reason</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'command'</span><span class="p">,</span> <span class="s1">'wait'</span><span class="p">,</span> <span class="s1">'request'</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">node</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">created_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">due_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">request</span><span class="p">:</span> <span class="n">HumanRequest</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">steers</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">RunSteer</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span> <span class="n">omitted_steers</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">recorded_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunStatus</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">part_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">current_part_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">source</span><span class="p">:</span> <span class="n">ResolvedSource</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">size</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">cursor</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">phase</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'queued'</span><span class="p">,</span> <span class="s1">'admitted'</span><span class="p">,</span> <span class="s1">'running'</span><span class="p">,</span> <span class="s1">'stopping'</span><span class="p">,</span> <span class="s1">'suspended'</span><span class="p">,</span> <span class="s1">'finished'</span><span class="p">],</span> <span class="n">active_executions</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">ActiveExecution</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span> <span class="n">result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">graph_result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">controller</span><span class="p">:</span> <span class="n">ControllerObservation</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">suspend_requested</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">reason</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'command'</span><span class="p">,</span> <span class="s1">'wait'</span><span class="p">,</span> <span class="s1">'request'</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">node</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">created_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">due_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">request</span><span class="p">:</span> <span class="n">HumanRequest</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">steers</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">RunSteer</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span> <span class="n">omitted_steers</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">recorded_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">workspace</span><span class="p">:</span> <span class="n">JsonValue</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
@@ -3918,7 +3963,7 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
         </li>
         <li class="doc-section-item field-body">
             <b><code>result</code></b>
-              (<code><a class="autorefs autorefs-internal" title="              RunResult(*, run_id: str, part_id: str, succeeded: bool, output: JsonValue = None, delivery_receipt: JsonValue = None, failure: str | None = None, context: FailureContext | None = None)
+              (<code><a class="autorefs autorefs-internal" title="              RunResult(*, run_id: str, part_id: str, succeeded: bool, output: JsonValue = None, delivery_receipt: JsonValue = None, failure: str | None = None, context: FailureContext | None = None, artifacts: dict[str, JsonValue] = dict())
 
   
       dataclass
@@ -3932,7 +3977,7 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
         </li>
         <li class="doc-section-item field-body">
             <b><code>graph_result</code></b>
-              (<code><a class="autorefs autorefs-internal" title="              RunResult(*, run_id: str, part_id: str, succeeded: bool, output: JsonValue = None, delivery_receipt: JsonValue = None, failure: str | None = None, context: FailureContext | None = None)
+              (<code><a class="autorefs autorefs-internal" title="              RunResult(*, run_id: str, part_id: str, succeeded: bool, output: JsonValue = None, delivery_receipt: JsonValue = None, failure: str | None = None, context: FailureContext | None = None, artifacts: dict[str, JsonValue] = dict())
 
   
       dataclass
@@ -4006,7 +4051,7 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
         </li>
         <li class="doc-section-item field-body">
             <b><code>request</code></b>
-              (<code><a class="autorefs autorefs-internal" title="              HumanRequest(*, id: str, text: str, signals: JsonValue, output: JsonValue, expires_at: int)
+              (<code><a class="autorefs autorefs-internal" title="              HumanRequest(*, id: str, text: str, signals: JsonValue, output: JsonValue, expires_at: int, artifacts: dict[str, JsonValue] = dict())
 
   
       dataclass
@@ -4052,6 +4097,20 @@ nodes. Messages pass through unchanged; this record also carries runtime failure
             <p>Ledger recording time of the event producing a watch notification, in Unix
 milliseconds. None for status responses and old events without timing. Imported
 history carries its import time, not the original execution time. Cursor defines order.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>workspace</code></b>
+              (<code><a class="autorefs autorefs-internal" title="            JsonValue: TypeAlias = bool | int | float | str | list['JsonValue'] | dict[str, 'JsonValue'] | None
+
+  
+      module-attribute
+   (zeroshot.values.JsonValue)" href="../configuration/#zeroshot.JsonValue">JsonValue</a></code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Native placement and selected folder metadata, or None in repository mode.</p>
           </div>
         </li>
     </ul>
@@ -4227,7 +4286,7 @@ None for human direction.</p>
 
 
 <h2 id="zeroshot.RunSummary" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunSummary</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">part_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">current_part_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">source</span><span class="p">:</span> <span class="n">ResolvedSource</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">size</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">cursor</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">phase</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'queued'</span><span class="p">,</span> <span class="s1">'admitted'</span><span class="p">,</span> <span class="s1">'running'</span><span class="p">,</span> <span class="s1">'stopping'</span><span class="p">,</span> <span class="s1">'suspended'</span><span class="p">,</span> <span class="s1">'finished'</span><span class="p">],</span> <span class="n">force_stop_requested</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span> <span class="n">graph_result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">controller</span><span class="p">:</span> <span class="n">ControllerObservation</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">suspend_requested</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">reason</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'command'</span><span class="p">,</span> <span class="s1">'wait'</span><span class="p">,</span> <span class="s1">'request'</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">node</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">created_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">due_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">request</span><span class="p">:</span> <span class="n">HumanRequest</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunSummary</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">part_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">current_part_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">source</span><span class="p">:</span> <span class="n">ResolvedSource</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">size</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">cursor</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">phase</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'queued'</span><span class="p">,</span> <span class="s1">'admitted'</span><span class="p">,</span> <span class="s1">'running'</span><span class="p">,</span> <span class="s1">'stopping'</span><span class="p">,</span> <span class="s1">'suspended'</span><span class="p">,</span> <span class="s1">'finished'</span><span class="p">],</span> <span class="n">force_stop_requested</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span> <span class="n">graph_result</span><span class="p">:</span> <span class="n">RunResult</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">controller</span><span class="p">:</span> <span class="n">ControllerObservation</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">suspend_requested</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">reason</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'command'</span><span class="p">,</span> <span class="s1">'wait'</span><span class="p">,</span> <span class="s1">'request'</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">node</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">created_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">due_at</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">request</span><span class="p">:</span> <span class="n">HumanRequest</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">workspace</span><span class="p">:</span> <span class="n">JsonValue</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
@@ -4323,7 +4382,7 @@ None for human direction.</p>
         </li>
         <li class="doc-section-item field-body">
             <b><code>graph_result</code></b>
-              (<code><a class="autorefs autorefs-internal" title="              RunResult(*, run_id: str, part_id: str, succeeded: bool, output: JsonValue = None, delivery_receipt: JsonValue = None, failure: str | None = None, context: FailureContext | None = None)
+              (<code><a class="autorefs autorefs-internal" title="              RunResult(*, run_id: str, part_id: str, succeeded: bool, output: JsonValue = None, delivery_receipt: JsonValue = None, failure: str | None = None, context: FailureContext | None = None, artifacts: dict[str, JsonValue] = dict())
 
   
       dataclass
@@ -4397,7 +4456,7 @@ None for human direction.</p>
         </li>
         <li class="doc-section-item field-body">
             <b><code>request</code></b>
-              (<code><a class="autorefs autorefs-internal" title="              HumanRequest(*, id: str, text: str, signals: JsonValue, output: JsonValue, expires_at: int)
+              (<code><a class="autorefs autorefs-internal" title="              HumanRequest(*, id: str, text: str, signals: JsonValue, output: JsonValue, expires_at: int, artifacts: dict[str, JsonValue] = dict())
 
   
       dataclass
@@ -4407,6 +4466,20 @@ None for human direction.</p>
           –
           <div class="doc-md-description">
             <p>Human request contract when suspended for a request.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>workspace</code></b>
+              (<code><a class="autorefs autorefs-internal" title="            JsonValue: TypeAlias = bool | int | float | str | list['JsonValue'] | dict[str, 'JsonValue'] | None
+
+  
+      module-attribute
+   (zeroshot.values.JsonValue)" href="../configuration/#zeroshot.JsonValue">JsonValue</a></code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Native workspace selection, or None in repository mode.</p>
           </div>
         </li>
     </ul>
@@ -4445,7 +4518,7 @@ None for human direction.</p>
 
 
 <h2 id="zeroshot.HumanRequest" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">HumanRequest</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="nb">id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">signals</span><span class="p">:</span> <span class="n">JsonValue</span><span class="p">,</span> <span class="n">output</span><span class="p">:</span> <span class="n">JsonValue</span><span class="p">,</span> <span class="n">expires_at</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">HumanRequest</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="nb">id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">signals</span><span class="p">:</span> <span class="n">JsonValue</span><span class="p">,</span> <span class="n">output</span><span class="p">:</span> <span class="n">JsonValue</span><span class="p">,</span> <span class="n">expires_at</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">artifacts</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">JsonValue</span><span class="p">]</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">())</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
@@ -4509,6 +4582,20 @@ None for human direction.</p>
           –
           <div class="doc-md-description">
             <p>Exclusive answer deadline in Unix epoch milliseconds.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>artifacts</code></b>
+              (<code><span title="dict">dict</span>[<span title="str">str</span>, <a class="autorefs autorefs-internal" title="            JsonValue: TypeAlias = bool | int | float | str | list['JsonValue'] | dict[str, 'JsonValue'] | None
+
+  
+      module-attribute
+   (zeroshot.values.JsonValue)" href="../configuration/#zeroshot.JsonValue">JsonValue</a>]</code>, default:
+                  <code><span title="dict">dict</span>()</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Explicit attachments on an authorized inbox read; omitted on status views.</p>
           </div>
         </li>
     </ul>
@@ -4775,7 +4862,7 @@ None for human direction.</p>
         </li>
         <li class="doc-section-item field-body">
             <b><code>request</code></b>
-              (<code><a class="autorefs autorefs-internal" title="              HumanRequest(*, id: str, text: str, signals: JsonValue, output: JsonValue, expires_at: int)
+              (<code><a class="autorefs autorefs-internal" title="              HumanRequest(*, id: str, text: str, signals: JsonValue, output: JsonValue, expires_at: int, artifacts: dict[str, JsonValue] = dict())
 
   
       dataclass
@@ -5533,7 +5620,7 @@ metadata retains destination names and the originating node, node instance and e
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-26">26 November 2026</time>
+    Last updated <time datetime="2026-11-27">27 November 2026</time>
   </span>
 
     

@@ -641,6 +641,8 @@
       
         
       
+        
+      
     
     
     
@@ -841,6 +843,34 @@
     
   
     Ask a person
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guides/file-workflows/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Work with files and folders
   
 
     
@@ -3034,7 +3064,7 @@ current directory when the client opens.</p>
 
 
 
-        <p>Use a named hosted target already configured and logged in through the CLI.</p>
+        <p>Use a named direct or hosted target already configured through the CLI.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -3607,7 +3637,7 @@ connections.</p>
 
 
 <h2 id="zeroshot.RunRequest" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunRequest</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">graph</span><span class="p">:</span> <span class="n">GraphSpec</span><span class="p">,</span> <span class="n">initial_input</span><span class="p">:</span> <span class="n">JsonValue</span><span class="p">,</span> <span class="n">runtime</span><span class="p">:</span> <span class="n">RuntimePlan</span><span class="p">,</span> <span class="n">cwd</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">worktree</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">worktree_base</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'local'</span><span class="p">,</span> <span class="s1">'remote'</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">repository</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">source_connection</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">branch</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">revision</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">submission_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunRequest</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">graph</span><span class="p">:</span> <span class="n">GraphSpec</span><span class="p">,</span> <span class="n">initial_input</span><span class="p">:</span> <span class="n">JsonValue</span><span class="p">,</span> <span class="n">runtime</span><span class="p">:</span> <span class="n">RuntimePlan</span><span class="p">,</span> <span class="n">cwd</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">worktree</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">worktree_base</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'local'</span><span class="p">,</span> <span class="s1">'remote'</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">repository</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">source_connection</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">branch</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">revision</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">submission_key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">workspace</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">workspace_placement</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'in-place'</span><span class="p">,</span> <span class="s1">'managed'</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">workspace_seeds</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span> <span class="n">copy_workspace</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
@@ -3751,6 +3781,49 @@ enabled worktrees in native preflight.</p>
           –
           <div class="doc-md-description">
             <p>Stable idempotency key; None generates one before native preflight.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>workspace</code></b>
+              (<code><span title="bool">bool</span></code>, default:
+                  <code>False</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Execute without a Git source or delivery. Omission keeps repository mode.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>workspace_placement</code></b>
+              (<code><span title="typing.Literal">Literal</span>[&#39;in-place&#39;, &#39;managed&#39;] | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>In-place locally or managed on targets by default. Seeds and
+copy_workspace select managed placement. In-place uses the exact cwd folder.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>workspace_seeds</code></b>
+              (<code><span title="tuple">tuple</span>[<span title="str">str</span>, ...]</code>, default:
+                  <code>()</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Target library selections, user:PATH or org:PATH with optional #MEMBER.
+Requires workspace. Native admission freezes the selected current bytes.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>copy_workspace</code></b>
+              (<code><span title="bool">bool</span></code>, default:
+                  <code>False</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Freeze the local cwd contents into a disposable managed workspace.
+Requires workspace and cannot be used with a target or seeds.</p>
           </div>
         </li>
     </ul>
@@ -4062,7 +4135,7 @@ needs exactly the run before it.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-26">26 November 2026</time>
+    Last updated <time datetime="2026-11-27">27 November 2026</time>
   </span>
 
     

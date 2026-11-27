@@ -1,0 +1,449 @@
+{
+  "profile": "openengine.graph.full/v1",
+  "initialInput": {
+    "kind": "record",
+    "fields": {
+      "text": {
+        "type": {
+          "kind": "string"
+        },
+        "required": true
+      },
+      "source": {
+        "type": {
+          "kind": "filepath"
+        },
+        "required": true
+      }
+    }
+  },
+  "policy": {
+    "policy": "policy.native-v2@1",
+    "default": "deny"
+  },
+  "root": {
+    "kind": "seq",
+    "name": "file_workflow",
+    "state": {
+      "kind": "record",
+      "fields": {
+        "text": {
+          "type": {
+            "kind": "string"
+          },
+          "required": true
+        },
+        "source": {
+          "type": {
+            "kind": "filepath"
+          },
+          "required": true
+        },
+        "reply": {
+          "type": {
+            "kind": "filepath"
+          },
+          "required": false
+        },
+        "folder": {
+          "type": {
+            "kind": "filepath"
+          },
+          "required": false
+        }
+      }
+    },
+    "promotedStatePaths": [],
+    "children": [
+      {
+        "kind": "step",
+        "name": "produce",
+        "worker": "agent.produce@1",
+        "input": {
+          "kind": "record",
+          "fields": {
+            "source": {
+              "type": {
+                "kind": "filepath"
+              },
+              "required": true
+            }
+          }
+        },
+        "output": {
+          "kind": "null"
+        },
+        "inputBindings": [
+          {
+            "target": ["source"],
+            "value": {
+              "source": "state",
+              "path": ["source"]
+            }
+          }
+        ],
+        "writeBindings": [],
+        "attempts": 1,
+        "instructions": "Read the supplied source folder. Write report/draft.txt in the working folder. Return JSON null; files are published explicitly by the next request."
+      },
+      {
+        "kind": "choice",
+        "name": "produce_result",
+        "state": {
+          "kind": "record",
+          "fields": {
+            "text": {
+              "type": {
+                "kind": "string"
+              },
+              "required": true
+            },
+            "source": {
+              "type": {
+                "kind": "filepath"
+              },
+              "required": true
+            },
+            "reply": {
+              "type": {
+                "kind": "filepath"
+              },
+              "required": false
+            },
+            "folder": {
+              "type": {
+                "kind": "filepath"
+              },
+              "required": false
+            }
+          }
+        },
+        "promotedStatePaths": [],
+        "branches": [
+          {
+            "when": {
+              "kind": "in",
+              "value": {
+                "source": "error",
+                "name": "produce",
+                "field": null
+              },
+              "labels": ["crash", "malformed", "refusal", "timeout"]
+            },
+            "node": {
+              "kind": "fail",
+              "name": "produce_failed",
+              "reason": "produce_failed"
+            }
+          }
+        ],
+        "otherwise": {
+          "kind": "seq",
+          "name": "review_file",
+          "state": {
+            "kind": "record",
+            "fields": {
+              "text": {
+                "type": {
+                  "kind": "string"
+                },
+                "required": true
+              },
+              "source": {
+                "type": {
+                  "kind": "filepath"
+                },
+                "required": true
+              },
+              "reply": {
+                "type": {
+                  "kind": "filepath"
+                },
+                "required": false
+              },
+              "folder": {
+                "type": {
+                  "kind": "filepath"
+                },
+                "required": false
+              }
+            }
+          },
+          "children": [
+            {
+              "kind": "verifier",
+              "name": "approval",
+              "worker": "builtin.request.ask@1",
+              "input": {
+                "kind": "record",
+                "fields": {
+                  "text": {
+                    "type": {
+                      "kind": "string"
+                    },
+                    "required": true
+                  }
+                }
+              },
+              "output": {
+                "kind": "record",
+                "fields": {
+                  "reply": {
+                    "type": {
+                      "kind": "filepath"
+                    },
+                    "required": true
+                  }
+                }
+              },
+              "diagnostic": {
+                "kind": "record",
+                "fields": {
+                  "message": {
+                    "type": {
+                      "kind": "string"
+                    },
+                    "required": true
+                  }
+                }
+              },
+              "signals": {},
+              "attempts": 1,
+              "inputBindings": [
+                {
+                  "target": ["text"],
+                  "value": {
+                    "source": "state",
+                    "path": ["text"]
+                  }
+                }
+              ],
+              "writeBindings": [
+                {
+                  "target": ["reply"],
+                  "value": {
+                    "node": "approval",
+                    "channel": "out",
+                    "path": ["reply"]
+                  }
+                }
+              ],
+              "artifacts": {
+                "draft": {
+                  "kind": "literal",
+                  "path": "report"
+                }
+              }
+            },
+            {
+              "kind": "choice",
+              "name": "approval_result",
+              "state": {
+                "kind": "record",
+                "fields": {
+                  "text": {
+                    "type": {
+                      "kind": "string"
+                    },
+                    "required": true
+                  },
+                  "source": {
+                    "type": {
+                      "kind": "filepath"
+                    },
+                    "required": true
+                  },
+                  "reply": {
+                    "type": {
+                      "kind": "filepath"
+                    },
+                    "required": false
+                  },
+                  "folder": {
+                    "type": {
+                      "kind": "filepath"
+                    },
+                    "required": false
+                  }
+                }
+              },
+              "promotedStatePaths": [],
+              "branches": [
+                {
+                  "when": {
+                    "kind": "in",
+                    "value": {
+                      "source": "error",
+                      "name": "approval",
+                      "field": null
+                    },
+                    "labels": ["crash", "malformed", "refusal", "timeout"]
+                  },
+                  "node": {
+                    "kind": "fail",
+                    "name": "approval_failed",
+                    "reason": "approval_failed"
+                  }
+                }
+              ],
+              "otherwise": {
+                "kind": "seq",
+                "name": "apply_edit",
+                "state": {
+                  "kind": "record",
+                  "fields": {
+                    "text": {
+                      "type": {
+                        "kind": "string"
+                      },
+                      "required": true
+                    },
+                    "source": {
+                      "type": {
+                        "kind": "filepath"
+                      },
+                      "required": true
+                    },
+                    "reply": {
+                      "type": {
+                        "kind": "filepath"
+                      },
+                      "required": false
+                    },
+                    "folder": {
+                      "type": {
+                        "kind": "filepath"
+                      },
+                      "required": false
+                    }
+                  }
+                },
+                "children": [
+                  {
+                    "kind": "step",
+                    "name": "edit",
+                    "worker": "agent.edit@1",
+                    "input": {
+                      "kind": "record",
+                      "fields": {
+                        "reply": {
+                          "type": {
+                            "kind": "filepath"
+                          },
+                          "required": true
+                        }
+                      }
+                    },
+                    "output": {
+                      "kind": "record",
+                      "fields": {
+                        "folder": {
+                          "type": {
+                            "kind": "filepath"
+                          },
+                          "required": true
+                        }
+                      }
+                    },
+                    "inputBindings": [
+                      {
+                        "target": ["reply"],
+                        "value": {
+                          "source": "state",
+                          "path": ["reply"]
+                        }
+                      }
+                    ],
+                    "writeBindings": [
+                      {
+                        "target": ["folder"],
+                        "value": {
+                          "node": "edit",
+                          "channel": "out",
+                          "path": ["folder"]
+                        }
+                      }
+                    ],
+                    "attempts": 1,
+                    "instructions": "Read the supplied reply file. Apply its requested edit to report/draft.txt. Return {\"folder\":\"report\"}."
+                  },
+                  {
+                    "kind": "choice",
+                    "name": "edit_result",
+                    "state": {
+                      "kind": "record",
+                      "fields": {
+                        "text": {
+                          "type": {
+                            "kind": "string"
+                          },
+                          "required": true
+                        },
+                        "source": {
+                          "type": {
+                            "kind": "filepath"
+                          },
+                          "required": true
+                        },
+                        "reply": {
+                          "type": {
+                            "kind": "filepath"
+                          },
+                          "required": false
+                        },
+                        "folder": {
+                          "type": {
+                            "kind": "filepath"
+                          },
+                          "required": false
+                        }
+                      }
+                    },
+                    "promotedStatePaths": [],
+                    "branches": [
+                      {
+                        "when": {
+                          "kind": "in",
+                          "value": {
+                            "source": "error",
+                            "name": "edit",
+                            "field": null
+                          },
+                          "labels": ["crash", "malformed", "refusal", "timeout"]
+                        },
+                        "node": {
+                          "kind": "fail",
+                          "name": "edit_failed",
+                          "reason": "edit_failed"
+                        }
+                      }
+                    ],
+                    "otherwise": {
+                      "kind": "succeed",
+                      "name": "done",
+                      "output": {
+                        "kind": "null"
+                      },
+                      "artifacts": {
+                        "result": {
+                          "kind": "binding",
+                          "value": {
+                            "source": "state",
+                            "path": ["folder"]
+                          }
+                        }
+                      },
+                      "bindings": []
+                    }
+                  }
+                ],
+                "promotedStatePaths": []
+              }
+            }
+          ],
+          "promotedStatePaths": []
+        }
+      }
+    ]
+  }
+}
