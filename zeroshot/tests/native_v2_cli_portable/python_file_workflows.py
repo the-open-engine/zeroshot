@@ -123,6 +123,15 @@ async def download(client, publication, destination):
     )
 
 
+async def assert_cleaned_publication_unavailable(client, publication):
+    try:
+        await download(client, publication, root / "cleaned")
+    except TargetError as error:
+        assert "not found" in str(error), error
+    else:
+        raise AssertionError("cleaned publication remained downloadable")
+
+
 async def local(managed):
     label = "managed" if managed else "in-place"
     work, state = root / label, root / ("state-" + label)
@@ -198,13 +207,9 @@ async def local(managed):
             cleanup = await client.cleanup(all=True)
             assert cleanup["publications"] == 2, cleanup
             assert (await client.cleanup(all=True))["publications"] == 0
-            try:
-                await download(client, publication, root / "cleaned")
-                raise AssertionError("cleaned publication remained downloadable")
-            except TargetError as error:
-                assert "not found" in str(error), error
+            await assert_cleaned_publication_unavailable(client, publication)
         else:
-            assert publication["kind"] == "local" and publication["path"] == "report"
+            assert (publication["kind"], publication["path"]) == ("local", "report")
             # Windows may retain its native extended-length spelling in a reference.
             assert Path(publication["root"]).samefile(work)
             assert work.joinpath("report/draft.txt").read_text() == "before\nafter"
