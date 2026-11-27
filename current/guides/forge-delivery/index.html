@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Set up GitHub and GitLab delivery with native CLI logins or token connections.">
+        <meta name="description" content="Set up GitHub, GitLab and Forgejo delivery with native CLI logins or token connections.">
       
       
       
@@ -63,14 +63,14 @@
     <meta property="og:type" content="article">
     <meta property="og:site_name" content="zeroshot">
     <meta property="og:title" content="GitHub and GitLab delivery | zeroshot docs">
-    <meta property="og:description" content="Set up GitHub and GitLab delivery with native CLI logins or token connections.">
+    <meta property="og:description" content="Set up GitHub, GitLab and Forgejo delivery with native CLI logins or token connections.">
     <meta property="og:url" content="https://zeroshot.sh/docs/current/guides/forge-delivery/">
     <meta property="og:image" content="https://zeroshot.sh/og.jpg">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="GitHub and GitLab delivery | zeroshot docs">
-    <meta name="twitter:description" content="Set up GitHub and GitLab delivery with native CLI logins or token connections.">
+    <meta name="twitter:description" content="Set up GitHub, GitLab and Forgejo delivery with native CLI logins or token connections.">
     <meta name="twitter:image" content="https://zeroshot.sh/og.jpg">
     
       
@@ -97,7 +97,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#github-and-gitlab-delivery" class="md-skip">
+        <a href="#github-gitlab-and-forgejo-delivery" class="md-skip">
           Skip to content
         </a>
       
@@ -1097,6 +1097,17 @@
     <span class="md-ellipsis">
       
         Scope and limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#forgejo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Forgejo
       
     </span>
   </a>
@@ -2371,6 +2382,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#forgejo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Forgejo
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2391,9 +2413,10 @@
   
 
 
-<h1 id="github-and-gitlab-delivery">GitHub and GitLab delivery<a class="headerlink" href="#github-and-gitlab-delivery" title="Permanent link">&para;</a></h1>
+<h1 id="github-gitlab-and-forgejo-delivery">GitHub, GitLab and Forgejo delivery<a class="headerlink" href="#github-gitlab-and-forgejo-delivery" title="Permanent link">&para;</a></h1>
 <p>GitHub.com, GitHub Enterprise, and GitLab use the same delivery nodes for PR/MR creation, merging,
-and issue or review comments.</p>
+and issue or review comments. Self-hosted Forgejo uses them for pull request creation, required
+checks and merging, without comments; see <a href="#forgejo">Forgejo</a>.</p>
 <table>
 <thead>
 <tr>
@@ -2418,6 +2441,11 @@ and issue or review comments.</p>
 <td>19.5.1</td>
 <td><code>GITLAB_TOKEN</code></td>
 </tr>
+<tr>
+<td>Self-hosted Forgejo</td>
+<td>16.0.0</td>
+<td><code>FORGEJO_TOKEN</code></td>
+</tr>
 </tbody>
 </table>
 <p>Instances must be reachable over HTTPS with certificate verification enabled. Local delivery honors
@@ -2428,8 +2456,9 @@ and CA settings. Both accept private CA certificates from the named PEM file or 
 directories and support <code>socks5://</code> and <code>socks5h://</code> proxy URLs. An unreadable certificate file
 is reported by name. Proxy credentials stay private. Relative CA paths are anchored to the invoking
 directory before a delivery worktree is created.</p>
-<p>Older or unidentifiable servers fail version checks. Use a web base without a trailing slash, including any GitLab installation
-prefix (such as <code>https://gitlab.example/install</code>). GitHub uses a root web URL.</p>
+<p>Older or unidentifiable servers fail version checks. Use a web base without a trailing slash,
+including any GitLab or Forgejo installation prefix (such as <code>https://gitlab.example/install</code>).
+GitHub uses a root web URL.</p>
 <h2 id="local-setup">Local setup<a class="headerlink" href="#local-setup" title="Permanent link">&para;</a></h2>
 <p>Before agents start, local <code>--pr</code> and <code>--ship</code> runs make one authenticated, read-only forge request
 to check connectivity, token acceptance, project readability and the supported server version.
@@ -2523,7 +2552,8 @@ web base, separately from the Git locator:</p>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="nt">"connections"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"company-forge"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"GITLAB_TOKEN"</span><span class="p">]</span><span class="w"> </span><span class="p">}</span>
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="p">}</span>
 </code></pre></div>
-<p>Default API connections are <code>github.GH_TOKEN</code> and <code>gitlab.GITLAB_TOKEN</code>; explicit bindings keep their names.
+<p>Default API connections are <code>github.GH_TOKEN</code>, <code>gitlab.GITLAB_TOKEN</code> and <code>forgejo.FORGEJO_TOKEN</code>;
+explicit bindings keep their names.
 Named targets read the declared field names for both submission and resume. Native CLI aliases such
 as <code>GH_ENTERPRISE_TOKEN</code> and <code>GITLAB_ACCESS_TOKEN</code> apply only to local runs.
 One static connection can hold both transport and API fields; inline run values work too. GitHub uses
@@ -2677,6 +2707,41 @@ Neither procedure requires a force-push.</p>
 <p>For a named target, use <code>zeroshot checkpoints RUN_ID --target NAME</code>, then
 <code>zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID --target NAME</code> with a checkpoint taken
 before the rewrite. The target restores its own retained checkout; omit <code>--discard-workspace-changes</code>.</p>
+<h2 id="forgejo">Forgejo<a class="headerlink" href="#forgejo" title="Permanent link">&para;</a></h2>
+<p>Forgejo is never identified automatically. Select it with <code>--source-provider source.forgejo</code> and
+<code>--source-base-url https://forge.example</code>, including the installation path when there is one, or
+with the equivalent <code>forge</code> object in a source file, as shown for GitLab:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="go">zeroshot run --title "Example change" --input task.json \</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="go">  --template software-change --uniform-runtime-config runtime.json --pr \</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="go">  --source-provider source.forgejo --source-base-url https://forge.example</span>
+</code></pre></div>
+<p>The Forgejo API uses HTTPS. Git checkout and push can use HTTPS or SSH. For a private certificate
+authority, use the <code>SSL_CERT_FILE</code> setting described above.</p>
+<p>The token is <code>FORGEJO_TOKEN</code> from the delivery connection: the default <code>forgejo</code> connection or the
+connection the delivery node declares, as shown for GitLab above. A self-hosted instance has no
+native login, so local runs read no ambient token and start no CLI for it. The scopes are
+<code>read:user</code> and <code>write:repository</code>, and the token's user needs push access. <code>check_access</code> refuses a
+read-only token before agents start.</p>
+<p>Required checks come from the rule in effect for the target branch, read through the branch
+endpoint: <code>enable_status_check</code> and <code>status_check_contexts</code>, with <code>*</code> and <code>?</code> patterns. Approvals
+come from <code>required_approvals</code>.</p>
+<p><strong>Protect the target branch.</strong> Without an enabled status check, a pull request whose CI has not
+reported yet has no statuses and counts as not required, so <code>--ship</code> can merge before CI starts.
+Enable a status check on the target branch for CI-gated delivery.</p>
+<p>A failed check carries the failed Forgejo Actions job logs into repair, with the same budgets and
+redaction as GitLab. Statuses from other CI systems contribute their status line only. Without
+Actions read access the status lines remain and the diagnostic says why details are missing.</p>
+<p><code>--ship</code> merges with the repository's default merge style when it is allowed, otherwise with the
+first allowed style. It pins the reviewed head with <code>head_commit_id</code>, never forces or schedules a
+merge, and keeps the head branch.</p>
+<p>Zeroshot rechecks the target just before submitting the merge. Forgejo uses the PR's target branch at
+merge time, so avoid retargeting during delivery. If a request's outcome is uncertain, Zeroshot
+observes the PR for confirmation while its controller is active.</p>
+<p><code>mergeable: false</code> is rechecked three times, two seconds apart, before it counts as a conflict,
+because Forgejo also reports it while its own conflict check runs.</p>
+<p>Not supported: review comment intake and conversation resolution, automatic head updates when the
+branch rule blocks outdated branches, and merge queues. A pull request blocked only by such a rule
+waits.</p>
 
 
 
@@ -2697,7 +2762,7 @@ before the rewrite. The target restores its own retained checkout; omit <code>--
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-26">26 November 2026</time>
+    Last updated <time datetime="2026-11-27">27 November 2026</time>
   </span>
 
     
