@@ -31,7 +31,7 @@ mod input_size_tests;
 mod tests;
 
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -102,8 +102,9 @@ pub async fn build_production_target_authority(
 /// Host-owned non-secret capabilities used to compose one installed target.
 #[derive(Clone)]
 pub struct ProductionHostingConfig {
+    /// Authenticated store for both managed breakpoint capture and post-restart receipt lookup.
     pub file_store: Option<(
-        Arc<crate::native_v2_files::DiskFileStore>,
+        Arc<dyn crate::native_v2_files::publication::ManagedPublicationStore>,
         openengine_cluster_server::identity::ConnectionIdentity,
     )>,
     /// User-facing size choices. Private capsules retain sizes already admitted by their host.
@@ -143,6 +144,21 @@ pub struct ProductionHostingConfig {
     pub git_program: PathBuf,
     pub gh_program: PathBuf,
     pub process_pool: HostedProcessPool,
+}
+
+impl ProductionHostingConfig {
+    pub(crate) fn file_publisher(
+        &self,
+        workspace: &Path,
+    ) -> Option<Arc<dyn crate::native_v2_files::publication::RunFilePublisher>> {
+        self.file_store.as_ref().map(|(store, identity)| {
+            Arc::new(crate::native_v2_files::publication::ManagedFilePublisher {
+                workspace: workspace.to_owned(),
+                store: store.clone(),
+                identity: identity.clone(),
+            }) as Arc<dyn crate::native_v2_files::publication::RunFilePublisher>
+        })
+    }
 }
 
 impl fmt::Debug for ProductionHostingConfig {

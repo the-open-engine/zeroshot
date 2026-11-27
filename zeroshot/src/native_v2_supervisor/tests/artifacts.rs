@@ -1,4 +1,6 @@
 use super::*;
+#[path = "artifacts/host_store.rs"]
+mod host_store;
 #[path = "artifacts/receipt_sizes.rs"]
 mod receipt_sizes;
 use crate::native_v2_files::{DiskFileStore, FileAccess, SingleAccountFiles, TargetFileHost};
