@@ -2540,7 +2540,9 @@ python -m mkdocs build --strict
   generic runtime-loss settlement, using existing checkpoint authority and no replacement agents
   or credential resolution. Allocator checkpoint preparation and committed-publication recovery
   stay together in `native_v2_hosting/allocator/workspace.rs`. Recovery reuses the receipt even
-  after workspace loss. The catalog retains
+  after workspace loss. A host can supply `ManagedPublicationStore` in
+  `ProductionHostingConfig.file_store`. Capture and receipt lookup share the authenticated
+  store. Direct targets use the disk adapter. The catalog retains
   request-vs-final access context for reads and pins. Final references live in result metadata;
   request attachments are omitted from ordinary status/vector views and retained in the inbox.
   Managed file receipts retain the producing part’s file address in logical and exact reads. A

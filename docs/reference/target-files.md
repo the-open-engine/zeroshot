@@ -145,4 +145,13 @@ servers install it explicitly through `TargetFilesMount`. Run allocators inject 
 `RunFilePublisher` for their placement; publication access context stays in the host catalog.
 Implementations must call the supplied preflight validator with the complete receipt before
 committing it, including on replay.
+
+Production hosts can set `ProductionHostingConfig.file_store` to a
+`native_v2_files::publication::ManagedPublicationStore` and an authenticated identity.
+At a request or final output, `capture` commits the selected workspace bytes and receipt
+together. After an interruption, `committed_receipt` looks up the same owner and paths, even
+if the workspace is gone. Return `Ok(None)` only when no commit exists. A storage or
+authorization error must remain an error so recovery can retry. Both calls use the engine's
+blocking I/O pool. Direct targets use the disk implementation.
+
 Existing hosts may leave publication and cleanup unsupported. Worker artifact receipts and workspace recovery storage retain their existing contracts.

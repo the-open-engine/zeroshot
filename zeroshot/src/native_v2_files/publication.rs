@@ -1,6 +1,6 @@
 //! Host-side capture before request visibility or primary graph completion.
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use async_trait::async_trait;
 use openengine_cluster_protocol::{FieldName, PublishedFile, PublishedFiles, UnixTimestampMillis};
@@ -23,6 +23,59 @@ pub struct FilePublication {
 pub trait RunFilePublisher: Send + Sync {
     /// Call the supplied preflight before committing a publication, including on receipt replay.
     async fn publish(&self, request: FilePublication) -> Result<PublishedFiles>;
+}
+
+/// Host-owned managed storage. Both operations run on the engine's blocking I/O pool.
+pub trait ManagedPublicationStore: Send + Sync {
+    /// Authorize the identity and confine every path to the workspace. Preflight the full
+    /// receipt, honor cancellation, and commit the bytes and receipt atomically before returning.
+    /// Repeating the same owner and paths must recover the same committed bytes and receipt.
+    fn capture(
+        &self,
+        identity: &ConnectionIdentity,
+        workspace: &Path,
+        request: &FilePublication,
+    ) -> Result<PublishedFiles>;
+
+    /// Look up the authorized owner's committed receipt without opening the workspace.
+    /// Return None only for a missing commit. Conflicts and storage failures must return errors.
+    fn committed_receipt(
+        &self,
+        identity: &ConnectionIdentity,
+        request: &FilePublication,
+    ) -> Result<Option<PublishedFiles>>;
+}
+
+impl ManagedPublicationStore for DiskFileStore {
+    fn capture(
+        &self,
+        identity: &ConnectionIdentity,
+        workspace: &Path,
+        request: &FilePublication,
+    ) -> Result<PublishedFiles> {
+        self.capture_publication(
+            &FileAccess {
+                target: self.target(),
+                identity,
+            },
+            workspace,
+            request,
+        )
+    }
+
+    fn committed_receipt(
+        &self,
+        identity: &ConnectionIdentity,
+        request: &FilePublication,
+    ) -> Result<Option<PublishedFiles>> {
+        self.publication_receipt(
+            &FileAccess {
+                target: self.target(),
+                identity,
+            },
+            request,
+        )
+    }
 }
 
 /// The local placement records references into the user's original working root.
@@ -85,7 +138,7 @@ impl RunFilePublisher for LocalFilePublisher {
 
 pub struct ManagedFilePublisher {
     pub workspace: PathBuf,
-    pub store: Arc<DiskFileStore>,
+    pub store: Arc<dyn ManagedPublicationStore>,
     pub identity: ConnectionIdentity,
 }
 
@@ -96,18 +149,9 @@ impl RunFilePublisher for ManagedFilePublisher {
         let store = self.store.clone();
         let identity = self.identity.clone();
         // A detached waiter never cancels a started atomic catalog mutation.
-        tokio::task::spawn_blocking(move || {
-            store.capture_publication(
-                &FileAccess {
-                    target: store.target(),
-                    identity: &identity,
-                },
-                &workspace,
-                &request,
-            )
-        })
-        .await
-        .map_err(|_| super::invalid("artifact capture task failed"))?
+        tokio::task::spawn_blocking(move || store.capture(&identity, &workspace, &request))
+            .await
+            .map_err(|_| super::invalid("artifact capture task failed"))?
     }
 }
 

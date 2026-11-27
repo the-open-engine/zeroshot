@@ -221,6 +221,7 @@ async fn completed_input_cleanup_preserves_an_explicit_managed_publication() {
     std::fs::create_dir(&workspace).assert_value();
     assert!(
         allocator(&root.child("disabled"), None)
+            .config
             .file_publisher(&workspace)
             .is_none()
     );
@@ -247,6 +248,7 @@ async fn completed_input_cleanup_preserves_an_explicit_managed_publication() {
     std::fs::write(&output, "published output").assert_value();
     let (_stop, stopping) = tokio::sync::watch::channel(false);
     let published = allocator
+        .config
         .file_publisher(&workspace)
         .assert_value()
         .publish(FilePublication {

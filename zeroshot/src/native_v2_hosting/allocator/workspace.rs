@@ -197,19 +197,6 @@ impl ProductionCapsuleAllocator {
         Ok(())
     }
 
-    pub(super) fn file_publisher(
-        &self,
-        workspace: &Path,
-    ) -> Option<Arc<dyn crate::native_v2_files::publication::RunFilePublisher>> {
-        self.config.file_store.as_ref().map(|(store, identity)| {
-            Arc::new(crate::native_v2_files::publication::ManagedFilePublisher {
-                workspace: workspace.to_owned(),
-                store: store.clone(),
-                identity: identity.clone(),
-            }) as Arc<dyn crate::native_v2_files::publication::RunFilePublisher>
-        })
-    }
-
     pub(super) async fn prepare_hosted_workspace(
         &self,
         request: WorkspacePreparation<'_>,
@@ -334,18 +321,10 @@ impl ProductionCapsuleAllocator {
             let store = store.clone();
             let identity = identity.clone();
             let request = request.clone();
-            tokio::task::spawn_blocking(move || {
-                store.publication_receipt(
-                    &crate::native_v2_files::FileAccess {
-                        target: store.target(),
-                        identity: &identity,
-                    },
-                    &request,
-                )
-            })
-            .await
-            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?
-            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?
+            tokio::task::spawn_blocking(move || store.committed_receipt(&identity, &request))
+                .await
+                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?
+                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?
         };
         let Some(files) = files else {
             return Ok(None);

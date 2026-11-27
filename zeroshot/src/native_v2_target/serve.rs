@@ -8,6 +8,7 @@ use thiserror::Error;
 use tokio::net::TcpListener;
 use url::Url;
 use zeroshot_engine::native_v2_cli::TargetServe;
+use zeroshot_engine::native_v2_files::publication::ManagedPublicationStore;
 use zeroshot_engine::native_v2_hosting::{
     ProductionHostingConfig, ProductionHostingError, build_production_target_authority,
 };
@@ -183,7 +184,8 @@ async fn prepare_target(
         }
     });
     let hosting = ProductionHostingConfig {
-        file_store,
+        file_store: file_store
+            .map(|(store, identity)| (store as Arc<dyn ManagedPublicationStore>, identity)),
         workspace_files,
         run_sizes: config
             .bootstrap_key_file

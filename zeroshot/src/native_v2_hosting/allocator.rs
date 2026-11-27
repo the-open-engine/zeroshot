@@ -529,7 +529,7 @@ impl ProductionCapsuleAllocator {
             }
         }
         Ok(AllocatedCapsule {
-            file_publisher: self.file_publisher(&paths.workspace),
+            file_publisher: self.config.file_publisher(&paths.workspace),
             node_instance_floor: Default::default(),
             runner,
             cleanup,
