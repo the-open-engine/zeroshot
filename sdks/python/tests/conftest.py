@@ -137,6 +137,28 @@ elif args[:2] == ["target", "remove"]:
     print(os.environ.get("FAKE_TARGET_REMOVAL", json.dumps({"name":name, "removed":True})))
 elif args[:2] == ["target", "add"] or args[:2] == ["target", "setup"]:
     pass
+elif args and args[0] in ("file", "cleanup"):
+    if os.getenv("FAKE_FILE_ERROR"):
+        fail("invalid_request", os.environ["FAKE_FILE_ERROR"], "file operation refused", {})
+    if os.getenv("FAKE_FILE_DELAY"):
+        with open(os.environ["FAKE_FILE_PID"], "w") as stream:
+            stream.write(str(os.getpid()))
+        time.sleep(60)
+    address = {"scope":{"kind":"user"},"path":"library/data"}
+    responses = {
+        "stage":{"kind":"staged","runId":"upload-1","operation":"operation-1"},
+        "upload":{"kind":"replaced","address":address,"operation":"operation-1"},
+        "list":{"kind":"list","paths":[address]},
+        "download":{"output":args[-1]},
+        "remove":{"kind":"removed","removed":True},
+        "cleanup":{"kind":"cleaned","publications":2,"checkpointLineages":1},
+    }
+    selected = args[1] if args[0] == "file" else "cleanup"
+    result = responses[selected]
+    if selected == "list" and "--" in args:
+        result = {"kind":"members","selection":{"address":address,"member":""},
+                  "entries":[{"kind":"directory","path":""}]}
+    print(os.getenv("FAKE_FILE_RESPONSE", json.dumps(result)))
 elif args[:2] == ["stack", "validate"]:
     print(json.dumps({"valid": True}))
 elif args[:2] == ["stack", "submit"]:

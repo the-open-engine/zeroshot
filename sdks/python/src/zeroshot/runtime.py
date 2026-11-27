@@ -50,7 +50,7 @@ class DirectTarget:
 
 @dataclass(frozen=True, slots=True)
 class HostedTarget:
-    """Use a named hosted target already configured and logged in through the CLI.
+    """Use a named direct or hosted target already configured through the CLI.
 
     Args:
         name: Exact local target name from ``Client.list_targets()`` or

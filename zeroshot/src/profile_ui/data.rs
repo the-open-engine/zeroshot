@@ -1149,6 +1149,22 @@ fn rewrite_input_references(
             let schema = if key == "bindings" { "output" } else { "input" };
             rewrite_connected_fields(value, schema, changes, field)?;
         }
+        if let Some(publications) = value.get_mut("artifacts").and_then(Value::as_object_mut) {
+            publications.retain(|_, publication| {
+                if publication["kind"] != "binding"
+                    || publication["value"]["source"] != "state"
+                    || publication["value"]["path"][0] != old
+                {
+                    return true;
+                }
+                if field.is_some() {
+                    publication["value"]["path"][0] = json!(name);
+                    true
+                } else {
+                    false
+                }
+            });
+        }
         if value["over"]["source"] == "state" && value["over"]["path"][0] == old {
             if field.is_some() {
                 value["over"]["path"][0] = json!(name);

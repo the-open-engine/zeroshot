@@ -1,12 +1,13 @@
 // Presentation helpers for the Rust PayloadType wire format. Admission stays in Rust.
 export type Payload = { kind: string; [key: string]: any };
-export const scalarKinds = ['null', 'string', 'boolean', 'integer', 'number'];
+export const scalarKinds = ['null', 'string', 'boolean', 'integer', 'number', 'filepath'];
 export const typeLabels: Record<string, string> = {
   null: 'None',
   string: 'String',
   boolean: 'Boolean',
   integer: 'Integer',
   number: 'Number',
+  filepath: 'File or folder',
   record: 'Object',
   enum: 'Enum',
   array: 'Array',

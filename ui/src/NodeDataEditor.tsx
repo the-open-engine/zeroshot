@@ -600,11 +600,13 @@ function TypeSelect({
       disabled={disabled}
       onChange={(event) => onChange(freshType(event.target.value))}
     >
-      {['string', 'boolean', 'integer', 'number', 'enum', 'array', 'null'].map((kind) => (
-        <option key={kind} value={kind}>
-          {typeLabels[kind]}
-        </option>
-      ))}
+      {['string', 'filepath', 'boolean', 'integer', 'number', 'enum', 'array', 'null'].map(
+        (kind) => (
+          <option key={kind} value={kind}>
+            {typeLabels[kind]}
+          </option>
+        )
+      )}
     </select>
   );
 }
@@ -641,10 +643,10 @@ function TypeDetails({
           disabled={disabled}
           onChange={(event) => change({ ...type, items: freshType(event.target.value) })}
         >
-          {!['string', 'boolean', 'integer', 'number', 'record', 'null'].includes(
+          {!['string', 'filepath', 'boolean', 'integer', 'number', 'record', 'null'].includes(
             type.items.kind
           ) && <option value={type.items.kind}>{typeSummary(type.items)}</option>}
-          {['string', 'boolean', 'integer', 'number', 'record', 'null'].map((kind) => (
+          {['string', 'filepath', 'boolean', 'integer', 'number', 'record', 'null'].map((kind) => (
             <option key={kind} value={kind}>
               {typeLabels[kind]}
             </option>

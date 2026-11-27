@@ -50,6 +50,48 @@ function setup() {
     },
   };
 }
+test('file actions require discovered capability and current document identity', () => {
+  const selection = {
+    runId: 'run',
+    requestId: 'question',
+    name: 'draft',
+    file: { kind: 'local' as const, root: '/work', path: 'report' },
+    action: 'inspect' as const,
+  };
+  for (const files of [
+    undefined,
+    { kind: 'future-files/v2', inspect: true },
+    { kind: 'openengine.workspace-files/v1', inspect: 'yes' },
+  ]) {
+    const state = setup();
+    state.emit({ ...state.init, files });
+    state.bridge.send('state', {}, { documentId: 'run-document', generation: 2 });
+    const count = state.sent.length;
+    state.bridge.openFile(selection);
+    assert.equal(state.sent.length, count);
+    state.bridge.dispose();
+  }
+  const state = setup();
+  state.emit({ ...state.init, files: { kind: 'openengine.workspace-files/v1', inspect: true } });
+  state.bridge.openFile(selection);
+  assert.equal(state.sent.length, 1, 'no selected document yet');
+  state.bridge.send('state', {}, { documentId: 'run-document', generation: 2 });
+  state.bridge.openFile({ ...selection, action: 'download' });
+  state.bridge.openFile(selection);
+  const message = state.sent.at(-1)!;
+  assert.deepEqual(message, {
+    version: 1,
+    type: 'file_action',
+    workspaceId: state.init.workspaceId,
+    documentId: 'run-document',
+    generation: 2,
+    requestId: message.requestId,
+    selection,
+  });
+  assert.notEqual(message.requestId, selection.requestId);
+  assert.equal(state.sent.filter((m) => m.type === 'file_action').length, 1);
+  state.bridge.dispose();
+});
 test('init requires the exact parent, origin and ready identity', () => {
   const state = setup();
   state.emit(state.init, {});

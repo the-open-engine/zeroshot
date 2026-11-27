@@ -3,6 +3,8 @@ import { ChevronRight } from 'lucide-react';
 import type { ControlVisit } from './control-history';
 import type { Document } from './domain';
 import { PersonRequestView } from './PersonRequestView';
+import { PublishedFiles } from './PublishedFiles';
+import type { PublishedFiles as Files } from './file-workflows';
 import { RecordedValue } from './RecordedValue';
 import { RECORDED_PAGE_SIZE } from './recorded-value';
 import { Transcript } from './Transcript';
@@ -31,6 +33,7 @@ export type RunContext = {
   /** The ledger's first and latest recorded times at this position, when it kept times. */
   clock: { first?: number; at?: number };
   terminal?: RunTerminal;
+  artifacts?: Files;
   /** A failure the run reported that the loaded history does not reach yet. */
   currentFailure?: Extract<RunTerminal, { status: 'failed' }>;
   /** Unrecorded steps may still run at this position: live, or replaying before the end. */
@@ -125,12 +128,13 @@ export function RunStartDetail({ run }: { run: RunContext }) {
 }
 
 /** What the run returned, opened at the list's end. */
-export function RunResultDetail({ output }: { output: unknown }) {
+export function RunResultDetail({ output, artifacts }: { output: unknown; artifacts?: Files }) {
   return (
     <div className="step-detail">
       <DetailSection title="Result" hint={fieldNames(output)}>
         <Facts value={output} />
       </DetailSection>
+      <PublishedFiles files={artifacts} />
     </div>
   );
 }

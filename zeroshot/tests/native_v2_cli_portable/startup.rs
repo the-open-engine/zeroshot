@@ -2,6 +2,8 @@
 
 #[path = "file_inputs.rs"]
 mod file_inputs;
+#[path = "python_file_workflows.rs"]
+mod python_file_workflows;
 #[path = "resume_checkpoint_tests.rs"]
 mod resume_checkpoint;
 #[path = "resume_runtime_tests.rs"]

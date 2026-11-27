@@ -12,9 +12,17 @@ import {
   readObservation,
 } from './history-contract';
 import type { HistoryEvent, HistoryPage, RunDetail, RunSummary } from './run-history';
+import {
+  readPublishedFiles,
+  type RunFileAccess,
+  type RunFileAction,
+  type WorkspaceFilesCapability,
+} from './file-workflows';
 
 /** A viewer needs a selected run, not knowledge of its host's run menu. */
 export interface RunHistoryReader {
+  /** Explicit host capabilities, separate from status/history authorization. */
+  files?: RunFileAccess;
   /** Sources may identify transient read failures without exposing their transport to the viewer. */
   retryDelay?: HistoryRetryDelay;
   forPart?(partId: string): RunHistoryReader;
@@ -27,6 +35,28 @@ export interface RunHistorySource extends RunHistoryReader {
     after?: string,
     signal?: AbortSignal
   ): Promise<{ runs: RunSummary[]; nextCursor: string | null }>;
+}
+
+/** Discovered host capabilities only; standalone readers never synthesize these routes. */
+export function createHostFileAccess(
+  api: ApiClient,
+  capability: WorkspaceFilesCapability,
+  open: (selection: RunFileAction) => void
+): RunFileAccess {
+  return {
+    actions: (['inspect', 'download'] as const).filter((action) => capability[action] === true),
+    open,
+    attachments: capability.requestAttachments
+      ? async (runId, requestId, signal) => {
+          const response = await api<{ artifacts: unknown }>(
+            `runs/${encodeURIComponent(runId)}/requests/${encodeURIComponent(requestId)}/files`,
+            undefined,
+            signal
+          );
+          return readPublishedFiles(response.artifacts);
+        }
+      : undefined,
+  };
 }
 
 /** A definition and its projection must agree before any history is replayed. */
@@ -65,6 +95,7 @@ export function readRunDetail(
   if (detail.terminal?.status === 'failed')
     validateFailureContext(detail.terminal.context, detail.cursor);
   validateDefinitionRuntimeFailure(detail);
+  if (detail.metadata?.artifacts !== undefined) readPublishedFiles(detail.metadata.artifacts);
   return detail as RunDetail;
 }
 

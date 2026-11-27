@@ -29,6 +29,7 @@ import { effectiveLane } from './runtime-readiness';
 import { usePendingText } from './pending-edits';
 import { NodeDataEditor } from './NodeDataEditor';
 import { OutcomeSettings } from './OutcomeSettings';
+import { PublicationsEditor } from './PublicationsEditor';
 import { analyzeWorkflowOutcomes } from './workflow-outcomes';
 import { editableActivityRole, makeReadOnlyVerifier, makeWritingAgent } from './activity-access';
 export type InspectorProps = {
@@ -241,6 +242,10 @@ export function Inspector(p: InspectorProps) {
               openJson={p.openJson}
               selectNode={p.selectNode}
             />
+            {(node.kind === 'succeed' ||
+              (node.kind === 'verifier' && node.worker === REQUEST_WORKER)) && (
+              <PublicationsEditor document={doc} node={node} onChange={p.updateNode} />
+            )}
             {p.parent && ['seq', 'par', 'choice'].includes(p.parent.kind) && (
               <div className="order-control">
                 <span>{p.parent.kind === 'seq' ? 'Execution order' : 'Branch order'}</span>

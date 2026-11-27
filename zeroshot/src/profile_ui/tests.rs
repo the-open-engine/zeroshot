@@ -2,6 +2,9 @@ use super::*;
 use crate::native_v2_cli::{BuiltinGraphTemplate, TemplateDelivery};
 use openengine_cluster_testkit::assertions::AssertValue;
 
+#[path = "file_workflow_tests.rs"]
+mod file_workflows;
+
 #[test]
 fn serve_api_retains_the_local_one_argument_entry_point() {
     let future = serve("127.0.0.1:0".parse().assert_value());

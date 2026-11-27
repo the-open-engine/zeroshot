@@ -287,7 +287,7 @@ async fn preparation_deadline_rechecks_at_admission_after_controller_initializat
     assert!(ledger.list().await.assert_value().is_empty());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn preparation_deadline_covers_cumulative_work_and_drains_runtime_composition() {
     let root = tempfile::tempdir().assert_value();
     let workspace = private_directory(root.path(), "workspace");
@@ -300,7 +300,7 @@ async fn preparation_deadline_covers_cumulative_work_and_drains_runtime_composit
     bootstrap.submission.runtime.workspace_checkpoints = false;
     let prepared = prepare_controller_start(&bootstrap).await.assert_value();
     let deadline = tokio::time::Instant::now() + Duration::from_millis(200);
-    tokio::time::sleep(Duration::from_millis(120)).await;
+    tokio::time::advance(Duration::from_millis(120)).await;
     let completed = std::sync::atomic::AtomicBool::new(false);
     let result = prepare_runtime(
         &prepared,

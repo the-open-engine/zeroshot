@@ -190,8 +190,47 @@ function fixture() {
     load: async () => structuredClone(saved),
     remove: async () => {},
   };
-  return { store };
+  return {
+    store,
+    setSaved: (environment: Environment) => {
+      saved = environment;
+    },
+  };
 }
+
+test('seed selections survive pending field commits and embedded environment save/reopen', async (t) => {
+  const { store, setSaved } = fixture();
+  const ui = await renderWorkspace(t, store);
+  await ui.input('Select environment', 'env-1', 'change');
+  await ui.click('Add seed');
+  await ui.input('Seed 1 path', 'datasets/source');
+  await act(async () =>
+    ui
+      .label('Seed 1 path')
+      .dispatchEvent(new ui.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+  );
+  await ui.input('Seed 1 scope', 'org', 'change');
+  await act(async () => ui.label('Seed 1 member').focus());
+  await ui.input('Seed 1 member', 'reports');
+  const snapshot = await ui.requestSave();
+  assert.deepEqual(snapshot.environment.definition, {
+    startup: 'npm ci',
+    seeds: [{ address: { scope: { kind: 'org' }, path: 'datasets/source' }, member: 'reports' }],
+  });
+  setSaved({
+    id: 'env-1',
+    name: 'node-tools',
+    revision: 'r2',
+    definition: snapshot.environment.definition,
+  });
+  await ui.remount();
+  await ui.input('Select environment', 'env-1', 'change');
+  assert.equal(ui.label('Seed 1 path').value, 'datasets/source');
+  assert.equal(ui.label('Seed 1 member').value, 'reports');
+  await ui.click('Remove seed 1');
+  const removed = await ui.requestSave();
+  assert.equal(Object.hasOwn(removed.environment.definition, 'seeds'), false);
+});
 
 test('environment edits capture one CAS snapshot and protect unsaved navigation', async (t) => {
   const { ui } = await editingFixture(t);
@@ -252,8 +291,8 @@ test('failed save and deletion retain the environment draft and saved revision',
   });
   assert.equal(ui.label('Startup script').value, 'local unsaved work');
   assert.equal(
-    ui.messages.filter((message) => message.problem?.code === 'environment_conflict').at(-1)?.problem
-      .code,
+    ui.messages.filter((message) => message.problem?.code === 'environment_conflict').at(-1)
+      ?.problem.code,
     'environment_conflict'
   );
   assert.throws(() => ui.button('Reload environment'));
@@ -270,7 +309,10 @@ test('read-only environment view can select resources but cannot modify or delet
   await ui.input('Select environment', 'env-1', 'change');
   assert.equal(ui.dom.window.document.querySelector('fieldset')!.disabled, true);
   const text = ui.dom.window.document.body.textContent!;
-  assert.doesNotMatch(text, /New environment|Save environment|Reload environment|Delete environment/);
+  assert.doesNotMatch(
+    text,
+    /New environment|Save environment|Reload environment|Delete environment/
+  );
   assert.equal(ui.label('Startup script').value, 'npm ci');
 });
 

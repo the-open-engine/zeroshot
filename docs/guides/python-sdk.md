@@ -126,6 +126,12 @@ These options apply only to local execution. Native preflight rejects `worktree=
 
 ## Watch a submitted run
 
+For delivery-free file work, use `RunRequest(workspace=True)` or the same `workspace=True` string
+submission option. Local placement defaults to the selected folder in place; `copy_workspace=True`
+uses a disposable managed copy, and `workspace_seeds=("user:PATH",)` seeds a managed workspace.
+Named targets use managed placement. See [file workflows](file-workflows.md) for the complete
+example, async file operations, filepath answers, result artifacts and explicit disk cleanup.
+
 ```python
 from zeroshot import Client, UniformRuntime
 
@@ -149,7 +155,7 @@ ordering and resumption, and `execution` to distinguish retries and simultaneous
 
 ## Run on a direct target
 
-Local execution uses `LocalTarget`. Docker/direct and hosted targets require a committed Git
+Local execution uses `LocalTarget`. Repository-mode Docker/direct and hosted runs require a committed Git
 source, selected from the client workspace or per-run `repository=`, `branch=`, and `revision=`.
 `repository=` accepts a credential-free HTTPS/SSH Git URL or GitHub `owner/name` shorthand;
 `source_connection=` selects a named connection used only for Git checkout and delivery:

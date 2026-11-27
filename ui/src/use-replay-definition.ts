@@ -53,6 +53,7 @@ export function useReplayDefinition(
   );
   return {
     document,
+    artifacts: selected?.metadata?.artifacts,
     error: failure?.part === historical ? failure?.message : undefined,
     loading: Boolean(run && !selected),
     retry: () => setRetry((n) => n + 1),

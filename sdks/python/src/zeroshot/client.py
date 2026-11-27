@@ -16,6 +16,7 @@ from typing import Literal, TypedDict, Unpack, overload
 from ._binary import resolve_binary
 from ._process import NativeProcess, _RunFailed
 from ._projection import (
+    _file_response,
     _inbox,
     _inbox_request,
     _log_event,
@@ -88,6 +89,10 @@ class _Submission:
     branch: str | None
     revision: str | None
     submission_key: str
+    workspace: bool
+    workspace_placement: Literal["in-place", "managed"] | None
+    workspace_seeds: tuple[str, ...]
+    copy_workspace: bool
 
 
 class _SubmitOptions(TypedDict, total=False):
@@ -102,6 +107,10 @@ class _SubmitOptions(TypedDict, total=False):
     branch: str | None
     revision: str | None
     submission_key: str | None
+    workspace: bool
+    workspace_placement: Literal["in-place", "managed"] | None
+    workspace_seeds: tuple[str, ...]
+    copy_workspace: bool
 
 
 class _RunOptions(_SubmitOptions, total=False):
@@ -211,7 +220,8 @@ class Client:
         Args:
             task: Task text for a built-in preset, or a complete RunRequest.
             options: Typed keyword options. title, preset, runtime, cwd, worktree, worktree_base,
-                repository, source_connection, branch, revision, and submission_key apply to
+                repository, source_connection, branch, revision, submission_key, workspace,
+                workspace_placement, workspace_seeds, and copy_workspace apply to
                 string submissions. worktree defaults to False; worktree_base accepts local or
                 remote. See RunRequest for local-only worktree and cleanup semantics.
                 wait_timeout is a non-negative observation deadline in seconds; omit it to wait
@@ -254,7 +264,8 @@ class Client:
             task: Task text for a built-in preset, or a complete RunRequest.
             options: Typed keyword options for string submissions: title, preset, runtime,
                 cwd, worktree, worktree_base, repository, source_connection, branch, revision,
-                and submission_key. worktree defaults to False; worktree_base accepts local or
+                submission_key, workspace, workspace_placement, workspace_seeds, and
+                copy_workspace. worktree defaults to False; worktree_base accepts local or
                 remote. See RunRequest for local-only worktree and cleanup semantics.
 
         Returns:
@@ -361,6 +372,162 @@ class Client:
             raise ProtocolError("Zeroshot returned a malformed run inventory")
         return tuple(_summary(_status(item)) for item in value["runs"])
 
+    async def stage_file(
+        self,
+        source: str | Path,
+        *,
+        operation: str | None = None,
+        run_id: str | None = None,
+    ) -> dict[str, JsonValue]:
+        """Upload a private file or folder for a filepath input or answer.
+
+        Args:
+            source: Local path relative to the captured client workspace, independent of run cwd.
+            operation: Stable upload retry key; omit to generate one in the CLI.
+            run_id: Upload identity from a previous receipt, for an interrupted upload retry.
+
+        Returns:
+            The CLI staged receipt. Put this object directly in a declared filepath field.
+            Admission always copies accepted inputs, including for local in-place runs.
+
+        Raises:
+            InvalidRequestError: If native file validation rejects the request.
+            TargetError: If transfer, target access, or file capability discovery fails.
+            ProtocolError: If the CLI receipt is malformed.
+
+        Cancellation reaps the CLI child. Retry an uncertain upload with the same two identities.
+        """
+        arguments = ["file", "stage"]
+        if operation is not None:
+            arguments.extend(["--operation", operation])
+        if run_id is not None:
+            arguments.extend(["--run-id", run_id])
+        return await self._file_command(
+            [*arguments, *self._route_arguments(), "--", str(source)], "staged"
+        )
+
+    async def upload_file(
+        self,
+        source: str | Path,
+        path: str,
+        *,
+        scope: Literal["user", "org"] = "user",
+        operation: str | None = None,
+    ) -> dict[str, JsonValue]:
+        """Replace a reusable library file or folder with the local source's current bytes.
+
+        Args:
+            source: Local path relative to the captured client workspace.
+            path: Complete target-relative library name.
+            scope: User or organization library.
+            operation: Stable retry key; conflicting reuse is refused by the native store.
+
+        Returns:
+            The unchanged CLI replaced receipt, including its address and operation key.
+        """
+        arguments = ["file", "upload", "--scope", scope, *self._route_arguments()]
+        if operation is not None:
+            arguments.extend(["--operation", operation])
+        return await self._file_command([*arguments, "--", str(source), path], "replaced")
+
+    async def list_files(
+        self,
+        path: str | None = None,
+        *,
+        scope: Literal["user", "org"] | None = None,
+        run_id: str | None = None,
+        member: str | None = None,
+    ) -> dict[str, JsonValue]:
+        """List library/publication names, or the members of one selected file or folder.
+
+        Args:
+            path: Select one complete named tree; omit to list names.
+            scope: Library scope, defaulting to user. Cannot be combined with run_id.
+            run_id: Producing physical part ID for read-only managed publications.
+            member: File or subtree within path. Requires path.
+
+        Returns:
+            The CLI list or members receipt. Missing or cleaned paths raise the native error;
+            live local outputs are outside the managed run namespace.
+        """
+        arguments = ["file", "list", *_file_scope(scope, run_id), *self._route_arguments()]
+        if member is not None:
+            arguments.extend(["--member", member])
+        if path is not None:
+            arguments.extend(["--", path])
+        return await self._file_command(arguments, "list" if path is None else "members")
+
+    async def download_file(
+        self,
+        path: str,
+        output: str | Path,
+        *,
+        scope: Literal["user", "org"] | None = None,
+        run_id: str | None = None,
+        member: str = "",
+    ) -> dict[str, JsonValue]:
+        """Download a selected file or folder to an absent local destination.
+
+        Args:
+            path: Target-relative library or managed publication path.
+            output: New local destination, relative to the captured client workspace.
+            scope: Library scope, defaulting to user. Cannot be combined with run_id.
+            run_id: The publication receipt's address.scope.runId, including after continuation.
+            member: File or subtree within the selected tree; empty selects the whole tree.
+
+        Returns:
+            The CLI output-path receipt, after native framing and digest validation. File bytes
+            stream through the CLI's bounded transfer, never through Python JSON or run status.
+        """
+        return await self._file_command(
+            [
+                "file",
+                "download",
+                *_file_scope(scope, run_id),
+                *self._route_arguments(),
+                "--member",
+                member,
+                "--",
+                path,
+                str(output),
+            ],
+            "download",
+        )
+
+    async def remove_file(
+        self, path: str, *, scope: Literal["user", "org"] = "user"
+    ) -> dict[str, JsonValue]:
+        """Remove one reusable library name and return the CLI removed receipt.
+
+        Args:
+            path: Complete target-relative library name. Run publications are read-only.
+            scope: User or organization library. Accepted input pins remain independently owned.
+
+        Returns:
+            The CLI removed receipt, including whether a name was removed.
+        """
+        return await self._file_command(
+            ["file", "remove", "--scope", scope, *self._route_arguments(), "--", path], "removed"
+        )
+
+    async def cleanup(self, *, all: bool = False) -> dict[str, JsonValue]:
+        """Explicitly reclaim eligible retained data on the selected supporting target.
+
+        Args:
+            all: Remove the 60-day age filter. Pending work remains protected. Libraries, live
+                local outputs, logs and ledgers are outside cleanup's scope.
+
+        Returns:
+            The CLI cleaned receipt with publications and checkpointLineages removed.
+        """
+        return await self._file_command(
+            ["cleanup", *(["--all"] if all else []), *self._route_arguments()], "cleaned"
+        )
+
+    async def _file_command(self, arguments: list[str], kind: str) -> dict[str, JsonValue]:
+        await self._ready()
+        return _file_response(await self._native().json(arguments), kind)
+
     async def list_presets(self) -> tuple[str, ...]:
         """Return built-in preset names read dynamically from the bundled executable."""
         value = await self._native(static=True).json(["template", "list"])
@@ -454,6 +621,10 @@ class Client:
             branch=overrides.get("branch"),
             revision=overrides.get("revision"),
             submission_key=(submission_key if submission_key is not None else _submission_key()),
+            workspace=overrides.get("workspace", False),
+            workspace_placement=overrides.get("workspace_placement"),
+            workspace_seeds=overrides.get("workspace_seeds", ()),
+            copy_workspace=overrides.get("copy_workspace", False),
         )
 
     def _submission_arguments(self, submission: _Submission, root: Path) -> list[str]:
@@ -463,6 +634,14 @@ class Client:
         self._append_runtime(arguments, submission.runtime, root)
         if submission.cwd is not None:
             arguments.extend(["--cwd", str(submission.cwd)])
+        if submission.workspace:
+            arguments.append("--workspace")
+        if submission.workspace_placement is not None:
+            arguments.extend(["--workspace-placement", submission.workspace_placement])
+        for seed in submission.workspace_seeds:
+            arguments.extend(["--workspace-seed", seed])
+        if submission.copy_workspace:
+            arguments.append("--copy-workspace")
         if submission.worktree:
             arguments.append("--worktree")
         if submission.worktree_base is not None:
@@ -582,7 +761,7 @@ class Client:
             and isinstance(self.target, DirectTarget)
             and self._direct_directory is not None
         ):
-            environment["ZEROSHOT_CONFIG_DIR"] = self._direct_directory.name
+            environment["ZEROSHOT_CONFIG_DIR"] = str(Path(self._direct_directory.name).resolve())
         environment["ZEROSHOT_ERROR_FORMAT"] = "json"
         return environment, secrets
 
@@ -1194,6 +1373,14 @@ def _part_arguments(part_id: str | None) -> list[str]:
     return ["--part", part_id] if part_id is not None else []
 
 
+def _file_scope(scope: str | None, run_id: str | None) -> list[str]:
+    if scope is not None and run_id is not None:
+        raise InvalidRequestError("scope and run_id cannot be combined")
+    if run_id is not None:
+        return ["--run", run_id]
+    return ["--scope", scope] if scope is not None else []
+
+
 def _submission_key() -> str:
     return f"python-{uuid.uuid4().hex}"
 
@@ -1220,6 +1407,10 @@ def _exact_submission(request: RunRequest, overrides: _SubmitOptions) -> _Submis
             overrides.get("branch"),
             overrides.get("revision"),
             overrides.get("submission_key"),
+            overrides.get("workspace"),
+            overrides.get("workspace_placement"),
+            overrides.get("workspace_seeds"),
+            overrides.get("copy_workspace"),
         )
     ):
         raise TypeError("RunRequest cannot be combined with string-submission overrides")
@@ -1235,6 +1426,10 @@ def _exact_submission(request: RunRequest, overrides: _SubmitOptions) -> _Submis
         source_connection=request.source_connection,
         branch=request.branch,
         revision=request.revision,
+        workspace=request.workspace,
+        workspace_placement=request.workspace_placement,
+        workspace_seeds=request.workspace_seeds,
+        copy_workspace=request.copy_workspace,
         submission_key=(
             request.submission_key if request.submission_key is not None else _submission_key()
         ),

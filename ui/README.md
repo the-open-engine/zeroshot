@@ -256,6 +256,47 @@ A `finished` run can still follow `active` or `collecting` observation. Completi
 only after `page.complete` drains the observed head. Platform retains these execution cursors and native
 control records across archive handoff; Platform status cursors never enter graph playback.
 
+## File capabilities
+
+Graph `filepath` fields, literal/bound request and final `artifacts`, and environment `seeds`
+round-trip through the shared editors. Seeds are target selections
+`{address: {scope: {kind: "user" | "org"}, path}, member}`. The consuming host maps environment
+seeds into `submission.workspace.seeds`, applying target authorization at submission. They do not
+belong in `runtime.environment`. The host owns launch and file selection.
+
+Embedded `init` may advertise:
+
+```json
+{
+  "files": {
+    "kind": "openengine.workspace-files/v1",
+    "requestAttachments": true,
+    "inspect": true,
+    "download": true
+  }
+}
+```
+
+All flags are optional; absent/unknown capabilities leave existing viewers working. Advertise
+each only when implemented. `requestAttachments` enables an independent same-origin
+`GET runs/{encodedRunId}/requests/{encodedRequestId}/files` below `apiBase`, returning
+`{artifacts: {NAME: PublishedFile}}`. The host must require request-read authority here;
+ordinary status/history never exposes request attachment metadata. Final publications come from
+the selected part definition's `metadata.artifacts` under run-read authority.
+
+An inspect/download button sends `file_action` through the existing exact-parent/origin bridge.
+The normal workspace/document/generation/request envelope carries a separate `selection` object:
+`{runId, requestId?, name, file, action: "inspect" | "download"}`. Its optional request ID identifies
+the attachment's request, independently of the envelope request ID. The host verifies the current
+workspace/document, reauthorizes that publication, and delivers the download or sandboxed preview.
+Paths and references do not grant access; the bridge never infers a URL or reads file bytes.
+
+Direct React consumers can instead supply `RunHistoryReader.files` with optional
+`attachments(runId, requestId, signal)`, advertised `actions`, and `open(selection)`. Readers with
+only detail/history access leave it unset. Standalone local/direct viewers display final metadata
+and CLI/SDK retrieval hints. `kind: "managed"` identifies retained bytes on the named target and
+producing part; `kind: "local"` identifies a live local root/path whose contents may change.
+
 ## Verification
 
 Start with the UI tests and native service tests:

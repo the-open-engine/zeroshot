@@ -1,6 +1,7 @@
 import { assertDocument, type Document } from './domain';
 import type { Saved } from './api';
 import { readEnvironment, type Environment } from './environment-store';
+import type { RunFileAction, WorkspaceFilesCapability } from './file-workflows';
 
 export type WorkspaceAuthority = { userId: string; organizationId: string; scope: 'user' | 'org' };
 type Envelope = {
@@ -21,6 +22,7 @@ export type WorkspaceInit = {
   view?: 'profiles' | 'environments';
   environmentApi?: string;
   readOnly?: boolean;
+  files?: WorkspaceFilesCapability;
   csrf?: { cookieName: string; headerName: string };
 };
 export type HostCommand = Envelope &
@@ -57,6 +59,7 @@ export class WorkspaceBridge {
   readonly readyId = crypto.randomUUID();
   configuration?: WorkspaceInit;
   private disposed = false;
+  private selection?: { documentId: string | null; generation: number };
   private handler?: (command: HostCommand) => void;
   private readonly unlisten: () => void;
   constructor(
@@ -75,7 +78,7 @@ export class WorkspaceBridge {
     };
   }
   send(
-    type: 'save_snapshot' | 'state' | 'navigate',
+    type: 'save_snapshot' | 'state' | 'navigate' | 'file_action',
     payload: Record<string, unknown>,
     identity: {
       documentId: string | null;
@@ -84,6 +87,8 @@ export class WorkspaceBridge {
     }
   ) {
     if (!this.configuration || this.disposed) return;
+    if (type === 'state')
+      this.selection = { documentId: identity.documentId, generation: identity.generation };
     this.parent.postMessage(
       {
         ...payload,
@@ -96,6 +101,11 @@ export class WorkspaceBridge {
       },
       this.origin
     );
+  }
+  /** A request to the host, never a grant of file authority or a URL to fetch. */
+  openFile(selection: RunFileAction) {
+    if (!this.selection || !this.configuration?.files?.[selection.action]) return;
+    this.send('file_action', { selection }, this.selection);
   }
   dispose() {
     this.disposed = true;
@@ -164,7 +174,18 @@ function readInit(
   )
     return;
   if (!validEnvironmentApi(value, base)) return;
-  return value as unknown as WorkspaceInit;
+  return { ...value, files: readFilesCapability(value.files) } as unknown as WorkspaceInit;
+}
+
+function readFilesCapability(value: unknown): WorkspaceFilesCapability | undefined {
+  if (!record(value) || value.kind !== 'openengine.workspace-files/v1') return;
+  if (
+    ['requestAttachments', 'inspect', 'download'].some(
+      (key) => value[key] !== undefined && typeof value[key] !== 'boolean'
+    )
+  )
+    return;
+  return value as WorkspaceFilesCapability;
 }
 function invalidCommandEnvelope(value: Record<string, unknown>, workspaceId: string): boolean {
   return (

@@ -23,6 +23,7 @@ import { InvocationView, ValueSection } from './InvocationDetail';
 import { WorkflowCanvas } from './WorkflowCanvas';
 import { RunStory } from './RunStory';
 import type { RunContext } from './RunViewParts';
+import { PublishedFiles, RunFilesProvider } from './PublishedFiles';
 import { findNode, labels, type Document, type GraphNode, type Positions } from './domain';
 import type { WorkerOption } from './workers';
 import { nodeTitle } from './workflow-projection';
@@ -108,7 +109,15 @@ function useHistoryProjection(history: HistoryFeed, source: RunHistoryReader) {
   return { moments, safePosition, moment, current, definition, document, projection };
 }
 
-export function RunHistoryView({
+export function RunHistoryView(props: RunHistoryViewProps) {
+  return (
+    <RunFilesProvider runId={props.runId} access={props.source.files}>
+      <RunHistoryContent {...props} />
+    </RunFilesProvider>
+  );
+}
+
+function RunHistoryContent({
   runId,
   source,
   workers,
@@ -262,6 +271,16 @@ export function RunHistoryView({
   const latest = safePosition === moments.length - 1;
   const pendingHandoff = pendingHandoffAtHead(history, latest, listedPartId, listedPhase);
   const toggle = <RunViewToggle layout={layout} setLayout={switchLayout} />;
+  const context = runContext(run, document, projection, {
+    terminal: displayedTerminal,
+    artifacts: definition.artifacts,
+    currentFailure,
+    open: !displayedTerminal && (history.isLiveRun || !latest || !history.loadedHead),
+    following,
+    pendingHandoff,
+    answerable: current && run?.phase === 'suspended',
+    partHref,
+  });
   return (
     <main className="workspace history-workspace">
       {run && document && projection ? (
@@ -284,16 +303,7 @@ export function RunHistoryView({
           >
             {layout === 'story' ? (
               <RunStory
-                run={runContext(run, document, projection, {
-                  terminal: displayedTerminal,
-                  currentFailure,
-                  // Steps not recorded yet may still run when live or replaying before the end.
-                  open: !displayedTerminal && (history.isLiveRun || !latest || !history.loadedHead),
-                  following,
-                  pendingHandoff,
-                  answerable: current && run.phase === 'suspended',
-                  partHref,
-                })}
+                run={context!}
                 execution={execution}
                 select={selectStep}
                 showInGraph={(target) => {
@@ -337,6 +347,7 @@ export function RunHistoryView({
             )}
             {inspector && node && layout === 'graph' && (
               <RunInspector
+                context={context!}
                 run={run}
                 document={document}
                 projection={projection}
@@ -433,12 +444,13 @@ function RunViewToggle({
 
 /** What the Steps view reads about the run at this position. */
 function runContext(
-  run: RunDetail,
-  document: Document,
-  projection: NonNullable<ReturnType<typeof useProjection>>,
+  run: RunDetail | undefined,
+  document: Document | undefined,
+  projection: ReturnType<typeof useProjection>,
   position: Pick<
     RunContext,
     | 'terminal'
+    | 'artifacts'
     | 'currentFailure'
     | 'open'
     | 'following'
@@ -446,7 +458,8 @@ function runContext(
     | 'partHref'
     | 'pendingHandoff'
   >
-): RunContext {
+): RunContext | undefined {
+  if (!run || !document || !projection) return;
   const successor = projection.successorRunId;
   return {
     ...position,
@@ -972,6 +985,7 @@ function HistoryEmpty({
 }
 
 type RunInspectorProps = {
+  context: RunContext;
   run: RunDetail;
   document: Document;
   projection: ReturnType<typeof projectHistory>;
@@ -1000,6 +1014,7 @@ type RunInspectorProps = {
 };
 
 function RunInspector({
+  context,
   run,
   document,
   projection,
@@ -1078,6 +1093,7 @@ function RunInspector({
                 open
               />
             )}
+            {terminal?.status === 'succeeded' && <PublishedFiles files={context.artifacts} />}
             {terminal?.status === 'failed' && terminal.context && (
               <RunFailureDetails
                 context={terminal.context}
@@ -1168,6 +1184,8 @@ function RunInspector({
                     showNode={activeInvocation.node !== node.name}
                     follow={following}
                     reading={readingTranscript}
+                    runId={run.runId}
+                    requestContext={context}
                   />
                 )}
               </>

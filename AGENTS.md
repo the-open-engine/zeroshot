@@ -2514,6 +2514,18 @@ python -m mkdocs build --strict
 
 ## Explicit file publication
 
+- The Python SDK delegates file transfer/cleanup to its native CLI and preserves JSON receipts;
+  workspace options stay on run submission. Shared UI `filepath` schemas/publication editors
+  preserve native graph fields. Publication bindings participate in the existing scoped run-input
+  rename/removal traversal. Saved environment `seeds` are host-resolved submission selections,
+  never `runtime.environment`. Embedded `init.files` opts into `openengine.workspace-files/v1`:
+  request attachments use a separate request-authorized metadata reader and file actions carry
+  a nested `selection` through the existing host bridge. Do not infer byte URLs or filesystem
+  authority from metadata. Standalone/status-only viewers do not synthesize request attachment
+  reads. The portable `startup::python_file_workflows::` fixture exercises the public example
+  through the CLI on native CI lanes without a provider account and validates the documented runtime
+  unchanged before substituting deterministic workers. No MCP/skill publication changes.
+
 - `PayloadType::Filepath` validates regular files/folders under the execution workspace or its
   host-accepted input roots through the
   shared response correction path. Plain strings have no filesystem effect; ordinary results never

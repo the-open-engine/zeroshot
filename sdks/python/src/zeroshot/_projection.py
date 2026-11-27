@@ -94,6 +94,7 @@ def _status(value: object, *, watch: bool = False) -> RunStatus:
         current_part_id=None if watch else _string(root, "currentPartId", "run status"),
         title=_string(root, "title", "run status"),
         source=_source(root.get("source")),
+        workspace=cast(JsonValue, root.get("workspace")),
         size=_string(root, "size", "run status"),
         cursor=_cursor(root),
         recorded_at=_optional_timestamp(root, "recordedAt", "watch event"),
@@ -130,6 +131,7 @@ def _summary(status: RunStatus) -> RunSummary:
         created_at=status.created_at,
         due_at=status.due_at,
         request=status.request,
+        workspace=status.workspace,
     )
 
 
@@ -206,8 +208,10 @@ def _terminal_result(
     run_id: str, part_id: str, value: object, metadata: object = None
 ) -> RunResult:
     receipt = None
+    artifacts: dict[str, JsonValue] = {}
     if metadata is not None:
         fields = _mapping(metadata, "run status.status.metadata")
+        artifacts = _published_files(fields.get("artifacts", {}))
         if fields.get("deliveryReceipt") is not None:
             receipt = cast(JsonValue, dict(_mapping(fields["deliveryReceipt"], "delivery receipt")))
     terminal = _mapping(value, "run status.status.terminalResult")
@@ -226,6 +230,7 @@ def _terminal_result(
             succeeded=True,
             delivery_receipt=receipt,
             output=cast(JsonValue, terminal["output"]),
+            artifacts=artifacts,
         )
     return RunResult(
         run_id=run_id,
@@ -234,6 +239,7 @@ def _terminal_result(
         delivery_receipt=receipt,
         failure=_string(terminal, "reason", "run status.status.terminalResult"),
         context=_failure_context(terminal.get("context")),
+        artifacts=artifacts,
     )
 
 
@@ -523,7 +529,55 @@ def _human_request(value: object) -> HumanRequest:
         signals=cast(JsonValue, dict(_mapping(request.get("signals"), "request.signals"))),
         output=cast(JsonValue, dict(_mapping(request.get("output"), "request.output"))),
         expires_at=_positive_javascript_safe_integer(request, "expiresAt", "request"),
+        artifacts=_published_files(request.get("artifacts", {})),
     )
+
+
+def _published_files(value: object) -> dict[str, JsonValue]:
+    files = _mapping(value, "published files")
+    for reference in files.values():
+        entry = _mapping(reference, "published file")
+        kind = _enum_string(entry, "kind", {"local", "managed"}, "published file")
+        if kind == "local":
+            _string(entry, "root", "published file")
+            _string(entry, "path", "published file")
+        else:
+            _string(entry, "target", "published file")
+            address = _mapping(entry.get("address"), "published file.address")
+            _string(address, "path", "published file.address")
+            scope = _mapping(address.get("scope"), "published file.scope")
+            if scope.get("kind") != "run":
+                raise ProtocolError("Zeroshot emitted malformed published file scope")
+            _string(scope, "runId", "published file.scope")
+    return cast(dict[str, JsonValue], dict(files))
+
+
+def _file_response(value: object, kind: str) -> dict[str, JsonValue]:
+    response = _mapping(value, "file response")
+    if kind == "download":
+        _string(response, "output", "file response")
+    else:
+        if response.get("kind") != kind:
+            raise ProtocolError("Zeroshot emitted an unexpected file response kind")
+        if kind == "staged":
+            _string(response, "runId", "file response")
+            _string(response, "operation", "file response")
+        elif kind == "replaced":
+            _mapping(response.get("address"), "file response.address")
+            _string(response, "operation", "file response")
+        elif kind == "list":
+            _mapping_list(response.get("paths"), "file response.paths")
+        elif kind == "members":
+            _mapping(response.get("selection"), "file response.selection")
+            _mapping_list(response.get("entries"), "file response.entries")
+        elif kind == "removed":
+            if type(response.get("removed")) is not bool:
+                raise ProtocolError("Zeroshot emitted malformed file response.removed")
+        elif kind == "cleaned":
+            for name in ("publications", "checkpointLineages"):
+                if type(response.get(name)) is not int or cast(int, response[name]) < 0:
+                    raise ProtocolError("Zeroshot emitted malformed file cleanup counts")
+    return cast(dict[str, JsonValue], dict(response))
 
 
 def _inbox(value: object) -> InboxPage:
