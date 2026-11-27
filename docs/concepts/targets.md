@@ -13,6 +13,9 @@ graph and models.
 | Direct (Docker or Kubernetes) | Run on infrastructure you manage        | An exact committed Git revision                    |
 | Hosted                        | Use a service such as zeroshot Platform | An exact committed Git revision                    |
 
+Local and Direct targets work without a zeroshot Platform account.
+[See what the CLI connects to.](../reference/installation.md#network-access)
+
 The model provider still receives the code and context its agent needs. Self-hosting the target
 does not make model processing local.
 

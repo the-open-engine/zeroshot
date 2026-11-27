@@ -35,6 +35,9 @@ every rejection back through repair. <a href="https://zeroshot.sh/#one-graph">Mo
 
 <!-- prettier-ignore-end -->
 
+Local runs don’t require a zeroshot account. Run history stays on your machine.
+[See what the CLI connects to.](reference/installation.md#network-access)
+
 Working in ChatGPT, Codex or Claude? The [plugin](guides/plugins.md) runs zeroshot without the
 CLI. Prefer a browser? [`zeroshot ui`](getting-started/install.md#open-the-workspace-ui) edits
 profiles, follows live runs and replays finished ones.
