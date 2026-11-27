@@ -23,7 +23,7 @@ deliver
 - Or start from the built-in `software-change` graph (implementation, then acceptance and code review in parallel, then bounded repair): `zeroshot template show software-change --delivery none` prints it as an editable `GraphSpec`; run your version with `--graph my-graph.json`.
 - Choose each node's harness, model, effort, and instructions, which steps run in parallel, and where failures route. Codex can implement while Claude Code reviews.
 - Save the graph with its runtime settings as a profile (`--profile`), locally or for your organization on Zeroshot Platform, so everyone runs the same process. The browser UI (`zeroshot ui`) edits profiles and shows runs.
-- Steps can also be scripts, people or timed waits, over a list of items or in parallel: [What a graph is made of](https://zeroshot.sh/docs/current/concepts/graphs/), with the current limits.
+- Steps can also be scripts, people or timed waits, over a list of items or in parallel: [What a graph is made of](https://zeroshot.sh/docs/current/concepts/graphs/)
 
 ## Why teams use it
 

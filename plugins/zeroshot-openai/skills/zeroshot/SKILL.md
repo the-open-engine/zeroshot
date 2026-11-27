@@ -11,7 +11,7 @@ graph reached its declared outcome; it does not always mean a pull request was c
 
 Steps can also be scripts, people or timed waits.
 [What a graph is made of](https://zeroshot.sh/docs/current/concepts/graphs/)
-lists every building block and its current limits.
+lists every building block.
 
 Use the connected server's tool schemas for MCP calls and installed CLI help for CLI commands.
 

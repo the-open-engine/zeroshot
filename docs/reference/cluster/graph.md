@@ -45,8 +45,8 @@ object declares peer communication permissions; omission or `{}` grants none.
 Waiting and asking are verifiers with host-run workers, not separate kinds:
 `builtin.request.wait@1` pauses until a time or for a duration
 ([Wait until a time](../../guides/wait.md)), and `builtin.request.ask@1` suspends for a person's
-answer ([Ask a person](../../guides/ask-a-person.md)). Both are refused below `par` or `map`. For every building block and its current limits in one
-place, see [What a graph is made of](../../concepts/graphs.md).
+answer ([Ask a person](../../guides/ask-a-person.md)). Both are refused below `par` or `map`. For
+every building block in one place, see [What a graph is made of](../../concepts/graphs.md).
 
 Parallel joins are `all`, `any`, `quorum { count }`, or `first { when }`. The closed worker error
 channel is `timeout`, `crash`, `malformed`, and `refusal`. Choice reachability/exhaustiveness, loop
