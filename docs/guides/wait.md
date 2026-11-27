@@ -209,8 +209,9 @@ To wait for a person instead of a time, use [Ask a person](ask-a-person.md).
 
 A parallel or mapped group has one checkpoint for the whole outer group, and `suspend` lets that
 group finish first (see [Observe and control runs](observe-and-control.md)). A map over thousands
-of long-lived items is therefore one unit: a resume reruns the whole group, and no item inside it
-can wait.
+of long-lived items is therefore one unit: recovering from the group's entry checkpoint, after a
+crash or with `resume --from-checkpoint`, reruns the whole group, and no item inside it can wait.
+Suspending lets the group finish and resumes after it without repeating completed work.
 
 For work that spans days and many items, keep per-item progress outside the graph and process it
 in small batches:
