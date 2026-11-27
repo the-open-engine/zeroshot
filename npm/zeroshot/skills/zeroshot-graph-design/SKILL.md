@@ -13,6 +13,10 @@ For a local checkout, begin by asking:
 
 > I'll assume you want a reusable code-change graph for the repository this skill was called from: `<invoking directory>`. Is that right, or do you have a different purpose or repository in mind?
 
+If the user describes a process other than a code change, design it from
+[What a graph is made of](https://zeroshot.sh/docs/current/concepts/graphs/)
+instead of the code-change defaults.
+
 Use the actual invoking directory. In a browser chat without a checkout, ask which repository or
 purpose the profile should serve and use available host context, attachments, or user-supplied
 evidence instead of inventing an invoking path. Wait for the answer before proposing a graph. If
@@ -40,7 +44,7 @@ Infer what the user would almost always check after a code change. Ground the pr
 - Use the repository's own build, formatting, lint, type, and test commands where applicable. Scope expensive suites according to its established workflow.
 - For a UI, consider browser interaction, visual inspection, accessibility, and existing end-to-end tests. Identify the main flows worth checking; do not add a browser node merely because a dependency mentions a UI framework.
 - For services, CLIs, libraries, or infrastructure, choose the corresponding integration, smoke, compatibility, or deployment validation supported by the repository.
-- Translate common manual verification into concrete agent actions when tools permit. If a required check needs unavailable services, credentials, or human judgment, surface that dependency and ask how to handle it. Missing evidence cannot count as a pass.
+- Translate common manual verification into concrete agent actions when tools permit. If a required check needs human judgment, offer an ask node. If it needs unavailable services or credentials, surface that dependency and ask how to handle it. Missing evidence cannot count as a pass.
 
 For code-change graphs, ask: "How should runs deliver changes: leave them local, push a branch, open a PR, or merge?" Reuse any earlier choice and include delivery in the proposal.
 

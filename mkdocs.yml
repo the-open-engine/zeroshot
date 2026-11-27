@@ -50,6 +50,7 @@ nav:
       - Install: getting-started/install.md
       - Run a first task: getting-started/first-run.md
   - Concepts:
+      - What a graph is made of: concepts/graphs.md
       - How execution works: concepts/execution.md
       - Runtimes and connections: concepts/runtimes-and-connections.md
       - Targets: concepts/targets.md
