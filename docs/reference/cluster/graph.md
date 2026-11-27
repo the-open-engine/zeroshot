@@ -42,6 +42,11 @@ object declares peer communication permissions; omission or `{}` grants none.
 | `succeed`  | Declared output type and structured state-to-output bindings                                                                                               |
 | `fail`     | One reason label. Runtime labels such as `unhandled` are reserved.                                                                                         |
 
+Waiting and asking are verifiers with host-run workers, not separate kinds:
+`builtin.request.wait@1` pauses until a time or for a duration
+([Wait until a time](../../guides/wait.md)), and `builtin.request.ask@1` suspends for a person's
+answer ([Ask a person](../../guides/ask-a-person.md)). Both are refused below `par` or `map`.
+
 Parallel joins are `all`, `any`, `quorum { count }`, or `first { when }`. The closed worker error
 channel is `timeout`, `crash`, `malformed`, and `refusal`. Choice reachability/exhaustiveness, loop
 exit satisfiability, selector typing, dominance, promotion safety, and structural folds are

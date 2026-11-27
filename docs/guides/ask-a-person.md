@@ -463,6 +463,7 @@ in sequences, choices and loops, including repeated nodes, but never below paral
 Request nodes in one graph may declare different signals and outputs. Each answer is checked
 against the node that asked.
 Workspace checkpoints must be enabled. Stack profiles cannot contain requests.
+To pause until a time instead of a person, see [Wait until a time](wait.md).
 
 Add `--target NAME` to `answer` and either inbox command for a named target. Discovery must advertise
 `request_ask: {"kind":"openengine.request-ask/v1"}`. Answers use the same resume route and fresh
