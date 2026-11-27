@@ -200,6 +200,9 @@ async fn observed_review(
             &known.target_branch,
             &known.head_branch,
         )?;
+        if pull.merged {
+            require_bound_head(&pull, known)?;
+        }
         return Ok(Some(pull));
     }
     find(authority, request, credential).await

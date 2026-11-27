@@ -1,10 +1,10 @@
 //! Merge, withdrawal and conflict materialization for the contributed Forgejo adapter.
 //!
 //! A merge is one write for one identity-validated review, pinned to the reviewed head. The intent is
-//! recorded before the write and released only when a write settles or a read shows the merge, so a
-//! withdrawal never reports an attempt whose outcome is unknown as withdrawn. A later write for the
-//! same review is pinned to the same head. Nothing here asks the forge to force a merge, to merge
-//! when checks succeed, or to delete the head branch.
+//! recorded before the write. Only a confirmed rejection or an exact merged read releases it.
+//! While an attempt is unresolved, delivery observes the review and keeps the attempt owned.
+//! Nothing here asks the forge to force a merge, to merge when checks succeed, or to delete the head
+//! branch.
 
 use std::collections::BTreeSet;
 use std::sync::MutexGuard;
@@ -84,7 +84,7 @@ pub(super) async fn request(
         context.release()?;
         return Ok(SourceMergeRequestOutcome::Accepted);
     }
-    if pull.state == "closed" {
+    if pull.state == "closed" || context.record_exists()? {
         return Ok(SourceMergeRequestOutcome::Pending);
     }
 
@@ -107,9 +107,18 @@ pub(super) async fn request(
         return Ok(SourceMergeRequestOutcome::Pending);
     }
 
-    // An earlier unconfirmed attempt keeps its record: the new write is pinned to the same reviewed
-    // head, and only a settled write or a merged read releases it.
-    context.remember()?;
+    // Recheck the bound target after the policy reads, immediately before submission. Forgejo
+    // accepts a head precondition, so this is the last client-side observation of the target.
+    let current = context.pull(credential).await?;
+    review::require_bound_head(&current, receipt)?;
+    if current.merged || current.state != "open" || current.draft || !current.mergeable {
+        return Ok(SourceMergeRequestOutcome::Pending);
+    }
+
+    // Claim the attempt atomically so a concurrent call cannot submit a second write.
+    if !context.remember()? {
+        return Ok(SourceMergeRequestOutcome::Pending);
+    }
     let (owner, name) = split_repository(&receipt.repository)?;
     let segments = ["repos", owner, name, "pulls", &receipt.review_id, "merge"];
     let body = json!({
@@ -252,9 +261,8 @@ impl<'a> Merge<'a> {
         Ok(self.effects()?.contains(&self.key))
     }
 
-    fn remember(&self) -> Result<(), SourceDeliveryError> {
-        self.effects()?.insert(self.key.clone());
-        Ok(())
+    fn remember(&self) -> Result<bool, SourceDeliveryError> {
+        Ok(self.effects()?.insert(self.key.clone()))
     }
 
     fn release(&self) -> Result<(), SourceDeliveryError> {

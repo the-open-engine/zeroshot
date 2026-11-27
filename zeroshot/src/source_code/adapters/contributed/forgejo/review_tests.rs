@@ -1109,6 +1109,15 @@ async fn r22_a_retargeted_pull_request_blocks_a_second_creation() {
     assert_writes(&requests, &[]);
 }
 
+fn queue_merge_at_another_head(fixture: &Fixture) {
+    let mut merged = pull(7);
+    merged.state = "closed";
+    merged.merged = true;
+    merged.merge_sha = Some(MERGE_REVISION.to_owned());
+    merged.head_sha = OTHER_REVISION.to_owned();
+    fixture.queue(version()).queue(pull_response(&merged));
+}
+
 /// R23: a merged pull request whose recorded head is not the reviewed head is not the review the
 /// receipt names.
 #[tokio::test]
@@ -1116,12 +1125,7 @@ async fn r23_inspect_refuses_a_merged_pull_whose_recorded_head_is_another_revisi
     let fixture = Fixture::new().await;
     let authority = authority(&fixture).await;
 
-    let mut merged = pull(7);
-    merged.state = "closed";
-    merged.merged = true;
-    merged.merge_sha = Some(MERGE_REVISION.to_owned());
-    merged.head_sha = OTHER_REVISION.to_owned();
-    fixture.queue(version()).queue(pull_response(&merged));
+    queue_merge_at_another_head(&fixture);
 
     let error = review::inspect(&authority, &review_receipt(7), credential())
         .await
@@ -1138,4 +1142,22 @@ async fn r23_inspect_refuses_a_merged_pull_whose_recorded_head_is_another_revisi
     let requests = fixture.requests();
     assert_eq!(requests.len(), 2, "{requests:?}");
     assert_reads(&requests);
+}
+
+#[tokio::test]
+async fn resume_refuses_a_merge_at_a_different_recorded_head() {
+    let fixture = Fixture::new().await;
+    let authority = authority(&fixture).await;
+    let known = review_receipt(7);
+    let target = target();
+    let mut request = review_read(&target, Some(&known));
+    request.include_terminal_reviews = true;
+
+    queue_merge_at_another_head(&fixture);
+
+    let error = review::observe(&authority, request, credential())
+        .await
+        .assert_error();
+    assert!(format!("{error}").contains("instead of the reviewed head"));
+    assert_reads(&fixture.requests());
 }

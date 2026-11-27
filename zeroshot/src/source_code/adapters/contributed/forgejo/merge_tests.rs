@@ -40,6 +40,13 @@ fn credential() -> SourceDeliveryCredential<'static> {
     SourceDeliveryCredential::token(TOKEN)
 }
 
+async fn supported_forge() -> (Fixture, ForgejoDeliveryAuthority) {
+    let fixture = Fixture::new().await;
+    let authority = new_authority(&fixture).await;
+    fixture.queue(version());
+    (fixture, authority)
+}
+
 async fn new_authority(fixture: &Fixture) -> ForgejoDeliveryAuthority {
     ForgejoDeliveryAuthority::for_test(
         SourceForgeBaseUrl::new(BASE).assert_value(),
@@ -93,6 +100,7 @@ struct Pull<'a> {
     mergeable: bool,
     draft: bool,
     head: &'a str,
+    base: &'a str,
     merge_sha: Option<&'a str>,
 }
 
@@ -103,6 +111,7 @@ fn open_pull(head: &str) -> Pull<'_> {
         mergeable: true,
         draft: false,
         head,
+        base: TARGET_BRANCH,
         merge_sha: None,
     }
 }
@@ -131,7 +140,7 @@ impl Pull<'_> {
                 "repo": { "full_name": REPOSITORY },
             },
             "base": {
-                "ref": TARGET_BRANCH,
+                "ref": self.base,
                 "sha": BASE_REVISION,
                 "repo": { "full_name": REPOSITORY },
             },
@@ -177,6 +186,22 @@ fn gate_reads<'a>(
         .queue(pull.response())
         .queue(rule)
         .queue(statuses)
+}
+
+/// An open, ready pull is read again immediately before submission.
+fn ready_reads(fixture: &Fixture) -> &Fixture {
+    let pull = open_pull(REVISION);
+    gate_reads(fixture, &pull, branch(0, &[], false), page(&[])).queue(pull.response())
+}
+
+async fn confirm_successful_write(fixture: &Fixture, authority: &ForgejoDeliveryAuthority) {
+    ready_reads(fixture)
+        .queue(Response::status(StatusCode::OK))
+        .queue(merged_pull(REVISION).response());
+    let outcome = merge::request(authority, &receipt(), credential())
+        .await
+        .assert_value();
+    assert_eq!(outcome, SourceMergeRequestOutcome::Accepted);
 }
 
 /// The requests a merge request makes when the gate answers before the rule is read: the repository
@@ -236,33 +261,18 @@ fn statuses_uri() -> String {
 /// deletion, then a read that shows the merge; `Accepted`, and the record is gone.
 #[tokio::test]
 async fn m1_checks_passed_sends_one_write_and_releases_the_record() {
-    let fixture = Fixture::new().await;
-    let authority = new_authority(&fixture).await;
-    fixture.queue(version());
-    gate_reads(
-        &fixture,
-        &open_pull(REVISION),
-        branch(0, &[], false),
-        page(&[]),
-    )
-    .queue(Response::status(StatusCode::OK))
-    .queue(merged_pull(REVISION).response());
-
-    assert_eq!(
-        merge::request(&authority, &receipt(), credential())
-            .await
-            .assert_value(),
-        SourceMergeRequestOutcome::Accepted
-    );
+    let (fixture, authority) = supported_forge().await;
+    confirm_successful_write(&fixture, &authority).await;
     assert!(!recorded(&authority), "the write was confirmed");
 
     let requests = fixture.requests();
-    assert_eq!(requests.len(), 7, "{requests:?}");
+    assert_eq!(requests.len(), 8, "{requests:?}");
     assert_eq!(requests.assert_at(1).uri, repository_uri());
     assert_eq!(requests.assert_at(2).uri, PULL_URI);
     assert_eq!(requests.assert_at(3).uri, branch_uri());
     assert_eq!(requests.assert_at(4).uri, statuses_uri());
-    let write = requests.assert_at(5);
+    assert_eq!(requests.assert_at(5).uri, PULL_URI);
+    let write = requests.assert_at(6);
     assert_eq!(write.method, Method::POST);
     assert_eq!(write.uri, MERGE_URI);
     let body = request_body(write);
@@ -270,7 +280,7 @@ async fn m1_checks_passed_sends_one_write_and_releases_the_record() {
     assert_eq!(body.assert_key("head_commit_id"), &json!(REVISION));
     assert_eq!(body.assert_key("delete_branch_after_merge"), &json!(false));
     assert_eq!(
-        requests.assert_at(6).uri,
+        requests.assert_at(7).uri,
         PULL_URI,
         "the read that shows the merge"
     );
@@ -356,9 +366,7 @@ async fn m2_pending_checks_a_draft_and_missing_approvals_send_no_write() {
 /// M3: `mergeable` false through every recheck is `Conflict` without any write.
 #[tokio::test(start_paused = true)]
 async fn m3_ambiguous_mergeability_through_every_recheck_is_conflict_without_a_write() {
-    let fixture = Fixture::new().await;
-    let authority = new_authority(&fixture).await;
-    fixture.queue(version());
+    let (fixture, authority) = supported_forge().await;
     fixture.queue(repository("merge", &["merge"]));
     for _ in 0..4 {
         fixture.queue(
@@ -396,9 +404,7 @@ async fn m3_ambiguous_mergeability_through_every_recheck_is_conflict_without_a_w
 /// M4: already merged is `Accepted` without any write, and the read releases any record.
 #[tokio::test]
 async fn m4_an_already_merged_pull_request_is_accepted_without_a_write() {
-    let fixture = Fixture::new().await;
-    let authority = new_authority(&fixture).await;
-    fixture.queue(version());
+    let (fixture, authority) = supported_forge().await;
     gate_reads_without_rule(&fixture, &merged_pull(REVISION));
     remember(&authority);
 
@@ -420,9 +426,7 @@ async fn m4_an_already_merged_pull_request_is_accepted_without_a_write() {
 /// and the record of an earlier attempt is not released by it.
 #[tokio::test]
 async fn m5_a_head_that_differs_from_the_receipt_is_the_identity_error_without_a_write() {
-    let fixture = Fixture::new().await;
-    let authority = new_authority(&fixture).await;
-    fixture.queue(version());
+    let (fixture, authority) = supported_forge().await;
     gate_reads_without_rule(&fixture, &open_pull(MOVED_REVISION));
     remember(&authority);
 
@@ -451,16 +455,8 @@ async fn m5_a_head_that_differs_from_the_receipt_is_the_identity_error_without_a
 /// M6: 405 returns `Pending` and removes the record, so a second call sends a second write.
 #[tokio::test]
 async fn m6_http_405_returns_pending_and_lets_the_next_call_write_again() {
-    let fixture = Fixture::new().await;
-    let authority = new_authority(&fixture).await;
-    fixture.queue(version());
-    gate_reads(
-        &fixture,
-        &open_pull(REVISION),
-        branch(0, &[], false),
-        page(&[]),
-    )
-    .queue(Response::status(StatusCode::METHOD_NOT_ALLOWED));
+    let (fixture, authority) = supported_forge().await;
+    ready_reads(&fixture).queue(Response::status(StatusCode::METHOD_NOT_ALLOWED));
 
     assert_eq!(
         merge::request(&authority, &receipt(), credential())
@@ -473,32 +469,19 @@ async fn m6_http_405_returns_pending_and_lets_the_next_call_write_again() {
         "a refusal that is not a lost response releases the record"
     );
 
-    gate_reads(
-        &fixture,
-        &open_pull(REVISION),
-        branch(0, &[], false),
-        page(&[]),
-    )
-    .queue(Response::status(StatusCode::OK))
-    .queue(merged_pull(REVISION).response());
-    assert_eq!(
-        merge::request(&authority, &receipt(), credential())
-            .await
-            .assert_value(),
-        SourceMergeRequestOutcome::Accepted
-    );
+    confirm_successful_write(&fixture, &authority).await;
     assert!(!recorded(&authority), "the second write was confirmed");
 
     let requests = fixture.requests();
-    assert_eq!(requests.len(), 12, "{requests:?}");
+    assert_eq!(requests.len(), 14, "{requests:?}");
     assert_eq!(writes(&requests).len(), 2, "{requests:?}");
     assert_eq!(
-        requests.assert_at(5).uri,
+        requests.assert_at(6).uri,
         MERGE_URI,
         "the first call wrote once"
     );
     assert_eq!(
-        requests.assert_at(10).uri,
+        requests.assert_at(12).uri,
         MERGE_URI,
         "the second call wrote again"
     );
@@ -514,14 +497,9 @@ async fn m7_http_409_is_conflict_for_an_unchanged_head_and_pending_for_a_moved_o
     let unchanged = Fixture::new().await;
     let authority = new_authority(&unchanged).await;
     unchanged.queue(version());
-    gate_reads(
-        &unchanged,
-        &open_pull(REVISION),
-        branch(0, &[], false),
-        page(&[]),
-    )
-    .queue(Response::status(StatusCode::CONFLICT))
-    .queue(open_pull(REVISION).response());
+    ready_reads(&unchanged)
+        .queue(Response::status(StatusCode::CONFLICT))
+        .queue(open_pull(REVISION).response());
     assert_eq!(
         merge::request(&authority, &receipt(), credential())
             .await
@@ -536,14 +514,9 @@ async fn m7_http_409_is_conflict_for_an_unchanged_head_and_pending_for_a_moved_o
     let moved = Fixture::new().await;
     let authority = new_authority(&moved).await;
     moved.queue(version());
-    gate_reads(
-        &moved,
-        &open_pull(REVISION),
-        branch(0, &[], false),
-        page(&[]),
-    )
-    .queue(Response::status(StatusCode::CONFLICT))
-    .queue(open_pull(MOVED_REVISION).response());
+    ready_reads(&moved)
+        .queue(Response::status(StatusCode::CONFLICT))
+        .queue(open_pull(MOVED_REVISION).response());
     assert_eq!(
         merge::request(&authority, &receipt(), credential())
             .await
@@ -559,10 +532,10 @@ async fn m7_http_409_is_conflict_for_an_unchanged_head_and_pending_for_a_moved_o
     let moved_requests = moved.requests();
     assert_eq!(
         unchanged_requests.len(),
-        7,
+        8,
         "one write and the read that settles it"
     );
-    assert_eq!(moved_requests.len(), 7, "{moved_requests:?}");
+    assert_eq!(moved_requests.len(), 8, "{moved_requests:?}");
     assert_eq!(
         writes(&unchanged_requests).len(),
         1,
@@ -574,16 +547,8 @@ async fn m7_http_409_is_conflict_for_an_unchanged_head_and_pending_for_a_moved_o
 /// M8: 403 is the permission error with the documented text, and the token is never in it.
 #[tokio::test]
 async fn m8_http_403_is_the_permission_error_with_the_documented_text_and_no_token() {
-    let fixture = Fixture::new().await;
-    let authority = new_authority(&fixture).await;
-    fixture.queue(version());
-    gate_reads(
-        &fixture,
-        &open_pull(REVISION),
-        branch(0, &[], false),
-        page(&[]),
-    )
-    .queue(Response::status(StatusCode::FORBIDDEN));
+    let (fixture, authority) = supported_forge().await;
+    ready_reads(&fixture).queue(Response::status(StatusCode::FORBIDDEN));
 
     let error = merge::request(&authority, &receipt(), credential())
         .await
@@ -613,10 +578,10 @@ async fn m8_http_403_is_the_permission_error_with_the_documented_text_and_no_tok
     let requests = fixture.requests();
     assert_eq!(
         requests.len(),
-        6,
+        7,
         "no settle read after a permission refusal"
     );
-    assert_eq!(requests.assert_at(5).uri, MERGE_URI);
+    assert_eq!(requests.assert_at(6).uri, MERGE_URI);
     assert_eq!(writes(&requests).len(), 1, "{requests:?}");
 }
 
@@ -627,14 +592,9 @@ async fn m9_http_401_with_a_valid_user_is_the_permission_error_and_otherwise_kee
     let known = Fixture::new().await;
     let authority = new_authority(&known).await;
     known.queue(version());
-    gate_reads(
-        &known,
-        &open_pull(REVISION),
-        branch(0, &[], false),
-        page(&[]),
-    )
-    .queue(Response::status(StatusCode::UNAUTHORIZED))
-    .queue(Response::json(json!({ "login": "zeroshot" })));
+    ready_reads(&known)
+        .queue(Response::status(StatusCode::UNAUTHORIZED))
+        .queue(Response::json(json!({ "login": "zeroshot" })));
 
     let error = merge::request(&authority, &receipt(), credential())
         .await
@@ -654,23 +614,18 @@ async fn m9_http_401_with_a_valid_user_is_the_permission_error_and_otherwise_kee
     );
     let requests = known.requests();
     assert_eq!(
-        requests.assert_at(6).uri,
+        requests.assert_at(7).uri,
         "/api/v1/user",
         "the read that decides"
     );
-    assert_eq!(requests.len(), 7, "{requests:?}");
+    assert_eq!(requests.len(), 8, "{requests:?}");
 
     let refused = Fixture::new().await;
     let authority = new_authority(&refused).await;
     refused.queue(version());
-    gate_reads(
-        &refused,
-        &open_pull(REVISION),
-        branch(0, &[], false),
-        page(&[]),
-    )
-    .queue(Response::status(StatusCode::UNAUTHORIZED))
-    .queue(Response::status(StatusCode::UNAUTHORIZED));
+    ready_reads(&refused)
+        .queue(Response::status(StatusCode::UNAUTHORIZED))
+        .queue(Response::status(StatusCode::UNAUTHORIZED));
 
     let error = merge::request(&authority, &receipt(), credential())
         .await
@@ -681,23 +636,16 @@ async fn m9_http_401_with_a_valid_user_is_the_permission_error_and_otherwise_kee
         "no user read, so it stays 401"
     );
     let requests = refused.requests();
-    assert_eq!(requests.len(), 7, "{requests:?}");
+    assert_eq!(requests.len(), 8, "{requests:?}");
 }
 
 /// M10: a transport failure followed by a read that shows the merge is `Accepted`.
 #[tokio::test]
 async fn m10_a_transport_failure_followed_by_a_merged_read_is_accepted() {
-    let fixture = Fixture::new().await;
-    let authority = new_authority(&fixture).await;
-    fixture.queue(version());
-    gate_reads(
-        &fixture,
-        &open_pull(REVISION),
-        branch(0, &[], false),
-        page(&[]),
-    )
-    .queue(transport_failure())
-    .queue(merged_pull(REVISION).response());
+    let (fixture, authority) = supported_forge().await;
+    ready_reads(&fixture)
+        .queue(transport_failure())
+        .queue(merged_pull(REVISION).response());
 
     assert_eq!(
         merge::request(&authority, &receipt(), credential())
@@ -711,30 +659,24 @@ async fn m10_a_transport_failure_followed_by_a_merged_read_is_accepted() {
     );
 
     let requests = fixture.requests();
-    assert_eq!(requests.len(), 7, "{requests:?}");
-    assert_eq!(requests.assert_at(5).uri, MERGE_URI);
+    assert_eq!(requests.len(), 8, "{requests:?}");
+    assert_eq!(requests.assert_at(6).uri, MERGE_URI);
     assert_eq!(
-        requests.assert_at(6).uri,
+        requests.assert_at(7).uri,
         PULL_URI,
         "the read that shows the merge"
     );
     assert_eq!(writes(&requests).len(), 1, "{requests:?}");
 }
 
-/// M11: an unconfirmed write keeps its record until the next call's write settles it.
+/// A lost response leaves the merge owned through retry and withdrawal until a later
+/// exact-head read confirms success.
 #[tokio::test]
-async fn m11_an_unconfirmed_write_keeps_its_record_until_a_later_write_settles() {
-    let fixture = Fixture::new().await;
-    let authority = new_authority(&fixture).await;
-    fixture.queue(version());
-    gate_reads(
-        &fixture,
-        &open_pull(REVISION),
-        branch(0, &[], false),
-        page(&[]),
-    )
-    .queue(transport_failure())
-    .queue(open_pull(REVISION).response());
+async fn unconfirmed_write_waits_for_an_exact_merged_read() {
+    let (fixture, authority) = supported_forge().await;
+    ready_reads(&fixture)
+        .queue(transport_failure())
+        .queue(open_pull(REVISION).response());
 
     let error = merge::request(&authority, &receipt(), credential())
         .await
@@ -742,133 +684,31 @@ async fn m11_an_unconfirmed_write_keeps_its_record_until_a_later_write_settles()
     assert!(error.retryable_operation(), "{error}");
     assert!(format!("{error}").contains("transport failed"), "{error}");
     assert!(!format!("{error}").contains(TOKEN), "{error}");
-    assert!(recorded(&authority), "the outcome is unknown");
 
-    gate_reads(
-        &fixture,
-        &open_pull(REVISION),
-        branch(0, &[], false),
-        page(&[]),
-    )
-    .queue(Response::status(StatusCode::OK))
-    .queue(merged_pull(REVISION).response());
-    assert_eq!(
-        merge::request(&authority, &receipt(), credential())
-            .await
-            .assert_value(),
-        SourceMergeRequestOutcome::Accepted
-    );
-    assert!(
-        !recorded(&authority),
-        "the settled write releases the record it inherited"
-    );
-
-    let requests = fixture.requests();
-    assert_eq!(requests.len(), 13, "{requests:?}");
-    let writes = writes(&requests);
-    assert_eq!(writes.len(), 2, "{requests:?}");
-    assert_eq!(writes.assert_at(0).uri, MERGE_URI, "{requests:?}");
-    assert_eq!(writes.assert_at(1).uri, MERGE_URI, "{requests:?}");
-    assert_eq!(
-        requests.assert_at(5).uri,
-        MERGE_URI,
-        "the first call wrote once"
-    );
-    assert_eq!(
-        requests.assert_at(6).uri,
-        PULL_URI,
-        "the read that could not decide"
-    );
-    assert_eq!(
-        requests.assert_at(11).uri,
-        MERGE_URI,
-        "the second call wrote without first returning `Pending`"
-    );
-    assert_eq!(
-        requests.assert_at(12).uri,
-        PULL_URI,
-        "the read that confirmed it"
-    );
-}
-
-/// M23: a gate that is not ready leaves an existing record in place and sends no write.
-#[tokio::test]
-async fn m23_a_held_record_survives_a_gate_that_is_not_ready() {
-    let fixture = Fixture::new().await;
-    let authority = new_authority(&fixture).await;
-    remember(&authority);
-    fixture.queue(version());
-    gate_reads(
-        &fixture,
-        &open_pull(REVISION),
-        branch(0, &["ci"], true),
-        page(&[status(1, "ci", "pending", "")]),
-    );
-
-    assert_eq!(
-        merge::request(&authority, &receipt(), credential())
-            .await
-            .assert_value(),
-        SourceMergeRequestOutcome::Pending
-    );
-    assert!(
-        recorded(&authority),
-        "a gate that is not ready leaves the record in place"
-    );
-
-    let requests = fixture.requests();
-    assert!(writes(&requests).is_empty(), "{requests:?}");
-}
-
-/// M24: `withdraw` after a timed-out write and a second call still reports the settlement
-/// uncertain and keeps the record.
-#[tokio::test]
-async fn m24_withdraw_after_a_timed_out_write_and_a_second_call_still_reports_uncertain() {
-    let fixture = Fixture::new().await;
-    let authority = new_authority(&fixture).await;
-    fixture.queue(version());
-    gate_reads(
-        &fixture,
-        &open_pull(REVISION),
-        branch(0, &[], false),
-        page(&[]),
-    )
-    .queue(transport_failure())
-    .queue(open_pull(REVISION).response());
-
-    let error = merge::request(&authority, &receipt(), credential())
+    let read_count = fixture.requests().len();
+    gate_reads_without_rule(&fixture, &open_pull(REVISION));
+    let retry = merge::request(&authority, &receipt(), credential())
         .await
-        .assert_error();
-    assert!(error.retryable_operation(), "{error}");
-    assert!(recorded(&authority), "the outcome is unknown");
-
-    gate_reads(
-        &fixture,
-        &open_pull(REVISION),
-        branch(0, &["ci"], true),
-        page(&[status(1, "ci", "pending", "")]),
-    );
-    assert_eq!(
-        merge::request(&authority, &receipt(), credential())
-            .await
-            .assert_value(),
-        SourceMergeRequestOutcome::Pending
-    );
-    assert!(recorded(&authority), "the record is still held");
+        .assert_value();
+    assert_eq!(retry, SourceMergeRequestOutcome::Pending);
+    assert_eq!(fixture.requests().len(), read_count + 2);
+    assert!(recorded(&authority));
 
     fixture.queue(open_pull(REVISION).response());
-    let error = merge::withdraw(&authority, &receipt(), credential())
+    let withdrawal = merge::withdraw(&authority, &receipt(), credential())
         .await
         .assert_error();
-    let text = match &error {
-        SourceDeliveryError::Api(failure) => format!("{failure}"),
-        other => panic!("expected an API error, got {other:?}"),
-    };
-    assert!(
-        text.starts_with("Forgejo merge settlement remains uncertain for"),
-        "{text}"
-    );
-    assert!(recorded(&authority), "the record is still held");
+    assert!(format!("{withdrawal}").contains("Forgejo merge settlement remains uncertain"));
+    assert!(format!("{withdrawal}").contains("no repair handoff is authorized"));
+    assert!(recorded(&authority));
+
+    gate_reads_without_rule(&fixture, &merged_pull(REVISION));
+    let settled = merge::request(&authority, &receipt(), credential())
+        .await
+        .assert_value();
+    assert_eq!(settled, SourceMergeRequestOutcome::Accepted);
+    assert!(!recorded(&authority));
+    assert_eq!(writes(&fixture.requests()).len(), 1);
 }
 
 /// M12: `merge_style` takes the default when it is allowed, otherwise the allowed order, and a
@@ -1068,20 +908,8 @@ async fn m14_conflict_materialization_needs_the_transport_and_a_present_target_b
 /// asks for the head branch to be removed.
 #[tokio::test]
 async fn m15_no_write_body_carries_force_merge_or_merge_when_checks_succeed() {
-    let fixture = Fixture::new().await;
-    let authority = new_authority(&fixture).await;
-    fixture.queue(version());
-    gate_reads(
-        &fixture,
-        &open_pull(REVISION),
-        branch(0, &[], false),
-        page(&[]),
-    )
-    .queue(Response::status(StatusCode::OK))
-    .queue(merged_pull(REVISION).response());
-    merge::request(&authority, &receipt(), credential())
-        .await
-        .assert_value();
+    let (fixture, authority) = supported_forge().await;
+    confirm_successful_write(&fixture, &authority).await;
 
     let requests = fixture.requests();
     let write_requests = writes(&requests);
@@ -1113,9 +941,7 @@ async fn m15_no_write_body_carries_force_merge_or_merge_when_checks_succeed() {
 /// identity error, and no `POST` is sent.
 #[tokio::test]
 async fn m16_a_moved_head_is_the_identity_error_and_no_post_is_sent() {
-    let fixture = Fixture::new().await;
-    let authority = new_authority(&fixture).await;
-    fixture.queue(version());
+    let (fixture, authority) = supported_forge().await;
     gate_reads_without_rule(&fixture, &open_pull(MOVED_REVISION));
 
     let error = merge::request(&authority, &receipt(), credential())
@@ -1156,9 +982,7 @@ fn merged_at_moved_head() -> String {
 /// an earlier attempt stays recorded.
 #[tokio::test]
 async fn m17_a_merged_read_at_another_head_is_the_identity_error_without_a_write() {
-    let fixture = Fixture::new().await;
-    let authority = new_authority(&fixture).await;
-    fixture.queue(version());
+    let (fixture, authority) = supported_forge().await;
     gate_reads_without_rule(&fixture, &merged_pull(MOVED_REVISION));
     remember(&authority);
 
@@ -1176,54 +1000,24 @@ async fn m17_a_merged_read_at_another_head_is_the_identity_error_without_a_write
     assert!(writes(&requests).is_empty(), "{requests:?}");
 }
 
-/// M18: a confirmed write followed by a read merged at another head is the identity error.
+/// Both a confirmed write and a lost response require the merged read to match the reviewed head.
 #[tokio::test]
-async fn m18_a_confirmed_write_followed_by_a_merged_read_at_another_head_is_the_identity_error() {
-    let fixture = Fixture::new().await;
-    let authority = new_authority(&fixture).await;
-    fixture.queue(version());
-    gate_reads(
-        &fixture,
-        &open_pull(REVISION),
-        branch(0, &[], false),
-        page(&[]),
-    )
-    .queue(Response::status(StatusCode::OK))
-    .queue(merged_pull(MOVED_REVISION).response());
+async fn settlement_refuses_a_merge_at_another_head() {
+    for response in [Response::status(StatusCode::OK), transport_failure()] {
+        let (fixture, authority) = supported_forge().await;
+        ready_reads(&fixture)
+            .queue(response)
+            .queue(merged_pull(MOVED_REVISION).response());
 
-    let error = merge::request(&authority, &receipt(), credential())
-        .await
-        .assert_error();
-    assert_eq!(format!("{error}"), merged_at_moved_head());
+        let error = merge::request(&authority, &receipt(), credential())
+            .await
+            .assert_error();
+        assert_eq!(format!("{error}"), merged_at_moved_head());
 
-    let requests = fixture.requests();
-    assert_eq!(requests.len(), 7, "{requests:?}");
-    assert_eq!(writes(&requests).len(), 1, "{requests:?}");
-}
-
-/// M19: an uncertain write followed by a read merged at another head is the identity error.
-#[tokio::test]
-async fn m19_an_uncertain_write_followed_by_a_merged_read_at_another_head_is_the_identity_error() {
-    let fixture = Fixture::new().await;
-    let authority = new_authority(&fixture).await;
-    fixture.queue(version());
-    gate_reads(
-        &fixture,
-        &open_pull(REVISION),
-        branch(0, &[], false),
-        page(&[]),
-    )
-    .queue(transport_failure())
-    .queue(merged_pull(MOVED_REVISION).response());
-
-    let error = merge::request(&authority, &receipt(), credential())
-        .await
-        .assert_error();
-    assert_eq!(format!("{error}"), merged_at_moved_head());
-
-    let requests = fixture.requests();
-    assert_eq!(requests.len(), 7, "{requests:?}");
-    assert_eq!(writes(&requests).len(), 1, "{requests:?}");
+        let requests = fixture.requests();
+        assert_eq!(requests.len(), 8, "{requests:?}");
+        assert_eq!(writes(&requests).len(), 1, "{requests:?}");
+    }
 }
 
 /// M20: a withdrawal refuses a pull request merged at another head.
@@ -1244,4 +1038,22 @@ async fn m20_withdraw_refuses_a_merged_pull_at_another_head() {
         2,
         "the version and the pull request read"
     );
+}
+
+#[tokio::test]
+async fn retarget_after_policy_reads_prevents_merge_submission() {
+    let (fixture, authority) = supported_forge().await;
+    let pull = open_pull(REVISION);
+    let retargeted = Pull {
+        base: "other",
+        ..open_pull(REVISION)
+    };
+    gate_reads(&fixture, &pull, branch(0, &[], false), page(&[])).queue(retargeted.response());
+
+    let error = merge::request(&authority, &receipt(), credential())
+        .await
+        .assert_error();
+    assert!(format!("{error}").contains("targets other instead of main"));
+    assert!(writes(&fixture.requests()).is_empty());
+    assert!(!recorded(&authority));
 }

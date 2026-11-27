@@ -362,8 +362,12 @@ redaction as GitLab. Statuses from other CI systems contribute their status line
 Actions read access the status lines remain and the diagnostic says why details are missing.
 
 `--ship` merges with the repository's default merge style when it is allowed, otherwise with the
-first allowed style; it pins the reviewed head with `head_commit_id`, never forces a merge, never
-schedules a merge for later, and keeps the head branch.
+first allowed style. It pins the reviewed head with `head_commit_id`, never forces or schedules a
+merge, and keeps the head branch.
+
+Zeroshot rechecks the target just before submitting the merge. Forgejo uses the PR's target branch at
+merge time, so avoid retargeting during delivery. If a request's outcome is uncertain, Zeroshot
+observes the PR for confirmation while its controller is active.
 
 `mergeable: false` is rechecked three times, two seconds apart, before it counts as a conflict,
 because Forgejo also reports it while its own conflict check runs.
