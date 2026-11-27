@@ -1,6 +1,8 @@
 //! Maintained and contributor source-provider adapters. Registration uses SourceCodeProviderRegistry.
 pub mod contributed;
 pub mod core;
+mod forge_http;
+mod review_body;
 
 /// A contribution can advertise metadata in pure preflight and bind effects only once the engine
 /// supplies this source-scoped transport. The context is runtime-only and carries no credential.

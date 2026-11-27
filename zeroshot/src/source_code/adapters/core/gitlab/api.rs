@@ -1,5 +1,4 @@
 //! Bounded HTTPS exchange. API paths and credentials never come from returned pagination links.
-use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::Duration;
 use reqwest::{Client, Method, Url, redirect::Policy};
@@ -7,13 +6,12 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use tokio::sync::OnceCell;
 use url::Position;
+use crate::source_code_provider::adapters::forge_http::{self, BodyFailure};
 use crate::source_code_provider::{SourceDeliveryCredential, SourceDeliveryError};
 use super::wire::ServerMetadata;
 use super::super::ci_diagnostics::{JobLog, MAX_JOB_LOG_BYTES, job_log_tail};
 
 const RESPONSE_LIMIT: usize = 1024 * 1024;
-/// GitLab explains a rejection in a short JSON body; longer bodies keep only their prefix.
-const ERROR_BODY_LIMIT: usize = 4 * 1024;
 pub(super) const PAGE_LIMIT: u32 = 64;
 const PAGE_SIZE: usize = 100;
 
@@ -321,20 +319,7 @@ async fn rejection(
     network: &super::super::network::ForgeNetwork,
 ) -> SourceDeliveryError {
     let status = response.status().as_u16();
-    let mut body = Vec::new();
-    let truncated = loop {
-        match response.chunk().await {
-            Ok(Some(chunk)) if body.len() + chunk.len() <= ERROR_BODY_LIMIT => {
-                body.extend_from_slice(&chunk);
-            }
-            Ok(Some(chunk)) => {
-                body.extend_from_slice(&chunk[..ERROR_BODY_LIMIT - body.len()]);
-                break true;
-            }
-            Ok(None) => break false,
-            Err(_) => break true,
-        }
-    };
+    let (body, truncated) = forge_http::rejection_body(&mut response).await;
     let mut diagnostic = format!("GitLab API {resource} returned HTTP {status}").into_bytes();
     if !body.is_empty() {
         diagnostic.extend_from_slice(b": ");
@@ -361,21 +346,7 @@ fn transport_failure(
     credential: SourceDeliveryCredential<'_>,
     network: &super::super::network::ForgeNetwork,
 ) -> SourceDeliveryError {
-    let error = error.without_url();
-    let mut detail = context;
-    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(&error);
-    while let Some(current) = cause {
-        let _ = write!(detail, ": {current}");
-        // Operating systems localize their messages; the portable kind keeps the cause readable.
-        if let Some(kind) = current
-            .downcast_ref::<std::io::Error>()
-            .filter(|error| error.raw_os_error().is_some())
-            .map(std::io::Error::kind)
-        {
-            let _ = write!(detail, " [{kind}]");
-        }
-        cause = current.source();
-    }
+    let detail = forge_http::transport_detail(context, error);
     SourceDeliveryError::api(
         None,
         display_text(network.redact(&detail).into_bytes(), false, credential),
@@ -398,43 +369,11 @@ fn display_text_with_secrets(
     credential: SourceDeliveryCredential<'_>,
     extra_secrets: &[String],
 ) -> String {
-    use crate::native_v2_delivery::git_auth;
-    use crate::source_code_provider::SourceGitCredential;
-
-    let mut values = vec![credential.expose()];
-    values.extend(credential.github_git_token());
-    let mut secrets = extra_secrets.to_vec();
-    secrets.extend_from_slice(credential.diagnostic_secrets());
-    match credential.git() {
-        Some(SourceGitCredential::Https { username, password }) => {
-            values.extend([username, password]);
-            secrets.push(git_auth::encode_user_password(username, password));
-        }
-        Some(SourceGitCredential::Ssh {
-            private_key,
-            known_hosts,
-        }) => {
-            values.extend([private_key, known_hosts]);
-            values.extend(private_key.lines());
-        }
-        None => {}
-    }
-    for value in values.into_iter().filter(|value| !value.is_empty()) {
-        secrets.extend([
-            value.to_owned(),
-            credential_segment(value),
-            git_auth::encode_basic_credential(value),
-        ]);
-    }
-    // Redact every credential before any size bound or lossy UTF8 conversion can split it.
-    let (text, truncated) = crate::native_v2_delivery::command::diagnostic_text_with_secrets(
-        bytes, truncated, &secrets,
-    );
-    let mut text = text.replace(char::is_control, " ");
-    if truncated {
-        text.push_str(" [truncated]");
-    }
-    text
+    forge_http::display_text(
+        bytes,
+        truncated,
+        &forge_http::diagnostic_secrets(credential, extra_secrets),
+    )
 }
 
 pub(super) fn identity_error(
@@ -452,49 +391,25 @@ pub(super) fn delivery_context(
     error.with_context(display_text(context.into_bytes(), false, credential))
 }
 
-// Match the request encoder, including slash and percent escapes, without changing its URL.
-fn credential_segment(token: &str) -> String {
-    let mut url = Url::parse("https://redacted.invalid/").expect("static hierarchical URL");
-    url.path_segments_mut()
-        .expect("HTTP URL supports path segments")
-        .push(token);
-    url.path()[1..].to_owned()
-}
-
 async fn response_bytes(
-    mut response: reqwest::Response,
+    response: reqwest::Response,
     credential: SourceDeliveryCredential<'_>,
     maximum_bytes: usize,
     network: &super::super::network::ForgeNetwork,
 ) -> Result<Vec<u8>, SourceDeliveryError> {
-    if response
-        .content_length()
-        .is_some_and(|length| length > maximum_bytes as u64)
-    {
-        return Err(SourceDeliveryError::api(
+    match forge_http::bounded_body(response, maximum_bytes).await {
+        Ok(bytes) => Ok(bytes),
+        Err(BodyFailure::TooLarge) => Err(SourceDeliveryError::api(
             None,
             "GitLab response exceeded its byte bound",
-        ));
-    }
-    let source = response.url()[..Position::AfterPath].to_owned();
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|error| {
-        transport_failure(
+        )),
+        Err(BodyFailure::Transport { source, error }) => Err(transport_failure(
             format!("GitLab API response from {source} transport failed"),
             error,
             credential,
             network,
-        )
-    })? {
-        if bytes.len().saturating_add(chunk.len()) > maximum_bytes {
-            return Err(SourceDeliveryError::api(
-                None,
-                "GitLab response exceeded its byte bound",
-            ));
-        }
-        bytes.extend_from_slice(&chunk);
+        )),
     }
-    Ok(bytes)
 }
 
 pub(super) fn require_version(version: &str) -> Result<(), SourceDeliveryError> {

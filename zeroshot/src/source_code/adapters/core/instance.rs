@@ -22,7 +22,10 @@ pub fn forge_base_url(
 }
 
 /// Recognizes a locator only inside an explicitly selected instance.
-pub(super) fn repository_at_remote(remote: &str, base: &SourceForgeBaseUrl) -> Option<String> {
+pub(in crate::source_code_provider::adapters) fn repository_at_remote(
+    remote: &str,
+    base: &SourceForgeBaseUrl,
+) -> Option<String> {
     let parsed = remote_url(remote)?;
     let base = url::Url::parse(base.as_str()).ok()?;
     if !parsed.host_str()?.eq_ignore_ascii_case(base.host_str()?) {

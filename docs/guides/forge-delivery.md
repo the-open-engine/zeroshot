@@ -1,17 +1,19 @@
 ---
-description: 'Set up GitHub and GitLab delivery with native CLI logins or token connections.'
+description: 'Set up GitHub, GitLab and Forgejo delivery with native CLI logins or token connections.'
 ---
 
-# GitHub and GitLab delivery
+# GitHub, GitLab and Forgejo delivery
 
 GitHub.com, GitHub Enterprise, and GitLab use the same delivery nodes for PR/MR creation, merging,
-and issue or review comments.
+and issue or review comments. Self-hosted Forgejo uses them for pull request creation, required
+checks and merging, without comments; see [Forgejo](#forgejo).
 
-| Service                                     | Minimum version | API credential |
-| ------------------------------------------- | --------------- | -------------- |
-| GitHub.com / Enterprise Cloud (`*.ghe.com`) | Hosted service  | `GH_TOKEN`     |
-| GitHub Enterprise Server                    | 3.22.2          | `GH_TOKEN`     |
-| GitLab.com / self-managed GitLab            | 19.5.1          | `GITLAB_TOKEN` |
+| Service                                     | Minimum version | API credential  |
+| ------------------------------------------- | --------------- | --------------- |
+| GitHub.com / Enterprise Cloud (`*.ghe.com`) | Hosted service  | `GH_TOKEN`      |
+| GitHub Enterprise Server                    | 3.22.2          | `GH_TOKEN`      |
+| GitLab.com / self-managed GitLab            | 19.5.1          | `GITLAB_TOKEN`  |
+| Self-hosted Forgejo                         | 16.0.0          | `FORGEJO_TOKEN` |
 
 Instances must be reachable over HTTPS with certificate verification enabled. Local delivery honors
 the invoking shell's `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY`, their lower-case forms,
@@ -22,8 +24,9 @@ directories and support `socks5://` and `socks5h://` proxy URLs. An unreadable c
 is reported by name. Proxy credentials stay private. Relative CA paths are anchored to the invoking
 directory before a delivery worktree is created.
 
-Older or unidentifiable servers fail version checks. Use a web base without a trailing slash, including any GitLab installation
-prefix (such as `https://gitlab.example/install`). GitHub uses a root web URL.
+Older or unidentifiable servers fail version checks. Use a web base without a trailing slash,
+including any GitLab or Forgejo installation prefix (such as `https://gitlab.example/install`).
+GitHub uses a root web URL.
 
 ## Local setup
 
@@ -140,7 +143,8 @@ The source connection supplies `GIT_USERNAME` / `GIT_PASSWORD` for HTTPS, or
 }
 ```
 
-Default API connections are `github.GH_TOKEN` and `gitlab.GITLAB_TOKEN`; explicit bindings keep their names.
+Default API connections are `github.GH_TOKEN`, `gitlab.GITLAB_TOKEN` and `forgejo.FORGEJO_TOKEN`;
+explicit bindings keep their names.
 Named targets read the declared field names for both submission and resume. Native CLI aliases such
 as `GH_ENTERPRISE_TOKEN` and `GITLAB_ACCESS_TOKEN` apply only to local runs.
 One static connection can hold both transport and API fields; inline run values work too. GitHub uses
@@ -319,3 +323,51 @@ Neither procedure requires a force-push.
 For a named target, use `zeroshot checkpoints RUN_ID --target NAME`, then
 `zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID --target NAME` with a checkpoint taken
 before the rewrite. The target restores its own retained checkout; omit `--discard-workspace-changes`.
+
+## Forgejo
+
+Forgejo is never identified automatically. Select it with `--source-provider source.forgejo` and
+`--source-base-url https://forge.example`, including the installation path when there is one, or
+with the equivalent `forge` object in a source file, as shown for GitLab:
+
+```console
+zeroshot run --title "Example change" --input task.json \
+  --template software-change --uniform-runtime-config runtime.json --pr \
+  --source-provider source.forgejo --source-base-url https://forge.example
+```
+
+The Forgejo API uses HTTPS. Git checkout and push can use HTTPS or SSH. For a private certificate
+authority, use the `SSL_CERT_FILE` setting described above.
+
+The token is `FORGEJO_TOKEN` from the delivery connection: the default `forgejo` connection or the
+connection the delivery node declares, as shown for GitLab above. A self-hosted instance has no
+native login, so local runs read no ambient token and start no CLI for it. The scopes are
+`read:user` and `write:repository`, and the token's user needs push access. `check_access` refuses a
+read-only token before agents start.
+
+Required checks come from the rule in effect for the target branch, read through the branch
+endpoint: `enable_status_check` and `status_check_contexts`, with `*` and `?` patterns. Approvals
+come from `required_approvals`.
+
+**Protect the target branch.** Without an enabled status check, a pull request whose CI has not
+reported yet has no statuses and counts as not required, so `--ship` can merge before CI starts.
+Enable a status check on the target branch for CI-gated delivery.
+
+A failed check carries the failed Forgejo Actions job logs into repair, with the same budgets and
+redaction as GitLab. Statuses from other CI systems contribute their status line only. Without
+Actions read access the status lines remain and the diagnostic says why details are missing.
+
+`--ship` merges with the repository's default merge style when it is allowed, otherwise with the
+first allowed style. It pins the reviewed head with `head_commit_id`, never forces or schedules a
+merge, and keeps the head branch.
+
+Zeroshot rechecks the target just before submitting the merge. Forgejo uses the PR's target branch at
+merge time, so avoid retargeting during delivery. If a request's outcome is uncertain, Zeroshot
+observes the PR for confirmation while its controller is active.
+
+`mergeable: false` is rechecked three times, two seconds apart, before it counts as a conflict,
+because Forgejo also reports it while its own conflict check runs.
+
+Not supported: review comment intake and conversation resolution, automatic head updates when the
+branch rule blocks outdated branches, and merge queues. A pull request blocked only by such a rule
+waits.

@@ -749,7 +749,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Maintained implementations live in `source_code/adapters/core`; contributed implementations
   live in `source_code/adapters/contributed`. Git is shared transport; forge adapters supply review,
   checks, and merge behavior through the existing delivery nodes and opaque repository/review IDs.
-  GitHub and GitLab are maintained forges. `SourceForgeIdentity.baseUrl` is a canonical credential-free
+  GitHub and GitLab are maintained forges. Self-hosted Forgejo 16.0.0 or newer is the
+  contributed adapter `source.forgejo`. Internal registry composition passes the selected provider
+  separately from the public registration context. Forgejo builds its delivery authority and
+  HTTP client only when selected, and reads `FORGEJO_TOKEN` from the delivery connection. GitLab
+  and Forgejo share adapter-private `forge_http` and `review_body` helpers.
+  `SourceForgeIdentity.baseUrl` is a canonical credential-free
   HTTPS web base, including an optional installation path prefix. Review/merge identity must match
   the Git remote before credential resolution. GitHub Enterprise Server requires 3.22.2 or newer;
   GitLab requires 19.5.1 or newer. Adapters check versions and refuse older or unknown servers.

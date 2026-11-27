@@ -47,6 +47,13 @@ Adding a forge needs no new delivery node family or closed forge enum. Embedders
 admits an opaque nested repository and review ID, uses its own token field and credential refresh,
 and drives the existing PR and merge nodes through the supervisor and ledger.
 
+### Contributed adapters
+
+`source.forgejo` is a contributed adapter under
+`zeroshot/src/source_code/adapters/contributed/forgejo/`. It registers without effects and gets a
+delivery authority only when the run selects `source.forgejo` and a Git transport is admitted. Its
+capabilities are `Read`, `Push`, `PullRequest`, `Checks`, `Merge`.
+
 ## Target reconciliation
 
 `SourceDeliveryAuthority::reconcile_delivery_target` returns `SourceTargetIntegration`:

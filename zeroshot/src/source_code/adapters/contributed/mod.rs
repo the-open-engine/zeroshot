@@ -1,14 +1,26 @@
 //! Compile-time contributor registration. Add adapters here; the common workflow and node types
 //! remain unchanged. A metadata-only context must perform no filesystem, process, or network work.
-use crate::source_code_provider::{SourceCodeProviderRegistry, SourceRegistryError};
+use crate::source_code_provider::{SourceCodeProviderRegistry, SourceProviderRef, SourceRegistryError};
+
 use super::SourceAdapterContext;
 
+mod forgejo;
+
 pub fn register(
-    _registry: &mut SourceCodeProviderRegistry,
-    _context: SourceAdapterContext<'_>,
+    registry: &mut SourceCodeProviderRegistry,
+    context: SourceAdapterContext<'_>,
 ) -> Result<(), SourceRegistryError> {
+    register_with_selection(registry, context, None)
+}
+
+pub(super) fn register_with_selection(
+    registry: &mut SourceCodeProviderRegistry,
+    context: SourceAdapterContext<'_>,
+    selected: Option<&SourceProviderRef>,
+) -> Result<(), SourceRegistryError> {
+    forgejo::register(registry, context.source, context.transport, selected)?;
     #[cfg(test)]
-    registration_tests::register(_registry, _context)?;
+    registration_tests::register(registry, context)?;
     Ok(())
 }
 

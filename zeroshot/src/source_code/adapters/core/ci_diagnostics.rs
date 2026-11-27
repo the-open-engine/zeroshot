@@ -1,20 +1,20 @@
 //! Shared bounds and formatting for forge-owned CI repair evidence.
-pub(super) const MAX_FAILURE_DIAGNOSTIC_CHARS: usize = 8 * 1_024;
+pub(in crate::source_code_provider::adapters) const MAX_FAILURE_DIAGNOSTIC_CHARS: usize = 8 * 1_024;
 pub(super) const MAX_FAILURE_FEEDBACK_CHARS: usize = 64 * 1_024;
 pub(super) const MAX_FAILURE_ITEM_CHARS: usize = 1_024;
-pub(super) const MAX_FAILED_CHECK_LOGS: usize = 8;
-pub(super) const MAX_JOB_LOG_BYTES: usize = 64 * 1_024 * 1_024;
+pub(in crate::source_code_provider::adapters) const MAX_FAILED_CHECK_LOGS: usize = 8;
+pub(in crate::source_code_provider::adapters) const MAX_JOB_LOG_BYTES: usize = 64 * 1_024 * 1_024;
 pub(super) const MAX_JOB_LOG_TAIL_BYTES: usize = 64 * 1_024;
 
 /// Redacted evidence retains its raw failure classification through both budgets.
 #[derive(Clone, Debug)]
-pub(super) struct JobLog {
+pub(in crate::source_code_provider::adapters) struct JobLog {
     pub(super) text: String,
     failure: Option<usize>,
 }
 
 impl JobLog {
-    pub(super) fn unavailable(text: String) -> Self {
+    pub(in crate::source_code_provider::adapters) fn unavailable(text: String) -> Self {
         Self {
             text,
             failure: Some(0),
@@ -22,7 +22,7 @@ impl JobLog {
     }
 }
 
-pub(super) fn job_log_tail(
+pub(in crate::source_code_provider::adapters) fn job_log_tail(
     value: &str,
     end: usize,
     credential: crate::source_code_provider::SourceDeliveryCredential<'_>,
@@ -83,7 +83,11 @@ pub(super) fn diagnostic_secrets(
     secrets
 }
 
-pub(super) fn include_job_logs(diagnostic: &mut String, label: &str, logs: &[(u64, JobLog)]) {
+pub(in crate::source_code_provider::adapters) fn include_job_logs(
+    diagnostic: &mut String,
+    label: &str,
+    logs: &[(u64, JobLog)],
+) {
     if logs.is_empty() {
         return;
     }
@@ -96,7 +100,10 @@ pub(super) fn include_job_logs(diagnostic: &mut String, label: &str, logs: &[(u6
     }
 }
 
-pub(super) fn bounded_text(value: &str, maximum: usize) -> String {
+pub(in crate::source_code_provider::adapters) fn bounded_text(
+    value: &str,
+    maximum: usize,
+) -> String {
     const TRUNCATED: &str = "[diagnostic truncated]";
     if value.chars().count() <= maximum {
         return value.to_owned();
