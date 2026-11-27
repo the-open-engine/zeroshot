@@ -39,6 +39,22 @@ fn await_file(path: &Path) {
         std::thread::sleep(Duration::from_millis(25));
     }
 }
+
+fn await_file_for_run(fixture: &Fixture, id: &str, path: &Path) {
+    let deadline = Instant::now() + Duration::from_secs(180);
+    while !path.exists() {
+        let status = fixture.json(&["status", id]);
+        assert_ne!(status["status"]["phase"], "finished", "{status}");
+        assert!(
+            Instant::now() < deadline,
+            "{}; status: {status}; diagnostic: {}",
+            path.display(),
+            fs::read_to_string(path.with_file_name("input-path-diagnostic.json"))
+                .unwrap_or_default()
+        );
+        std::thread::sleep(Duration::from_secs(1));
+    }
+}
 fn configure(fixture: &Fixture, request: bool) {
     let state = json!({"kind":"record","fields":{
         "text":{"required":true,"type":{"kind":"string"}},
@@ -804,7 +820,7 @@ fn private_uploads_freeze_equal_basenames_and_directories_for_keyed_cli_submissi
             command.arg("--copy-workspace");
         }
         let id = receipt(&command.output().unwrap());
-        await_file(&fixture.root.path("ready"));
+        await_file_for_run(&fixture, &id, &fixture.root.path("ready"));
         fs::write(fixture.root.path("left/data.csv"), "changed left").unwrap();
         fs::remove_dir_all(fixture.root.path("right")).unwrap();
         assert_eq!(receipt(&command.output().unwrap()), id);
