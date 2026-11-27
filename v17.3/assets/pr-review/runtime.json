@@ -1,0 +1,30 @@
+{
+  "harness": "codex",
+  "provider": "openai",
+  "nodes": {
+    "classifier": {
+      "kind": "agent",
+      "model": "gpt-6.1-sol",
+      "effort": "xhigh",
+      "sessionScope": "execution"
+    },
+    "reproducer": {
+      "kind": "agent",
+      "model": "gpt-6.1-sol",
+      "effort": "xhigh",
+      "sessionScope": "execution"
+    },
+    "code_checker": {
+      "kind": "agent",
+      "model": "gpt-6.1-sol",
+      "effort": "xhigh",
+      "sessionScope": "execution"
+    },
+    "deliver": {
+      "kind": "comment_delivery",
+      "connections": {
+        "github": ["GH_TOKEN"]
+      }
+    }
+  }
+}
