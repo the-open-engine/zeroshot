@@ -48,13 +48,13 @@ async def main() -> None:
             )
         )
         try:
-            await run.wait()
+            result = await run.wait()
         except RunSuspendedError:
             request = await run.request()
             print(json.dumps(request.request.artifacts))
-        answer = await client.stage_file(args.answer)
-        continued = await run.answer({"signals": {}, "output": {"reply": answer}})
-        result = await continued.wait()
+            answer = await client.stage_file(args.answer)
+            continued = await run.answer({"signals": {}, "output": {"reply": answer}})
+            result = await continued.wait()
         result.raise_for_failure()
         publication = result.artifacts["result"]
         assert isinstance(publication, dict) and publication["kind"] == "managed"

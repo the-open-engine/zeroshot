@@ -7,6 +7,7 @@ import socket
 import subprocess
 import sys
 import threading
+from copy import deepcopy
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -300,6 +301,7 @@ async def main():
     await direct()
     await unsupported()
     public_example()
+    public_example(fail_producer=True)
 
 
 async def unsupported():
@@ -336,14 +338,19 @@ async def unsupported():
             thread.join()
 
 
-def public_example():
-    example = root / "public-example"
+def public_example(fail_producer=False):
+    example = root / ("public-example-failed" if fail_producer else "public-example")
     source = example / "source"
     source.mkdir(parents=True)
     source.joinpath("data.txt").write_text("before")
-    example.joinpath("answer.txt").write_text("after")
+    example_runtime = deepcopy(runtime)
+    if fail_producer:
+        example_runtime["nodes"]["produce"]["command"][-1] = "raise SystemExit(1)"
+        # A missing answer catches any attempt to stage it after the terminal failure.
+    else:
+        example.joinpath("answer.txt").write_text("after")
     example.joinpath("graph.json").write_text(json.dumps(graph))
-    example.joinpath("runtime.json").write_text(json.dumps(runtime))
+    example.joinpath("runtime.json").write_text(json.dumps(example_runtime))
     environment = dict(os.environ, ZEROSHOT_STATE_DIR=str(example / "state"))
     output = subprocess.run(
         [
@@ -365,6 +372,12 @@ def public_example():
         text=True,
         timeout=90,
     )
+    if fail_producer:
+        assert output.returncode != 0
+        assert "RunFailedError" in output.stderr, output.stderr
+        assert "produce_failed" in output.stderr, output.stderr
+        assert not example.joinpath("download").exists()
+        return
     assert output.returncode == 0, output.stderr
     assert example.joinpath("download/draft.txt").read_text() == "before\nafter"
 
