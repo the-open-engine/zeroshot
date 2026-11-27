@@ -13,7 +13,7 @@ use tokio::sync::OnceCell;
 use url::Position;
 
 use crate::source_code_provider::adapters::core::ci_diagnostics;
-use crate::source_code_provider::adapters::core::forge_http::{self, BodyFailure};
+use crate::source_code_provider::adapters::forge_http::{self, BodyFailure};
 use crate::source_code_provider::adapters::core::network::ForgeNetwork;
 use crate::source_code_provider::{SourceDeliveryCredential, SourceDeliveryError};
 

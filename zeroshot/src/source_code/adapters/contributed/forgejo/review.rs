@@ -3,7 +3,7 @@ use std::time::Duration;
 use reqwest::Method;
 use serde_json::json;
 
-use crate::source_code_provider::adapters::core::forge_http;
+use crate::source_code_provider::adapters::review_body;
 use crate::source_code_provider::{
     SourceChecks, SourceDeliveryCredential, SourceDeliveryError, SourceDeliveryRead,
     SourceDeliverySnapshot, SourceReviewLinks, SourceReviewObservation, SourceReviewReceipt,
@@ -244,7 +244,7 @@ fn generated_description(request: &SourceReviewRequest) -> Result<String, Source
     if !valid_delivery_description(&request.description) {
         return Err(SourceDeliveryError::Rejected);
     }
-    Ok(forge_http::generated_description(request))
+    Ok(review_body::generated_description(request))
 }
 
 fn normalize_body(body: &str) -> String {
@@ -471,7 +471,7 @@ async fn update(
         &request.target.target_branch,
         &request.head_branch,
     );
-    let body = forge_http::refresh_description(
+    let body = review_body::refresh_description(
         found.body.as_deref().unwrap_or(""),
         description,
         "Forgejo pull request",

@@ -1,6 +1,8 @@
 use reqwest::Method;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use crate::source_code_provider::adapters::review_body;
+
 use super::*;
 use wire::{Discussion, MergeRequest, Project};
 
@@ -255,7 +257,7 @@ pub(super) async fn open_or_update(
         .await?;
     let request = normalized_request(request)?;
     let request = &request;
-    let description = super::super::forge_http::generated_description(request);
+    let description = review_body::generated_description(request);
     let (found, _) = consistent_review_ref(authority, review_read(request), credential).await?;
     if let Some(found) = found {
         return update(authority, (request, &found, &description), credential).await;
@@ -434,7 +436,7 @@ async fn update(
         ));
     }
     let receipt = found.receipt(request, project.id, credential)?;
-    let body = super::super::forge_http::refresh_description(
+    let body = review_body::refresh_description(
         found.description.as_deref().unwrap_or(""),
         description,
         "GitLab review",

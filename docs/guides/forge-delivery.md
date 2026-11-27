@@ -340,8 +340,8 @@ zeroshot run --title "Example change" --input task.json \
   --source-provider source.forgejo --source-base-url https://forge.example
 ```
 
-Delivery is HTTPS only. A private certificate authority is trusted through the same `SSL_CERT_FILE`
-mechanism described above.
+The Forgejo API uses HTTPS. Git checkout and push can use HTTPS or SSH. For a private certificate
+authority, use the `SSL_CERT_FILE` setting described above.
 
 The token is `FORGEJO_TOKEN` from the delivery connection: the default `forgejo` connection or the
 connection the delivery node declares, as shown for GitLab above. A self-hosted instance has no

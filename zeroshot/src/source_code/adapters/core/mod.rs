@@ -8,8 +8,7 @@ use crate::source_code_provider::provider::*;
 use crate::execution::process::HostedProcessIdentity;
 use crate::native_v2_target_authority::OperatorDiagnosticStore;
 
-pub(crate) mod ci_diagnostics;
-pub(crate) mod forge_http;
+pub(super) mod ci_diagnostics;
 mod git;
 pub(crate) mod github;
 pub(crate) mod gitlab;
@@ -252,13 +251,10 @@ fn maintained_registry(
                 .with_comment_authority(comment),
         ))?;
     }
-    super::contributed::register(
+    super::contributed::register_with_selection(
         &mut registry,
-        super::SourceAdapterContext {
-            source,
-            transport,
-            selected: Some(selected),
-        },
+        super::SourceAdapterContext { source, transport },
+        Some(selected),
     )?;
     Ok(registry)
 }

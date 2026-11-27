@@ -6,6 +6,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use tokio::sync::OnceCell;
 use url::Position;
+use crate::source_code_provider::adapters::forge_http::{self, BodyFailure};
 use crate::source_code_provider::{SourceDeliveryCredential, SourceDeliveryError};
 use super::wire::ServerMetadata;
 use super::super::ci_diagnostics::{JobLog, MAX_JOB_LOG_BYTES, job_log_tail};
@@ -318,7 +319,7 @@ async fn rejection(
     network: &super::super::network::ForgeNetwork,
 ) -> SourceDeliveryError {
     let status = response.status().as_u16();
-    let (body, truncated) = super::super::forge_http::rejection_body(&mut response).await;
+    let (body, truncated) = forge_http::rejection_body(&mut response).await;
     let mut diagnostic = format!("GitLab API {resource} returned HTTP {status}").into_bytes();
     if !body.is_empty() {
         diagnostic.extend_from_slice(b": ");
@@ -345,7 +346,7 @@ fn transport_failure(
     credential: SourceDeliveryCredential<'_>,
     network: &super::super::network::ForgeNetwork,
 ) -> SourceDeliveryError {
-    let detail = super::super::forge_http::transport_detail(context, error);
+    let detail = forge_http::transport_detail(context, error);
     SourceDeliveryError::api(
         None,
         display_text(network.redact(&detail).into_bytes(), false, credential),
@@ -368,8 +369,6 @@ fn display_text_with_secrets(
     credential: SourceDeliveryCredential<'_>,
     extra_secrets: &[String],
 ) -> String {
-    use super::super::forge_http;
-
     forge_http::display_text(
         bytes,
         truncated,
@@ -398,9 +397,7 @@ async fn response_bytes(
     maximum_bytes: usize,
     network: &super::super::network::ForgeNetwork,
 ) -> Result<Vec<u8>, SourceDeliveryError> {
-    use super::super::forge_http::{BodyFailure, bounded_body};
-
-    match bounded_body(response, maximum_bytes).await {
+    match forge_http::bounded_body(response, maximum_bytes).await {
         Ok(bytes) => Ok(bytes),
         Err(BodyFailure::TooLarge) => Err(SourceDeliveryError::api(
             None,
