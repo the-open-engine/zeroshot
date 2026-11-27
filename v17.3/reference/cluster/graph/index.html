@@ -10,7 +10,7 @@
       
       
       
-        <link rel="canonical" href="https://zeroshot.sh/docs/current/reference/cluster/graph/">
+        <link rel="canonical" href="https://zeroshot.sh/docs/v17.3/reference/cluster/graph/">
       
       
         <link rel="prev" href="../api/">
@@ -442,6 +442,8 @@
       
         
       
+        
+      
     
     
     
@@ -486,6 +488,34 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../concepts/graphs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    What a graph is made of
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -614,6 +644,8 @@
   
     
     
+      
+        
       
         
       
@@ -843,6 +875,34 @@
     
   
     Ask a person
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guides/wait/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Wait until a time
   
 
     
@@ -2571,6 +2631,11 @@ object declares peer communication permissions; omission or <code>{}</code> gran
 </tr>
 </tbody>
 </table>
+<p>Waiting and asking are verifiers with host-run workers, not separate kinds:
+<code>builtin.request.wait@1</code> pauses until a time or for a duration
+(<a href="../../../guides/wait/">Wait until a time</a>), and <code>builtin.request.ask@1</code> suspends for a person's
+answer (<a href="../../../guides/ask-a-person/">Ask a person</a>). Both are refused below <code>par</code> or <code>map</code>. For
+every building block in one place, see <a href="../../../concepts/graphs/">What a graph is made of</a>.</p>
 <p>Parallel joins are <code>all</code>, <code>any</code>, <code>quorum { count }</code>, or <code>first { when }</code>. The closed worker error
 channel is <code>timeout</code>, <code>crash</code>, <code>malformed</code>, and <code>refusal</code>. Choice reachability/exhaustiveness, loop
 exit satisfiability, selector typing, dominance, promotion safety, and structural folds are

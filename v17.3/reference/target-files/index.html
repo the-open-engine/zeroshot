@@ -10,7 +10,7 @@
       
       
       
-        <link rel="canonical" href="https://zeroshot.sh/docs/current/reference/target-files/">
+        <link rel="canonical" href="https://zeroshot.sh/docs/v17.3/reference/target-files/">
       
       
         <link rel="prev" href="../target-runtime/">
@@ -442,6 +442,8 @@
       
         
       
+        
+      
     
     
     
@@ -486,6 +488,34 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/graphs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    What a graph is made of
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -614,6 +644,8 @@
   
     
     
+      
+        
       
         
       
@@ -843,6 +875,34 @@
     
   
     Ask a person
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/wait/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Wait until a time
   
 
     
@@ -2450,8 +2510,15 @@ existing authenticated scope/member authority with no fallback to a caller files
 servers install it explicitly through <code>TargetFilesMount</code>. Run allocators inject a
 <code>RunFilePublisher</code> for their placement; publication access context stays in the host catalog.
 Implementations must call the supplied preflight validator with the complete receipt before
-committing it, including on replay.
-Existing hosts may leave publication and cleanup unsupported. Worker artifact receipts and workspace recovery storage retain their existing contracts.</p>
+committing it, including on replay.</p>
+<p>Production hosts can set <code>ProductionHostingConfig.file_store</code> to a
+<code>native_v2_files::publication::ManagedPublicationStore</code> and an authenticated identity.
+At a request or final output, <code>capture</code> commits the selected workspace bytes and receipt
+together. After an interruption, <code>committed_receipt</code> looks up the same owner and paths, even
+if the workspace is gone. Return <code>Ok(None)</code> only when no commit exists. A storage or
+authorization error must remain an error so recovery can retry. Both calls use the engine's
+blocking I/O pool. Direct targets use the disk implementation.</p>
+<p>Existing hosts may leave publication and cleanup unsupported. Worker artifact receipts and workspace recovery storage retain their existing contracts.</p>
 
 
 

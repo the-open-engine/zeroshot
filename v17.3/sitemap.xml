@@ -2,7 +2,7 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://zeroshot.sh/docs/v17.3/</loc>
-         <lastmod>2026-11-10</lastmod>
+         <lastmod>2026-11-27</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/v17.3/zeroshot-cli/</loc>
@@ -21,12 +21,16 @@
          <lastmod>2026-11-26</lastmod>
     </url>
     <url>
+         <loc>https://zeroshot.sh/docs/v17.3/concepts/graphs/</loc>
+         <lastmod>2026-11-27</lastmod>
+    </url>
+    <url>
          <loc>https://zeroshot.sh/docs/v17.3/concepts/runtimes-and-connections/</loc>
          <lastmod>2026-11-22</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/v17.3/concepts/targets/</loc>
-         <lastmod>2026-11-25</lastmod>
+         <lastmod>2026-11-27</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/v17.3/getting-started/first-run/</loc>
@@ -46,7 +50,7 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/v17.3/guides/ask-a-person/</loc>
-         <lastmod>2026-11-25</lastmod>
+         <lastmod>2026-11-27</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/v17.3/guides/code-review/</loc>
@@ -94,7 +98,11 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/v17.3/guides/stacks/</loc>
-         <lastmod>2026-11-22</lastmod>
+         <lastmod>2026-11-27</lastmod>
+    </url>
+    <url>
+         <loc>https://zeroshot.sh/docs/v17.3/guides/wait/</loc>
+         <lastmod>2026-11-27</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/v17.3/project/harness-adapters/</loc>
