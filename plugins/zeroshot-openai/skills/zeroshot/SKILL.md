@@ -213,13 +213,17 @@ one from scratch:
    per node need a full `--runtime-config` plan instead of the uniform file. The
    [review loop guide](https://zeroshot.sh/docs/current/guides/review-loop/)
    shows the node shapes and a cross-vendor plan.
-3. For a check a script can decide, use a script verifier that emits signals. For a decision a person
-   must make, use an ask node. For a delay, use a wait node.
+3. For a check a script can decide, use a script verifier that emits signals. It needs a full
+   `--runtime-config` plan that binds the node to `{"kind": "script", "command": [...]}`, even when
+   every agent uses the same model, because the uniform file binds verifiers to agents. Script
+   bindings run locally only. For a decision a person must make, use an ask node. For a delay, use
+   a wait node. The uniform file supplies the request binding for both.
    [What a graph is made of](https://zeroshot.sh/docs/current/concepts/graphs/) shows where each can go.
 4. Validate by replacing `--template software-change` with `--graph graph.json` in the run command
-   above, then run it.
+   above (and the uniform file with `--runtime-config PLAN.json` when step 3 added a script), then
+   run it.
 5. Save it so later requests use it, with `--runtime-config PLAN.json` in place of the uniform file
-   when nodes use different models or harnesses:
+   when nodes use different models or harnesses, or when the graph has a script node:
 
    ```console
    zeroshot profile set NAME --graph graph.json \
