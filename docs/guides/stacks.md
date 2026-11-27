@@ -156,6 +156,7 @@ must finish first. When plans depend on each other, the skill offers to write a 
 [Plan work before running it](planning.md).
 
 Stack profiles cannot contain `builtin.request.wait@1` wait nodes; submission refuses them before sending the stack.
+See [Wait until a time](wait.md).
 
 Stack profiles cannot contain human request nodes (`builtin.request.ask@1`), including profiles
 used for merge or stacked pull-request delivery. These nodes need a retained interactive checkpoint
