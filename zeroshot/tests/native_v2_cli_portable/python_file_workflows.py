@@ -250,6 +250,8 @@ async def direct():
             stderr=log,
         )
         try:
+            async with Client(target=DirectTarget(origin)) as client:
+                await wait_for_target(client, server)
             cli(
                 "target",
                 "add",
@@ -260,7 +262,6 @@ async def direct():
                 json_output=False,
             )
             async with Client(target=HostedTarget("file-fixture")) as client:
-                await wait_for_target(client, server)
                 source = root / "direct-source"
                 source.mkdir()
                 source.joinpath("bytes").write_bytes(b"\x00\xff")
