@@ -364,7 +364,7 @@ async fn m2_pending_checks_a_draft_and_missing_approvals_send_no_write() {
 }
 
 /// M3: `mergeable` false through every recheck is `Conflict` without any write.
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn m3_ambiguous_mergeability_through_every_recheck_is_conflict_without_a_write() {
     let (fixture, authority) = supported_forge().await;
     fixture.queue(repository("merge", &["merge"]));
@@ -1056,4 +1056,42 @@ async fn retarget_after_policy_reads_prevents_merge_submission() {
     assert!(format!("{error}").contains("targets other instead of main"));
     assert!(writes(&fixture.requests()).is_empty());
     assert!(!recorded(&authority));
+}
+
+#[tokio::test]
+async fn a_pull_that_stops_being_ready_after_policy_reads_sends_no_merge() {
+    for current in [
+        merged_pull(REVISION),
+        Pull {
+            state: "closed",
+            ..open_pull(REVISION)
+        },
+        Pull {
+            draft: true,
+            ..open_pull(REVISION)
+        },
+        Pull {
+            mergeable: false,
+            ..open_pull(REVISION)
+        },
+    ] {
+        let (fixture, authority) = supported_forge().await;
+        gate_reads(
+            &fixture,
+            &open_pull(REVISION),
+            branch(0, &[], false),
+            page(&[]),
+        )
+        .queue(current.response());
+
+        let outcome = merge::request(&authority, &receipt(), credential())
+            .await
+            .assert_value();
+        assert_eq!(outcome, SourceMergeRequestOutcome::Pending);
+        let requests = fixture.requests();
+        assert_eq!(requests.len(), 6, "{requests:?}");
+        assert_eq!(requests.assert_at(5).uri, PULL_URI, "{requests:?}");
+        assert!(writes(&requests).is_empty());
+        assert!(!recorded(&authority));
+    }
 }

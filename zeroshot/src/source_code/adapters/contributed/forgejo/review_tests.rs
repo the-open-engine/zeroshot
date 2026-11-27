@@ -279,40 +279,56 @@ async fn r2_an_existing_pull_with_the_same_head_and_text_sends_no_patch() {
     assert_reads(&requests);
 }
 
-/// R3: a changed title sends exactly one write, and that write is an update of the found pull.
+/// R3: refresh the existing pull once, preserving its draft title and requiring confirmation.
 #[tokio::test]
-async fn r3_a_changed_title_sends_one_patch_and_no_post() {
-    let fixture = Fixture::new().await;
-    let authority = authority(&fixture).await;
+async fn r3_metadata_refresh_patches_the_existing_pull_and_requires_confirmation() {
     let target = target();
-
-    let mut existing = pull(7);
-    existing.title = "Earlier title".to_owned();
-    existing.body = generated(DESCRIPTION);
-    let mut confirmed = pull(7);
-    confirmed.title = TITLE.to_owned();
-    confirmed.body = generated(DESCRIPTION);
-    fixture
-        .queue(version())
-        .queue(page(1, vec![pull_value(&existing)]))
-        .queue(repository())
-        .queue(branch(REVISION))
-        .queue(pull_response(&confirmed));
-
     let request = review_request(&target, TITLE, DESCRIPTION);
-    let receipt = review::open_or_update(&authority, &request, credential())
-        .await
-        .assert_value();
-    assert_eq!(receipt, review_receipt(7));
+    for (draft, confirms_patch) in [(false, true), (true, true), (true, false)] {
+        let fixture = Fixture::new().await;
+        let authority = authority(&fixture).await;
+        let mut existing = pull(7);
+        existing.draft = draft;
+        existing.title = "Earlier title".to_owned();
+        existing.body = generated("Earlier description");
+        let expected_title = if draft { &existing.title } else { TITLE };
+        let mut returned = pull(7);
+        returned.draft = draft;
+        returned.title = expected_title.to_owned();
+        returned.body = if confirms_patch {
+            generated(DESCRIPTION)
+        } else {
+            existing.body.clone()
+        };
+        fixture
+            .queue(version())
+            .queue(page(1, vec![pull_value(&existing)]))
+            .queue(repository())
+            .queue(branch(REVISION))
+            .queue(pull_response(&returned));
 
-    let requests = fixture.requests();
-    assert_eq!(requests.len(), 5, "{requests:?}");
-    assert_writes(&requests, &[Method::PATCH]);
-    let patch = requests.assert_at(4);
-    assert_eq!(patch.uri, format!("{SEARCH_PATH}/7"), "{requests:?}");
-    let body = request_body(patch);
-    assert_eq!(body.assert_key("title"), &json!(TITLE));
-    assert_eq!(body.assert_key("body"), &json!(generated(DESCRIPTION)));
+        let result = review::open_or_update(&authority, &request, credential()).await;
+        if confirms_patch {
+            assert_eq!(result.assert_value(), review_receipt(7));
+        } else {
+            let error = result.assert_error();
+            assert!(
+                error
+                    .to_string()
+                    .contains("did not confirm the generated pull request metadata"),
+                "{error}"
+            );
+        }
+
+        let requests = fixture.requests();
+        assert_eq!(requests.len(), 5, "{requests:?}");
+        assert_writes(&requests, &[Method::PATCH]);
+        let patch = requests.assert_at(4);
+        assert_eq!(patch.uri, format!("{SEARCH_PATH}/7"), "{requests:?}");
+        let body = request_body(patch);
+        assert_eq!(body.assert_key("title"), &json!(expected_title));
+        assert_eq!(body.assert_key("body"), &json!(generated(DESCRIPTION)));
+    }
 }
 
 /// R4: an existing pull request that carries another head revision is an identity error, and
@@ -689,8 +705,6 @@ async fn r12_an_open_pull_that_disagrees_with_its_branch_is_retried_then_is_an_i
             .queue(branch(OTHER_REVISION));
     }
 
-    // Paused time keeps the recheck delay from making this test wait.
-    tokio::time::pause();
     let error = review::observe(&authority, review_read(&target, None), credential())
         .await
         .assert_error();
@@ -770,6 +784,60 @@ async fn r13_inspect_echoes_the_receipt_identity_and_refuses_another_head_branch
     }
     assert_eq!(requests.assert_at(2).uri, rule_uri(), "{requests:?}");
     assert_eq!(requests.assert_at(3).uri, statuses_uri(), "{requests:?}");
+}
+
+#[tokio::test]
+async fn observe_refuses_a_receipt_from_another_repository_before_reading_it() {
+    let fixture = Fixture::new().await;
+    let authority = authority(&fixture).await;
+    let known = SourceReviewReceipt {
+        repository: "other/name".to_owned(),
+        ..review_receipt(7)
+    };
+    fixture.queue(version());
+
+    let error = review::observe(
+        &authority,
+        review_read(&target(), Some(&known)),
+        credential(),
+    )
+    .await
+    .assert_error();
+    assert!(
+        error
+            .to_string()
+            .contains("differs from the admitted repository"),
+        "{error}"
+    );
+    let requests = fixture.requests();
+    assert_eq!(requests.len(), 1, "{requests:?}");
+    assert_eq!(requests.assert_at(0).uri, "/api/v1/version");
+}
+
+#[tokio::test]
+async fn inspect_returns_a_retryable_error_for_a_merge_without_a_valid_revision() {
+    let fixture = Fixture::new().await;
+    let authority = authority(&fixture).await;
+    let known = review_receipt(7);
+    fixture.queue(version());
+    for merge_sha in [None, Some("not-a-commit".to_owned())] {
+        fixture.queue(pull_response(&Pull {
+            merged: true,
+            merge_sha,
+            ..pull(7)
+        }));
+        let error = review::inspect(&authority, &known, credential())
+            .await
+            .assert_error();
+        assert!(error.retryable_operation(), "{error}");
+        assert!(
+            error
+                .to_string()
+                .contains("is merged without a merge commit revision"),
+            "{error}"
+        );
+    }
+    assert_eq!(fixture.requests().len(), 3);
 }
 
 /// R14: title normalization and the links built from the admitted instance.
@@ -1160,4 +1228,33 @@ async fn resume_refuses_a_merge_at_a_different_recorded_head() {
         .assert_error();
     assert!(format!("{error}").contains("instead of the reviewed head"));
     assert_reads(&fixture.requests());
+}
+
+#[tokio::test]
+async fn metadata_refresh_leaves_terminal_pulls_untouched() {
+    let fixture = Fixture::new().await;
+    let authority = authority(&fixture).await;
+    let target = target();
+    let mut request = review_request(&target, TITLE, DESCRIPTION);
+    request.known_review = Some(review_receipt(7));
+    request.include_terminal_reviews = true;
+    fixture.queue(version());
+
+    for (merged, diagnostic) in [(false, "was closed"), (true, "was already merged")] {
+        fixture
+            .queue(pull_response(&Pull {
+                state: "closed",
+                merged,
+                ..pull(7)
+            }))
+            .queue(repository())
+            .queue(branch(REVISION));
+        let error = review::open_or_update(&authority, &request, credential())
+            .await
+            .assert_error();
+        assert!(error.to_string().contains(diagnostic), "{error}");
+    }
+    let requests = fixture.requests();
+    assert_eq!(requests.len(), 7, "{requests:?}");
+    assert_reads(&requests);
 }

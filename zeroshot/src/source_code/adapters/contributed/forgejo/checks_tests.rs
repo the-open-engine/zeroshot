@@ -416,8 +416,6 @@ async fn k13_mergeable_turning_true_on_the_second_read_continues_with_the_checks
         .queue(branch(true, &["ci"], 0))
         .queue(page(&[status(1, "ci", "success", "ok")]));
 
-    // Paused time keeps the two-second wait from making this test wait.
-    tokio::time::pause();
     let review = observe(&fixture, &pull(false, false)).await.assert_value();
     assert_eq!(review.state, open(SourceChecks::Passed));
     assert!(!review.pull_request_ready);
@@ -439,7 +437,6 @@ async fn k14_mergeable_false_on_every_read_is_conflict_after_three_reads() {
         fixture.queue(pull_response(false, false));
     }
 
-    tokio::time::pause();
     let review = observe(&fixture, &pull(false, false)).await.assert_value();
     assert_eq!(review.state, SourceReviewState::Conflict);
     assert!(!review.pull_request_ready);
@@ -506,24 +503,34 @@ async fn k16_pattern_matching_line_bounds_and_token_redaction() {
     assert!(diagnostic.starts_with("ci-1: failure: "), "{diagnostic}");
 }
 
-/// K18: a pull retargeted during the recheck is a temporary error, and the recheck stops at the
-/// first read it makes.
+/// K18: a changed pull is a temporary error before any rule or status reads.
 #[tokio::test]
-async fn k18_a_pull_retargeted_during_the_recheck_is_a_temporary_error() {
-    let mut retargeted = pull_value(true, false);
-    retargeted["base"] = json!({ "ref": "other-branch", "sha": BASE_REVISION });
-    let fixture = Fixture::new().await;
-    fixture.queue(Response::json(retargeted));
+async fn k18_a_pull_changed_during_the_recheck_is_a_temporary_error() {
+    for (field, value, diagnostic) in [
+        ("/state", json!("closed"), "closed as its state"),
+        ("/head/sha", json!(BASE_REVISION), "as its head revision"),
+        ("/base/ref", json!("other-branch"), "as its target branch"),
+        (
+            "/base",
+            json!({
+                "ref": TARGET_BRANCH,
+                "sha": BASE_REVISION,
+                "repo": { "full_name": "other/name" },
+            }),
+            "another target repository",
+        ),
+    ] {
+        let mut changed = pull_value(true, false);
+        *changed.pointer_mut(field).assert_value() = value;
+        let fixture = Fixture::new().await;
+        fixture.queue(Response::json(changed));
 
-    tokio::time::pause();
-    let error = observe(&fixture, &pull(false, false)).await.assert_error();
-    let text = format!("{error}");
-    assert!(
-        text.contains("as its target branch while its mergeability was rechecked"),
-        "{text}"
-    );
+        let error = observe(&fixture, &pull(false, false)).await.assert_error();
+        assert!(error.retryable_operation(), "{error}");
+        assert!(error.to_string().contains(diagnostic), "{error}");
 
-    let requests = fixture.requests();
-    assert_eq!(requests.len(), 1, "{requests:?}");
-    assert_eq!(requests.assert_at(0).uri, PULL_URI, "{requests:?}");
+        let requests = fixture.requests();
+        assert_eq!(requests.len(), 1, "{requests:?}");
+        assert_eq!(requests.assert_at(0).uri, PULL_URI, "{requests:?}");
+    }
 }

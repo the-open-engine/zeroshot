@@ -253,3 +253,121 @@ fn f10_a_forgejo_selection_builds_the_delivery_authority() {
     let provider = registry.lookup(&provider_reference()).assert_value();
     assert!(provider.delivery_authority().is_some());
 }
+
+#[tokio::test]
+async fn scoped_provider_identifies_inspects_and_materializes_the_admitted_source() {
+    let mut source = forgejo_source();
+    source.repository =
+        openengine_cluster_protocol::SourceRepositoryId::new("workspace/alias").assert_value();
+    let scoped = ForgejoSourceProvider::new(Some(&source)).assert_value();
+    let metadata = provider();
+    let credential = SourceCredentialHandleId::new("credential").assert_value();
+    let identify = SourceIdentifyRepositoryRequest::new(
+        provider_reference(),
+        SourceProfileId::new("default").assert_value(),
+        (
+            SourceAccountId::new("workspace").assert_value(),
+            credential.clone(),
+        ),
+        SourceRepositoryReference::new("workspace/alias").assert_value(),
+    )
+    .assert_value();
+    let repository = scoped.identify_repository(&identify).await.assert_value();
+    assert_eq!(repository.repository().as_str(), REPOSITORY);
+    assert_eq!(
+        metadata
+            .identify_repository(&identify)
+            .await
+            .assert_error()
+            .code(),
+        SourceProviderFailureCode::InvalidRequest
+    );
+
+    let inspect =
+        SourceInspectRepositoryRequest::new(repository.clone(), credential.clone()).assert_value();
+    let inspection = scoped.inspect_repository(&inspect).await.assert_value();
+    assert_eq!(inspection.repository(), &repository);
+    assert_eq!(
+        inspection.default_revision().as_str(),
+        source.revision.as_str()
+    );
+    assert_eq!(
+        metadata
+            .inspect_repository(&inspect)
+            .await
+            .assert_error()
+            .code(),
+        SourceProviderFailureCode::InvalidRequest
+    );
+
+    let revision = SourceRevisionId::new(source.revision.as_str()).assert_value();
+    let request = SourceMaterializeRequest::new(repository.clone(), credential, revision.clone())
+        .assert_value();
+    let destination = CheckoutFixture {
+        revision: &revision,
+        fail: false,
+    };
+    let receipt = scoped
+        .materialize(&request, destination.scope())
+        .await
+        .assert_value();
+    assert_eq!(receipt.repository(), &repository);
+    assert_eq!(receipt.revision(), &revision);
+    assert_eq!(receipt.content_digest().as_str(), "a".repeat(64));
+
+    let refused = CheckoutFixture {
+        revision: &revision,
+        fail: true,
+    };
+    assert_eq!(
+        scoped
+            .materialize(&request, refused.scope())
+            .await
+            .assert_error()
+            .code(),
+        SourceProviderFailureCode::InvalidRequest,
+    );
+    assert_eq!(
+        metadata
+            .materialize(&request, destination.scope())
+            .await
+            .assert_error()
+            .code(),
+        SourceProviderFailureCode::InvalidRequest,
+    );
+}
+
+struct CheckoutFixture<'a> {
+    revision: &'a SourceRevisionId,
+    fail: bool,
+}
+
+impl CheckoutFixture<'_> {
+    fn scope(&self) -> SourceMaterializationDestination<'_> {
+        SourceMaterializationDestination::new(self)
+    }
+}
+
+#[async_trait::async_trait]
+impl SourceMaterializationTarget for CheckoutFixture<'_> {
+    async fn checkout_git(
+        &self,
+        request: SourceGitCheckout<'_>,
+    ) -> Result<SourceContentDigest, SourceMaterializationError> {
+        assert_eq!(request.remote, REMOTE);
+        assert_eq!(request.branch, "main");
+        assert_eq!(request.revision, self.revision);
+        if self.fail {
+            return Err(SourceMaterializationError);
+        }
+        Ok(SourceContentDigest::new("a".repeat(64)).assert_value())
+    }
+
+    fn is_available(&self) -> bool {
+        true
+    }
+
+    fn write_file(&self, _name: &str, _contents: &[u8]) -> Result<(), SourceMaterializationError> {
+        panic!("Forgejo must materialize by checking out Git");
+    }
+}
