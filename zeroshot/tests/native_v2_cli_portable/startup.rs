@@ -1,5 +1,7 @@
 //! Fresh and resumed controller startup preserves admitted run state.
 
+#[path = "file_inputs.rs"]
+mod file_inputs;
 #[path = "resume_checkpoint_tests.rs"]
 mod resume_checkpoint;
 #[path = "resume_runtime_tests.rs"]

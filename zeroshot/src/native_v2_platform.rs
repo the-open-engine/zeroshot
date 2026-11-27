@@ -446,6 +446,12 @@ impl NativeV2PlatformController {
         if let Some(catalog) = self.run_sizes.as_deref() {
             admission = admission.with_run_sizes(catalog);
         }
+        // File-store adapters resolve selectors before crossing the durable admission boundary.
+        submission
+            .graph
+            .initial_input
+            .validate_value(&submission.initial_input)
+            .map_err(NativeV2AdmissionError::InitialInput)?;
         let admitted = NativeV2Admission
             .admit_with_context(submission, admission)
             .await?;
@@ -483,6 +489,16 @@ impl NativeV2PlatformController {
                 .await
             }
         }
+    }
+
+    pub(crate) async fn require_unused_run_id(
+        &self,
+        run_id: &RunId,
+    ) -> Result<(), NativeV2PlatformError> {
+        if self.ledger.get(run_id).await?.is_some() {
+            return Err(RunLedgerError::RunIdConflict.into());
+        }
+        Ok(())
     }
 
     /// Resolves an exact sourceful retry before consulting its replacement secret envelope.

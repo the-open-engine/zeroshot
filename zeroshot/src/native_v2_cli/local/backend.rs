@@ -1,4 +1,7 @@
 use super::*;
+
+#[path = "backend/file_inputs.rs"]
+mod file_inputs;
 use crate::native_v2_cli::RunSelector;
 use crate::native_v2_contract::RuntimePlan;
 use std::collections::BTreeMap;
@@ -525,39 +528,7 @@ impl LocalCliBackend {
                     .to_owned(),
             ));
         }
-        let request_resolution = if matches!(
-            params.from,
-            Some(RunResumeFrom::Answer { .. } | RunResumeFrom::Expiry {})
-        ) {
-            let (paths, _directory) = self.recorded_storage(&params.run_id)?;
-            let ledger = SqliteRunLedger::open_read_only(paths.ledger()).map_err(local_error)?;
-            let stored = ledger
-                .get(&params.run_id)
-                .await
-                .map_err(local_error)?
-                .ok_or_else(|| invalid_request("run is not suspended"))?;
-            let suspension = stored
-                .snapshot
-                .suspension
-                .as_ref()
-                .filter(|_| stored.snapshot.phase == crate::v2_run_ledger::RunPhase::Suspended)
-                .ok_or_else(|| invalid_request("answer requires a suspended run"))?;
-            let resolution = crate::native_v2_request::resolve(
-                suspension,
-                params.from.as_ref(),
-                crate::native_v2_runner::current_timestamp(),
-            )
-            .map_err(invalid_request)?;
-            crate::native_v2_request::validate_resolution(
-                &stored.snapshot,
-                &params.successor_run_id,
-                &resolution,
-            )
-            .map_err(invalid_request)?;
-            Some(resolution)
-        } else {
-            None
-        };
+        let mut request_resolution = self.resolve_local_request(&params).await?;
         let expired = matches!(
             request_resolution,
             Some(openengine_cluster_protocol::RequestResolution::Expiry {})
@@ -588,48 +559,62 @@ impl LocalCliBackend {
                 ))
             })?;
         }
-        recovery.successor_run_id = Some(params.successor_run_id.clone());
-        recovery.pending_restore = restore;
-        self.write_recovery_document(&params.run_id, &recovery)?;
-        if let Err(failure) = self
-            .start_prepared_controller_with_lineage(
-                prepared,
-                Some((params.run_id.clone(), request_resolution)),
-                checkpoint,
-            )
-            .await
-        {
-            let handoff = if failure.controller_stopped {
-                Duration::ZERO
-            } else {
-                self.ready_timeout
-            };
-            self.reconcile_local_resume_claim(&params.run_id, handoff)
+        let mut input_claim = None;
+        let result = async {
+            input_claim = self
+                .accept_request_files(&params, &prepared, &mut request_resolution)
                 .await?;
-            if failure.controller_stopped && recovery.pending_restore.is_some() {
-                // Best effort: the recorded pending restore keeps this stage owned until removed.
-                let _ = remove_restore_stage(&recovery.workspace, &params.successor_run_id);
+            recovery.successor_run_id = Some(params.successor_run_id.clone());
+            recovery.pending_restore = restore;
+            self.write_recovery_document(&params.run_id, &recovery)?;
+            if let Err(failure) = self
+                .start_prepared_controller_with_lineage(
+                    prepared,
+                    Some((params.run_id.clone(), request_resolution)),
+                    checkpoint,
+                )
+                .await
+            {
+                let handoff = if failure.controller_stopped {
+                    Duration::ZERO
+                } else {
+                    self.ready_timeout
+                };
+                self.reconcile_local_resume_claim(&params.run_id, handoff)
+                    .await?;
+                if failure.controller_stopped && recovery.pending_restore.is_some() {
+                    // Best effort: the recorded pending restore keeps this stage owned until removed.
+                    let _ = remove_restore_stage(&recovery.workspace, &params.successor_run_id);
+                }
+                return Err(failure.error);
             }
-            return Err(failure.error);
+            if recovery.pending_restore.take().is_some() {
+                // Readiness follows the complete restore and durable admission. If this write fails,
+                // reconciliation can prove completion from that matching successor's admission.
+                let _ = self.write_recovery_document(&params.run_id, &recovery);
+            }
+            let successor = self.read_recovery_document(&params.successor_run_id)?;
+            debug_assert_eq!(successor.resumed_from.as_ref(), Some(&params.run_id));
+            if expired {
+                return Err(invalid_request(format!(
+                    "request expired; successor {}",
+                    params.successor_run_id.as_str()
+                )));
+            }
+            Ok(openengine_cluster_protocol::RunResumeResult {
+                current_part_id: params.successor_run_id.clone(),
+                run_id: params.successor_run_id.clone(),
+                resumed_from: params.run_id.clone(),
+            })
         }
-        if recovery.pending_restore.take().is_some() {
-            // Readiness follows the complete restore and durable admission. If this write fails,
-            // reconciliation can prove completion from that matching successor's admission.
-            let _ = self.write_recovery_document(&params.run_id, &recovery);
+        .await;
+        if result.is_err()
+            && let Some(claim) = input_claim
+        {
+            self.release_refused_input_claim(&params.successor_run_id, &claim)
+                .await?;
         }
-        let successor = self.read_recovery_document(&params.successor_run_id)?;
-        debug_assert_eq!(successor.resumed_from.as_ref(), Some(&params.run_id));
-        if expired {
-            return Err(invalid_request(format!(
-                "request expired; successor {}",
-                params.successor_run_id.as_str()
-            )));
-        }
-        Ok(openengine_cluster_protocol::RunResumeResult {
-            current_part_id: params.successor_run_id.clone(),
-            run_id: params.successor_run_id,
-            resumed_from: params.run_id,
-        })
+        result
     }
     async fn prepare_successor(
         &self,
@@ -1154,6 +1139,14 @@ impl NativeV2CliBackend for LocalCliBackend {
         }
         crate::v2_run_ledger::inbox::page(requests, params).map_err(vector_error)
     }
+    async fn release_rejected_answer_uploads(
+        &self,
+        run: &RunSelector,
+        output: &serde_json::Value,
+    ) -> Result<(), NativeV2CliError> {
+        self.release_selected_answer_uploads(run, output).await
+    }
+
     async fn inbox_show(
         &self,
         target: Option<&str>,
@@ -1312,21 +1305,28 @@ impl NativeV2CliBackend for LocalCliBackend {
         params: openengine_cluster_protocol::RunResumeParams,
         discard_workspace_changes: bool,
     ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
-        require_local(target)?;
-        let (lineage, part) = self
-            .select_part(&params.run_id, Some(&params.part_id), true)
-            .await?;
-        let mut receipt = self
-            .resume_local(
-                openengine_cluster_protocol::RunResumeParams {
-                    run_id: part,
-                    ..params
-                },
-                discard_workspace_changes,
-            )
-            .await?;
-        receipt.run_id = lineage.root().clone();
-        Ok(receipt)
+        let result = async {
+            require_local(target)?;
+            let (lineage, part) = self
+                .select_part(&params.run_id, Some(&params.part_id), true)
+                .await?;
+            let mut receipt = self
+                .resume_local(
+                    openengine_cluster_protocol::RunResumeParams {
+                        run_id: part,
+                        ..params.clone()
+                    },
+                    discard_workspace_changes,
+                )
+                .await?;
+            receipt.run_id = lineage.root().clone();
+            Ok(receipt)
+        }
+        .await;
+        if let Some(RunResumeFrom::Answer { output, .. }) = &params.from {
+            let _ = self.release_answer_uploads(&params.part_id, output).await;
+        }
+        result
     }
 
     async fn run_discard_workspace(

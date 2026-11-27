@@ -34,6 +34,48 @@ release them when unused.
 Managed publication names remain reserved after release so an earlier receipt cannot resolve to
 another publication's bytes.
 
+## Run inputs and file answers
+
+A `filepath` input accepts a local path string, an authorized target selection, or a private upload
+handle. Local strings resolve from the invoking directory. Target callers use selections or uploads;
+plain host paths grant no filesystem authority. File inputs are independent of workspace seeds and
+work in repository, managed workspace and in-place runs.
+
+```bash
+zeroshot file stage ./data.csv
+zeroshot file stage ./folder --target NAME
+```
+
+Put the returned `{ "kind": "staged", "runId": "...", "operation": "..." }` object directly in the
+filepath field of the JSON passed to `run --input`. Each field has its own selection, so equal source
+basenames need no renaming. To select an existing target file or folder, use:
+
+```json
+{
+  "kind": "target",
+  "selection": {
+    "address": { "scope": { "kind": "user" }, "path": "datasets/report" },
+    "member": ""
+  }
+}
+```
+
+For a declared filepath answer, put the same value in its field inside the answer JSON's `output`
+and pass that file to `zeroshot answer RUN_ID --input FILE`. Required and optional fields keep their
+ordinary schema rules. Files and folders use the same mechanism with no extension or MIME filtering.
+
+Admission freezes the accepted bytes. Retrying a submission key keeps them even if originals change.
+The graph receives usable run-owned paths under `ZEROSHOT_INPUTS`, also available to startup hooks.
+These paths remain outside the working folder, including in-place runs, and stay out of Git staging.
+Checkpoints restore changes to input copies; checkpoint-free restarts rebuild accepted originals.
+A winning answer belongs to its successor and stays available through failure and restart.
+
+Accepted inputs remain while the run can recover, including after local checkpoint discard. Success
+or final recovery disposal releases the run's copies while preserving original local files, library
+files and earlier publications. Rejected answer uploads are released; abandoned private uploads
+become eligible for explicit cleanup after 60 days. `--operation` and `--run-id` let an interrupted
+private upload retry its original handle.
+
 ## Graph outputs and cleanup
 
 Declare `artifacts` on a human request or graph success to expose current workspace paths. A
@@ -82,7 +124,9 @@ marker means unsupported; existing targets keep serving their other operations.
 All file HTTP operations POST to `/native-v2/files` on the selected target's authenticated origin.
 They use `application/vnd.openengine.file-tree.v1`, explicit `Content-Length`, no redirects and
 `Cache-Control: no-store` responses. A request starts with a big-endian u32 metadata length and
-that many JSON bytes (`FileRequest`). Only `replace` appends a binary tree. List/remove/replace/cleanup
+that many JSON bytes (`FileRequest`). Only `replace` and private `stage` append a binary tree. `release_staged` reclaims the authenticated
+caller's temporary upload by `runId` and `operation`, returning `{"kind":"released"}`. It is idempotent
+and never releases accepted input pins. List/remove/replace/cleanup
 responses use `FileResponse` JSON; download responses contain a binary tree directly.
 
 A tree starts with the eight bytes `OEFILES1`. Each entry has a big-endian u32 JSON header length

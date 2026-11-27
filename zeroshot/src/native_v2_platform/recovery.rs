@@ -8,6 +8,44 @@ impl NativeV2PlatformController {
         params: RunResumeParams,
     ) -> Result<RunResumeResult, NativeV2PlatformError> {
         let _turn = self.submission_turn.lock().await;
+        let mut input_claim = None;
+        let result = self
+            .resume_with_files(params.clone(), &mut input_claim)
+            .await;
+        if result.is_err()
+            && let Some(claim) = input_claim
+            && self
+                .ledger
+                .get(&params.successor_run_id)
+                .await
+                .is_ok_and(|run| run.is_none())
+        {
+            self.allocator.release_unadmitted_answer(&claim).await;
+        }
+        if let Some(openengine_cluster_protocol::RunResumeFrom::Answer { output, .. }) =
+            &params.from
+        {
+            self.release_answer_uploads(&params.run_id, output).await;
+        }
+        result
+    }
+
+    pub(super) async fn release_answer_uploads(&self, run_id: &RunId, output: &serde_json::Value) {
+        if let Ok(Some(source)) = self.ledger.get(run_id).await
+            && let Some(openengine_cluster_protocol::RunSuspension::Request { request, .. }) =
+                &source.snapshot.suspension
+        {
+            self.allocator
+                .release_answer_uploads(&request.output, output)
+                .await;
+        }
+    }
+
+    async fn resume_with_files(
+        &self,
+        params: RunResumeParams,
+        input_claim: &mut Option<crate::native_v2_files::inputs::FileInputClaim>,
+    ) -> Result<RunResumeResult, NativeV2PlatformError> {
         let RunResumeParams {
             runtime,
             from,
@@ -43,57 +81,8 @@ impl NativeV2PlatformController {
         self.recoverable_resume_source(&run_id).await?;
         let _control = self.lock_run_control(&run_id).await;
         let source = self.recoverable_resume_source(&run_id).await?;
-        let request_resolution = if let Some(suspension) = &source.snapshot.suspension {
-            if matches!(
-                suspension,
-                openengine_cluster_protocol::RunSuspension::Request { .. }
-            ) || matches!(
-                from,
-                Some(
-                    openengine_cluster_protocol::RunResumeFrom::Answer { .. }
-                        | openengine_cluster_protocol::RunResumeFrom::Expiry {}
-                )
-            ) {
-                Some(
-                    crate::native_v2_request::resolve(
-                        suspension,
-                        from.as_ref(),
-                        (self
-                            .allocator
-                            .suspension_policy()
-                            .unwrap_or_default()
-                            .wall_clock)(),
-                    )
-                    .map_err(|message| {
-                        NativeV2PlatformError::InvalidRequest(
-                            message.replace("RUN_ID", run_id.as_str()),
-                        )
-                    })?,
-                )
-            } else {
-                None
-            }
-        } else if matches!(
-            from,
-            Some(
-                openengine_cluster_protocol::RunResumeFrom::Answer { .. }
-                    | openengine_cluster_protocol::RunResumeFrom::Expiry {}
-            )
-        ) {
-            return Err(NativeV2PlatformError::InvalidRequest(
-                "answer requires a suspended run".to_owned(),
-            ));
-        } else {
-            None
-        };
-        if let Some(resolution) = &request_resolution {
-            crate::native_v2_request::validate_resolution(
-                &source.snapshot,
-                &successor_run_id,
-                resolution,
-            )
-            .map_err(NativeV2PlatformError::InvalidRequest)?;
-        }
+        let mut request_resolution =
+            self.resolve_file_request(&source, from.as_ref(), &successor_run_id)?;
         let expired = matches!(
             request_resolution,
             Some(openengine_cluster_protocol::RequestResolution::Expiry {})
@@ -143,6 +132,17 @@ impl NativeV2PlatformController {
                 .retain_delivery_state(&run_id, &state)
                 .await?;
         }
+        if let Some(resolution) = &mut request_resolution {
+            *input_claim = self
+                .accept_request_files(&source, &successor_run_id, resolution)
+                .await?;
+            crate::native_v2_request::validate_resolution(
+                &source.snapshot,
+                &successor_run_id,
+                resolution,
+            )
+            .map_err(NativeV2PlatformError::InvalidRequest)?;
+        }
         let controller_claim = self.allocator.claim_controller(&successor_run_id).await?;
         let stored = self
             .create_resume_successor(CreateRun {
@@ -178,6 +178,100 @@ impl NativeV2PlatformController {
             run_id: successor_run_id,
             resumed_from: run_id,
         })
+    }
+
+    fn resolve_file_request(
+        &self,
+        source: &StoredRun,
+        from: Option<&openengine_cluster_protocol::RunResumeFrom>,
+        successor_run_id: &RunId,
+    ) -> Result<Option<openengine_cluster_protocol::RequestResolution>, NativeV2PlatformError> {
+        let request_resolution = if let Some(suspension) = &source.snapshot.suspension {
+            if matches!(
+                suspension,
+                openengine_cluster_protocol::RunSuspension::Request { .. }
+            ) || matches!(
+                from,
+                Some(
+                    openengine_cluster_protocol::RunResumeFrom::Answer { .. }
+                        | openengine_cluster_protocol::RunResumeFrom::Expiry {}
+                )
+            ) {
+                Some(
+                    crate::native_v2_request::resolve(
+                        suspension,
+                        from,
+                        (self
+                            .allocator
+                            .suspension_policy()
+                            .unwrap_or_default()
+                            .wall_clock)(),
+                    )
+                    .map_err(|message| {
+                        NativeV2PlatformError::InvalidRequest(
+                            message.replace("RUN_ID", source.snapshot.run_id.as_str()),
+                        )
+                    })?,
+                )
+            } else {
+                None
+            }
+        } else if matches!(
+            from,
+            Some(
+                openengine_cluster_protocol::RunResumeFrom::Answer { .. }
+                    | openengine_cluster_protocol::RunResumeFrom::Expiry {}
+            )
+        ) {
+            return Err(NativeV2PlatformError::InvalidRequest(
+                "answer requires a suspended run".to_owned(),
+            ));
+        } else {
+            None
+        };
+        if let Some(resolution) = &request_resolution {
+            crate::native_v2_request::validate_resolution(
+                &source.snapshot,
+                successor_run_id,
+                resolution,
+            )
+            .map_err(NativeV2PlatformError::InvalidRequest)?;
+        }
+        Ok(request_resolution)
+    }
+
+    async fn accept_request_files(
+        &self,
+        source: &StoredRun,
+        successor_run_id: &RunId,
+        resolution: &mut openengine_cluster_protocol::RequestResolution,
+    ) -> Result<Option<crate::native_v2_files::inputs::FileInputClaim>, NativeV2PlatformError> {
+        let (submission_key, _) =
+            retained_submission_identity(&source.snapshot.run_id, successor_run_id)?;
+        if let openengine_cluster_protocol::RequestResolution::Answer { answer } = resolution {
+            let Some(openengine_cluster_protocol::RunSuspension::Request { request, .. }) =
+                &source.snapshot.suspension
+            else {
+                return Err(NativeV2PlatformError::InvalidRequest(
+                    "run has no request".into(),
+                ));
+            };
+            let frozen = self
+                .allocator
+                .accept_answer_files(crate::native_v2_files::inputs::InputAdmission {
+                    run_id: successor_run_id,
+                    owner: &source.snapshot.run_id,
+                    key: &submission_key,
+                    schema: &request.output,
+                    value: &answer.output,
+                    local_root: None,
+                })
+                .await
+                .map_err(NativeV2PlatformError::InvalidRequest)?;
+            answer.output = frozen.value;
+            return Ok(frozen.claim);
+        }
+        Ok(None)
     }
 
     pub(super) async fn recoverable_resume_source(

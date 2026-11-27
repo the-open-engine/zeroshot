@@ -58,7 +58,8 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
-        let root = tempfile::tempdir().assert_value();
+        let root =
+            tempfile::tempdir_in(std::env::temp_dir().canonicalize().assert_value()).assert_value();
         let directory = root.path().join("checkpoints");
         let workspace = root.path().join("workspace");
         fs::create_dir(&workspace).assert_value();
@@ -577,6 +578,63 @@ async fn restore_without_a_stop_request_replaces_the_workspace_within_one_poll()
     assert_eq!(fixture.source(), "initial");
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn unborn_git_checkpoint_restores_without_a_stop_receiver() {
+    for attempt in [false, true] {
+        let fixture = Fixture::new();
+        let git = |args: &[&str]| {
+            let result = std::process::Command::new("git")
+                .current_dir(&fixture.workspace)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            result.stdout
+        };
+        git(&["init", "--initial-branch=unborn"]);
+        git(&["add", "source"]);
+        let point = fixture.input_checkpoint("writer").await;
+        fs::write(fixture.workspace.join("source"), "later edits").unwrap();
+        git(&["add", "source"]);
+        let selection = CheckpointRestore {
+            directory: fixture.directory.clone(),
+            selection: CheckpointRestoreSelection::Checkpoint {
+                checkpoint_id: point.checkpoint_id,
+            },
+        };
+        if attempt {
+            restore_attempt(
+                &selection,
+                &fixture.workspace,
+                RestoreAttempt {
+                    owner: &RunId::new("0199f33f-3b44-7d21-9000-000000000001"),
+                    deadline: Instant::now() + std::time::Duration::from_secs(60),
+                },
+            )
+            .await
+            .unwrap();
+        } else {
+            restore(&selection, &fixture.workspace).await.unwrap();
+        }
+        assert_eq!(fixture.source(), "initial");
+        assert_eq!(git(&["symbolic-ref", "HEAD"]), b"refs/heads/unborn\n");
+        assert_eq!(git(&["show", ":source"]), b"initial");
+        assert!(
+            !std::process::Command::new("git")
+                .current_dir(&fixture.workspace)
+                .args(["rev-parse", "--verify", "HEAD"])
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+    }
+}
+
 #[tokio::test]
 async fn failed_restore_does_not_touch_the_live_workspace_and_can_be_retried() {
     let fixture = Fixture::new();
@@ -1091,4 +1149,84 @@ fn a_restart_starts_with_the_conversations_its_source_started_with() {
     // A record that cannot be read is not taken for a missing one.
     fs::write(root.path().join("third/conversation-origin.json"), "{").assert_value();
     assert!(conversations("third", Latest, "fourth").is_err());
+}
+
+#[tokio::test]
+async fn git_checkpoints_restore_mutable_inputs_without_staging_them() {
+    let mut fixture = Fixture::new();
+    let inputs = fixture._root.path().join("run-inputs");
+    fs::create_dir(&inputs).unwrap();
+    fs::write(inputs.join("data.csv"), "accepted original").unwrap();
+    fixture.store = fixture.store.with_file_inputs(vec![inputs.clone()]);
+    let git = |args: &[&str]| {
+        let result = std::process::Command::new("git")
+            .current_dir(&fixture.workspace)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        result.stdout
+    };
+    git(&["init"]);
+    git(&[
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "add",
+        ".",
+    ]);
+    git(&[
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-m",
+        "seed",
+    ]);
+    fs::write(fixture.workspace.join("normal-edit"), "workspace edit").unwrap();
+    fs::write(inputs.join("data.csv"), "selected input edit").unwrap();
+    let checkpoint = fixture.input_checkpoint("writer").await;
+    fs::write(
+        fixture.workspace.join("normal-edit"),
+        "later workspace edit",
+    )
+    .unwrap();
+    fs::write(inputs.join("data.csv"), "later input edit").unwrap();
+    fixture.restore(&checkpoint).await;
+    assert_eq!(
+        fs::read_to_string(inputs.join("data.csv")).unwrap(),
+        "selected input edit"
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.workspace.join("normal-edit")).unwrap(),
+        "workspace edit"
+    );
+    git(&["add", "--all"]);
+    git(&[
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-m",
+        "delivery",
+    ]);
+    let files = String::from_utf8(git(&["ls-tree", "--name-only", "HEAD"])).unwrap();
+    assert_eq!(files, "normal-edit\nsource\n");
+    assert_eq!(
+        fs::read_to_string(inputs.join("data.csv")).unwrap(),
+        "selected input edit"
+    );
 }

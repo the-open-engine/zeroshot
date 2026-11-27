@@ -135,7 +135,11 @@ impl NativeV2TargetServer {
         let request: FileRequest = serde_json::from_slice(&metadata)
             .map_err(|_| io::Error::other("invalid file request"))?;
         let payload_len = length - 4 - metadata_len as u64;
-        if !matches!(request, FileRequest::Replace { .. }) && payload_len != 0 {
+        if !matches!(
+            request,
+            FileRequest::Replace { .. } | FileRequest::Stage { .. }
+        ) && payload_len != 0
+        {
             return Err(io::Error::other("unexpected file payload"));
         }
         if let FileRequest::Cleanup { all } = request {
@@ -178,6 +182,24 @@ impl NativeV2TargetServer {
                         entries: mount.host.list_members(&access, &selection)?,
                         selection,
                     }))
+                }
+                FileRequest::Stage { run_id, operation } => {
+                    mount.host.stage_upload(
+                        &access,
+                        &crate::native_v2_files::FilePin {
+                            run_id: run_id.clone(),
+                            operation: operation.clone(),
+                        },
+                        &mut staged,
+                    )?;
+                    Ok(FileReply::Json(FileResponse::Staged { run_id, operation }))
+                }
+                FileRequest::ReleaseStaged { run_id, operation } => {
+                    mount.host.release_upload(
+                        &access,
+                        &crate::native_v2_files::FilePin { run_id, operation },
+                    )?;
+                    Ok(FileReply::Json(FileResponse::Released {}))
                 }
                 FileRequest::Replace { address, operation } => {
                     mount.host.replace(

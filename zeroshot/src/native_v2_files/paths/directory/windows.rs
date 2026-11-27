@@ -1,6 +1,7 @@
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::path::{Component, Path, PathBuf};
+use std::os::windows::fs::OpenOptionsExt;
 use std::sync::Arc;
 
 use super::super::super::{Result, invalid};
@@ -19,6 +20,32 @@ fn component(name: &OsStr) -> Result<()> {
         return Err(invalid("expected one file name"));
     }
     Ok(())
+}
+
+fn clear_readonly(path: &Path) -> Result<()> {
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ, FILE_WRITE_ATTRIBUTES,
+    };
+    // The caller holds the parent guards. Pin this entry without following reparse points;
+    // deny replacement while repairing only the disposable copy's attributes.
+    let file = std::fs::OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES)
+        .share_mode(FILE_SHARE_READ)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)?;
+    platform::file_identity(&file)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_dir() {
+        super::super::regular(&file)?;
+    }
+    let mut permissions = metadata.permissions();
+    #[expect(
+        clippy::permissions_set_readonly_false,
+        reason = "Windows disposable copy only"
+    )]
+    permissions.set_readonly(false);
+    file.set_permissions(permissions)
 }
 
 impl Directory {
@@ -85,7 +112,11 @@ impl Directory {
     pub fn remove_tree(&self, name: &OsStr) -> Result<()> {
         component(name)?;
         let path = self.0.path.join(name);
-        if std::fs::symlink_metadata(&path)?.is_dir() {
+        let metadata = std::fs::symlink_metadata(&path)?;
+        if metadata.permissions().readonly() {
+            clear_readonly(&path)?;
+        }
+        if metadata.is_dir() {
             let child = self.child(name)?;
             for entry in child.entries()? {
                 child.remove_tree(&entry?)?;

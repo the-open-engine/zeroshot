@@ -1183,12 +1183,83 @@ async fn execute_answer<B: NativeV2CliBackend, S: DetachSignal, W: Write>(
     output: &mut W,
 ) -> Result<CliOutcome, NativeV2CliError> {
     let (mut run, input, forward_github_token) = command;
-    context
-        .backend
-        .validate_request_ask(run.target.as_deref())
-        .await?;
-    let status = context
-        .backend
+    let part = answer_part(context.backend, &run).await;
+    let answer = read_request_answer(&input);
+    run.part_id = Some(match part {
+        Ok(part) => part,
+        Err(error) => {
+            if let Ok(openengine_cluster_protocol::RunResumeFrom::Answer { output, .. }) = &answer {
+                let _ = context
+                    .backend
+                    .release_rejected_answer_uploads(&run, output)
+                    .await;
+            }
+            return Err(error);
+        }
+    });
+    let (from, input_error) = match answer {
+        Ok(from) => (from, None),
+        Err(error) => (
+            // Only the owning controller knows whether the deadline passed. An invalid
+            // result lets it apply expiry even when the file cannot be parsed, and can
+            // never answer a pending request because the output must be a record.
+            openengine_cluster_protocol::RunResumeFrom::Answer {
+                signals: Default::default(),
+                output: serde_json::Value::Null,
+            },
+            Some(error),
+        ),
+    };
+    // Resume has its own preflight. Keep the observed request's identity and selections if
+    // the head changes or preparation refuses before the owning backend receives the answer.
+    let answer_run = run.clone();
+    let answer_output = match &from {
+        openengine_cluster_protocol::RunResumeFrom::Answer { output, .. } => Some(output.clone()),
+        _ => None,
+    };
+    let mut result = execute_resume(
+        RunResumeCommand {
+            runtime: None,
+            run,
+            from: Some(from),
+            api_default: false,
+            discard_workspace_changes: false,
+            forward_github_token,
+        },
+        context,
+        signal,
+        output,
+    )
+    .await;
+    if let (Some(input_error), Err(NativeV2CliError::Remote { message, .. })) =
+        (input_error, &mut result)
+    {
+        // A path names only the placeholder's shape; any other refusal (in particular expiry and
+        // its successor) stays first.
+        if message.starts_with('$') {
+            *message = format!("answer file: {input_error}");
+        } else {
+            message.push_str("; answer file: ");
+            message.push_str(&input_error);
+        }
+    }
+    if result.is_err()
+        && let Some(answer_output) = answer_output
+    {
+        let _ = context
+            .backend
+            .release_rejected_answer_uploads(&answer_run, &answer_output)
+            .await;
+    }
+    result
+}
+
+async fn answer_part<B: NativeV2CliBackend>(
+    backend: &B,
+    run: &RunSelector,
+) -> Result<RunId, NativeV2CliError> {
+    backend.validate_request_ask(run.target.as_deref()).await?;
+    let status = backend
         .run_status(
             run.target.as_deref(),
             RunStatusParams {
@@ -1219,47 +1290,7 @@ async fn execute_answer<B: NativeV2CliBackend, S: DetachSignal, W: Write>(
             }
         )));
     };
-    run.part_id = Some(status.part_id);
-    let (from, input_error) = match read_request_answer(&input) {
-        Ok(from) => (from, None),
-        Err(error) => (
-            // Only the owning controller knows whether the deadline passed. An invalid
-            // result lets it apply expiry even when the file cannot be parsed, and can
-            // never answer a pending request because the output must be a record.
-            openengine_cluster_protocol::RunResumeFrom::Answer {
-                signals: Default::default(),
-                output: serde_json::Value::Null,
-            },
-            Some(error),
-        ),
-    };
-    let mut result = execute_resume(
-        RunResumeCommand {
-            runtime: None,
-            run,
-            from: Some(from),
-            api_default: false,
-            discard_workspace_changes: false,
-            forward_github_token,
-        },
-        context,
-        signal,
-        output,
-    )
-    .await;
-    if let (Some(input_error), Err(NativeV2CliError::Remote { message, .. })) =
-        (input_error, &mut result)
-    {
-        // A path names only the placeholder's shape; any other refusal (in particular expiry and
-        // its successor) stays first.
-        if message.starts_with('$') {
-            *message = format!("answer file: {input_error}");
-        } else {
-            message.push_str("; answer file: ");
-            message.push_str(&input_error);
-        }
-    }
-    result
+    Ok(status.part_id)
 }
 
 fn read_request_answer(

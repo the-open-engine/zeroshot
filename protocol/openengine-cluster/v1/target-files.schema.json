@@ -65,8 +65,58 @@
       "type": "string"
     },
     "FileRequest": {
-      "description": "HTTP POST body: big-endian u32 JSON length, this JSON, then a tree for replace only.\nTree framing: magic, repeated (big-endian u32 header length, FileEntry JSON, file bytes and\nraw SHA-256 for files), zero u32, EOF. Parents precede children; root is first and mandatory.\nBoth directions require Content-Length. Receivers validate the complete transfer before publish.",
+      "description": "HTTP POST body: big-endian u32 JSON length, this JSON, then a tree for replace or stage.\nTree framing: magic, repeated (big-endian u32 header length, FileEntry JSON, file bytes and\nraw SHA-256 for files), zero u32, EOF. Parents precede children; root is first and mandatory.\nBoth directions require Content-Length. Receivers validate the complete transfer before publish.",
       "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Private upload for a filepath submission or answer; never creates a library name.",
+          "properties": {
+            "action": {
+              "const": "stage",
+              "type": "string"
+            },
+            "operation": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+              "type": "string"
+            },
+            "runId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "runId",
+            "operation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Release only the authenticated caller's temporary upload, preserving accepted pins.",
+          "properties": {
+            "action": {
+              "const": "release_staged",
+              "type": "string"
+            },
+            "operation": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+              "type": "string"
+            },
+            "runId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "runId",
+            "operation"
+          ],
+          "type": "object"
+        },
         {
           "additionalProperties": false,
           "properties": {
@@ -184,6 +234,43 @@
     },
     "FileResponse": {
       "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "released",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "staged",
+              "type": "string"
+            },
+            "operation": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+              "type": "string"
+            },
+            "runId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "runId",
+            "operation"
+          ],
+          "type": "object"
+        },
         {
           "additionalProperties": false,
           "properties": {
@@ -358,12 +445,61 @@
         "member"
       ],
       "type": "object"
+    },
+    "RunFileInput": {
+      "description": "A filepath input selects target bytes or a private upload. Hosts replace the selection with\na run-owned path before graph execution; selectors never authorize arbitrary host paths.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "target",
+              "type": "string"
+            },
+            "selection": {
+              "$ref": "#/$defs/FileSelection"
+            }
+          },
+          "required": [
+            "kind",
+            "selection"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "staged",
+              "type": "string"
+            },
+            "operation": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+              "type": "string"
+            },
+            "runId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "runId",
+            "operation"
+          ],
+          "type": "object"
+        }
+      ]
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
     "entry": {
       "$ref": "#/$defs/FileEntryWire"
+    },
+    "input": {
+      "$ref": "#/$defs/RunFileInput"
     },
     "request": {
       "$ref": "#/$defs/FileRequest"
@@ -375,7 +511,8 @@
   "required": [
     "request",
     "response",
-    "entry"
+    "entry",
+    "input"
   ],
   "title": "TargetFilesSchema",
   "type": "object"

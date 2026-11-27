@@ -164,13 +164,25 @@ impl From<FileEntry> for FileEntryWire {
     }
 }
 
-/// HTTP POST body: big-endian u32 JSON length, this JSON, then a tree for replace only.
+/// HTTP POST body: big-endian u32 JSON length, this JSON, then a tree for replace or stage.
 /// Tree framing: magic, repeated (big-endian u32 header length, FileEntry JSON, file bytes and
 /// raw SHA-256 for files), zero u32, EOF. Parents precede children; root is first and mandatory.
 /// Both directions require Content-Length. Receivers validate the complete transfer before publish.
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum FileRequest {
+    /// Private upload for a filepath submission or answer; never creates a library name.
+    Stage {
+        #[serde(rename = "runId")]
+        run_id: crate::RunId,
+        operation: crate::IdempotencyKey,
+    },
+    /// Release only the authenticated caller's temporary upload, preserving accepted pins.
+    ReleaseStaged {
+        #[serde(rename = "runId")]
+        run_id: crate::RunId,
+        operation: crate::IdempotencyKey,
+    },
     Cleanup {
         all: bool,
     },
@@ -196,6 +208,12 @@ pub enum FileRequest {
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum FileResponse {
+    Released {},
+    Staged {
+        #[serde(rename = "runId")]
+        run_id: crate::RunId,
+        operation: crate::IdempotencyKey,
+    },
     Cleaned {
         publications: u64,
         #[serde(rename = "checkpointLineages")]

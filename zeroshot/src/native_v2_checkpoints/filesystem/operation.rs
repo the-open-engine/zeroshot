@@ -25,7 +25,7 @@ impl SnapshotOperation {
         }
     }
 
-    pub(super) fn uncancelled() -> Self {
+    pub(crate) fn uncancelled() -> Self {
         Self {
             stopping: None,
             runtime: None,
@@ -45,7 +45,7 @@ impl SnapshotOperation {
         Ok(())
     }
 
-    pub(super) fn copy(&self, source: &Path, target: &Path) -> io::Result<()> {
+    pub(crate) fn copy(&self, source: &Path, target: &Path) -> io::Result<()> {
         self.check()?;
         let request = self
             .stopping

@@ -35,6 +35,7 @@ async fn invocation(
     node.instructions = None;
     let session = adapter.open(&node, &request.environment).await.unwrap();
     DriverInvocation {
+        file_roots: Vec::new(),
         dispatch: Default::default(),
         host_context: None,
         node,

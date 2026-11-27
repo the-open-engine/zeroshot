@@ -86,6 +86,7 @@ async fn turn(
         assert!(session.restore_conversation(restored).await);
     }
     let invocation = DriverInvocation {
+        file_roots: Vec::new(),
         node: request.invocation,
         environment: request.environment,
         session: session.clone(),

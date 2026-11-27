@@ -221,6 +221,8 @@ pub trait AgentContextProvider: Send + Sync {
 
 #[derive(Clone)]
 pub struct DriverInvocation {
+    /// Host-owned run input roots, independent of workspace and authored values.
+    pub file_roots: Vec<std::path::PathBuf>,
     pub dispatch: NodeDispatchMetadata,
     /// Transient host context; never part of the authored graph or durable invocation.
     pub host_context: Option<String>,
@@ -238,6 +240,16 @@ pub struct DriverInvocation {
 }
 
 impl DriverInvocation {
+    pub(crate) fn filepaths<'a>(
+        &'a self,
+        workspace: &'a std::path::Path,
+    ) -> response::FilepathContext<'a> {
+        response::FilepathContext {
+            workspace,
+            inputs: &self.file_roots,
+        }
+    }
+
     pub(crate) fn agent_prompt(&self) -> Result<String, NodeRunnerError> {
         self.agent_prompt_with_delivery(ResponseDelivery::Message)
     }
@@ -510,6 +522,7 @@ pub trait AuxiliaryRunnerFactory: Send + Sync {
 }
 
 struct NativeAuxiliaryRunnerFactory {
+    file_roots: Vec<std::path::PathBuf>,
     agent_context: Option<Arc<dyn AgentContextProvider>>,
     driver: Arc<dyn NodeDriver>,
     sessions: SessionPool,
@@ -533,6 +546,7 @@ pub(crate) const AUXILIARY_EXECUTION_OFFSET: u64 =
 impl AuxiliaryRunnerFactory for NativeAuxiliaryRunnerFactory {
     fn fork(&self, admitted: &AdmittedRun) -> Result<Arc<dyn NodeRunner>, NodeRunnerError> {
         let runner: Arc<dyn NodeRunner> = Arc::new(NativeNodeRunner {
+            file_roots: self.file_roots.clone(),
             agent_context: self.agent_context.clone(),
             driver: self.driver.clone(),
             sessions: self.sessions.isolated(),
@@ -570,6 +584,7 @@ impl AuxiliaryRunnerFactory for NativeAuxiliaryRunnerFactory {
 
 #[derive(Clone)]
 pub struct NativeNodeRunner {
+    file_roots: Vec<std::path::PathBuf>,
     agent_context: Option<Arc<dyn AgentContextProvider>>,
     driver: Arc<dyn NodeDriver>,
     sessions: SessionPool,
@@ -581,6 +596,12 @@ pub struct NativeNodeRunner {
 }
 
 impl NativeNodeRunner {
+    #[must_use]
+    pub fn with_file_inputs(mut self, roots: Vec<std::path::PathBuf>) -> Self {
+        self.file_roots = roots;
+        self
+    }
+
     /// Attach transient host context without changing the admitted graph or runtime plan.
     #[must_use]
     pub fn with_agent_context(mut self, context: Option<Arc<dyn AgentContextProvider>>) -> Self {
@@ -591,6 +612,7 @@ impl NativeNodeRunner {
     #[must_use]
     pub fn auxiliary_factory(&self) -> Arc<dyn AuxiliaryRunnerFactory> {
         Arc::new(NativeAuxiliaryRunnerFactory {
+            file_roots: self.file_roots.clone(),
             agent_context: self.agent_context.clone(),
             driver: self.driver.clone(),
             sessions: self.sessions.clone(),
@@ -621,6 +643,7 @@ impl NativeNodeRunner {
         sessions: SessionPool,
     ) -> Result<Self, NodeRunnerError> {
         Ok(Self {
+            file_roots: Vec::new(),
             agent_context: None,
             driver,
             sessions,
@@ -721,6 +744,7 @@ impl NodeRunner for NativeNodeRunner {
             .register(&reference, cancel_sender.clone())
             .await?;
         let runtime = RunnerTaskRuntime {
+            file_roots: self.file_roots.clone(),
             agent_context: self.agent_context.clone(),
             driver: self.driver.clone(),
             sessions: self.sessions.clone(),
@@ -779,6 +803,7 @@ impl NodeRunner for NativeNodeRunner {
 }
 
 struct RunnerTaskRuntime {
+    file_roots: Vec<std::path::PathBuf>,
     agent_context: Option<Arc<dyn AgentContextProvider>>,
     driver: Arc<dyn NodeDriver>,
     sessions: SessionPool,
@@ -834,6 +859,7 @@ async fn execute(
     let driver_invocation = DriverInvocation {
         dispatch: task.request.dispatch,
         host_context,
+        file_roots: runtime.file_roots,
         node: task.request.invocation.clone(),
         role: task.role,
         response: response.clone(),

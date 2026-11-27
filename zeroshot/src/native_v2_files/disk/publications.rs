@@ -296,6 +296,14 @@ impl DiskFileStore {
             publication.released = true;
             removed += 1;
         }
+        let uploader = self.operation_key(access, "upload-owner", &())?;
+        for pin in catalog.pins.values_mut() {
+            if pin.uploader.as_ref() == Some(&uploader)
+                && pin.expires_at.is_some_and(|expires| all || now >= expires)
+            {
+                pin.blob = None;
+            }
+        }
         self.save(&catalog)?;
         self.reclaim_locked(&catalog)?;
         Ok(removed)

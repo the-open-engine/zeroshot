@@ -214,6 +214,37 @@ pub trait CapsuleAllocator: Send + Sync {
         false
     }
 
+    /// Freeze explicit answer file selections under the already serialized winner transaction.
+    async fn accept_answer_files(
+        &self,
+        request: crate::native_v2_files::inputs::InputAdmission<'_>,
+    ) -> Result<crate::native_v2_files::inputs::FrozenFileInputs, String> {
+        let mut value = request.value.clone();
+        crate::native_v2_files::inputs::visit(request.schema, &mut value, "", &mut |_, _| {
+            Err("host does not enable file inputs".to_owned())
+        })?;
+        Ok(crate::native_v2_files::inputs::FrozenFileInputs {
+            run_id: request.run_id.clone(),
+            value,
+            claim: None,
+        })
+    }
+
+    /// Reclaim private upload handles after acceptance or refusal; accepted bytes have own pins.
+    async fn release_answer_uploads(
+        &self,
+        _schema: &openengine_cluster_protocol::PayloadType,
+        _value: &serde_json::Value,
+    ) {
+    }
+
+    /// Confirmed refusal before successor admission releases only that attempt's private pins.
+    async fn release_unadmitted_answer(
+        &self,
+        _claim: &crate::native_v2_files::inputs::FileInputClaim,
+    ) {
+    }
+
     /// None refuses suspension and wait plans; hosts with remote storage explicitly opt in.
     fn suspension_policy(&self) -> Option<crate::native_v2_wait::WaitPolicy> {
         None

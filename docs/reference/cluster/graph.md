@@ -269,7 +269,10 @@ never satisfies a required target field. Extra source fields are allowed. The re
 deterministic, side-effect free, and never delegates to general JSON Schema evaluation.
 
 A `filepath` is a nonempty string naming an existing regular file or folder inside the execution
-workspace. Worker and verifier responses validate these paths, including nested fields, through
+workspace or its host-accepted run input location. Submission and request-answer filepath fields
+also accept authorized target selections or private upload handles; admission replaces them with
+run-owned paths. See [file inputs](../target-files.md#run-inputs-and-file-answers).
+Worker and verifier responses validate these paths, including nested fields, through
 the ordinary response correction flow. It has no MIME constraint and is distinct from `string`;
 an ordinary string never triggers filesystem access. Validation alone publishes nothing.
 

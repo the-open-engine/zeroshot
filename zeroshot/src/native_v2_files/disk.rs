@@ -49,6 +49,10 @@ struct Tree {
 #[serde(deny_unknown_fields)]
 struct Pin {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    expires_at: Option<openengine_cluster_protocol::UnixTimestampMillis>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    uploader: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     owner: Option<FilePublicationOwner>,
     partition: String,
     source: FileSelection,
@@ -383,6 +387,70 @@ impl DiskFileStore {
     }
 }
 
+impl DiskFileStore {
+    fn stage_with_expiry(
+        &self,
+        access: &FileAccess<'_>,
+        request: (
+            &FilePin,
+            Option<openengine_cluster_protocol::UnixTimestampMillis>,
+        ),
+        input: &mut dyn Read,
+    ) -> Result<FilePin> {
+        let (pin, expires_at) = request;
+        let source = Self::staged_source(pin)?;
+        let partition = self.member_authority(access, &source, FileAction::Pin)?;
+        let (_lock, mut catalog) = self.load()?;
+        let identity = self.pin_key(access, pin)?;
+        if catalog.pins.get(&identity).is_some_and(|previous| {
+            previous.partition != partition
+                || !previous.staged
+                || previous.blob.is_none()
+                || previous.expires_at.is_some() != expires_at.is_some()
+        }) {
+            return Err(invalid("file stage operation conflicts or was released"));
+        }
+        self.reclaim_locked(&catalog)?;
+        let (blob, digest) = self.import(input, &mut |entry| {
+            self.check_entry(
+                FileAuthorization {
+                    access,
+                    action: FileAction::Pin,
+                    selection: &FileSelection {
+                        address: source.address.clone(),
+                        member: root_path(),
+                    },
+                },
+                &partition,
+                entry,
+            )
+        })?;
+        if let Some(previous) = catalog.pins.get(&identity) {
+            if previous.digest != digest {
+                return Err(invalid("file stage operation conflicts or was released"));
+            }
+            return Ok(pin.clone());
+        }
+        catalog.pins.insert(
+            identity,
+            Pin {
+                expires_at,
+                uploader: expires_at
+                    .map(|_| self.operation_key(access, "upload-owner", &()))
+                    .transpose()?,
+                owner: None,
+                partition,
+                source,
+                staged: true,
+                blob: Some(blob),
+                digest,
+            },
+        );
+        self.save(&catalog)?;
+        Ok(pin.clone())
+    }
+}
+
 impl TargetFileHost for DiskFileStore {
     fn list(
         &self,
@@ -679,6 +747,8 @@ impl TargetFileHost for DiskFileStore {
         catalog.pins.insert(
             identity,
             Pin {
+                expires_at: None,
+                uploader: None,
                 owner,
                 partition,
                 source: request.source.clone(),
@@ -697,49 +767,21 @@ impl TargetFileHost for DiskFileStore {
         pin: &FilePin,
         input: &mut dyn Read,
     ) -> Result<FilePin> {
-        let source = Self::staged_source(pin)?;
-        let partition = self.member_authority(access, &source, FileAction::Pin)?;
-        let (_lock, mut catalog) = self.load()?;
-        let identity = self.pin_key(access, pin)?;
-        if catalog.pins.get(&identity).is_some_and(|previous| {
-            previous.partition != partition || !previous.staged || previous.blob.is_none()
-        }) {
-            return Err(invalid("file stage operation conflicts or was released"));
-        }
-        self.reclaim_locked(&catalog)?;
-        let (blob, digest) = self.import(input, &mut |entry| {
-            self.check_entry(
-                FileAuthorization {
-                    access,
-                    action: FileAction::Pin,
-                    selection: &FileSelection {
-                        address: source.address.clone(),
-                        member: root_path(),
-                    },
-                },
-                &partition,
-                entry,
-            )
-        })?;
-        if let Some(previous) = catalog.pins.get(&identity) {
-            if previous.digest != digest {
-                return Err(invalid("file stage operation conflicts or was released"));
-            }
-            return Ok(pin.clone());
-        }
-        catalog.pins.insert(
-            identity,
-            Pin {
-                owner: None,
-                partition,
-                source,
-                staged: true,
-                blob: Some(blob),
-                digest,
-            },
-        );
-        self.save(&catalog)?;
-        Ok(pin.clone())
+        self.stage_with_expiry(access, (pin, None), input)
+    }
+
+    fn stage_upload(
+        &self,
+        access: &FileAccess<'_>,
+        pin: &FilePin,
+        input: &mut dyn Read,
+    ) -> Result<FilePin> {
+        let now = crate::native_v2_runner::current_timestamp();
+        let expires = openengine_cluster_protocol::UnixTimestampMillis::new(
+            now.get().saturating_add(60 * 24 * 60 * 60 * 1000),
+        )
+        .map_err(|_| invalid("upload expiry overflow"))?;
+        self.stage_with_expiry(access, (pin, Some(expires)), input)
     }
 
     fn pin_exists(&self, access: &FileAccess<'_>, pin: &FilePin) -> Result<bool> {
@@ -748,7 +790,13 @@ impl TargetFileHost for DiskFileStore {
         if !catalog.pins.contains_key(&self.pin_key(access, pin)?) {
             return Ok(false);
         }
-        self.retained_pin(access, pin, &catalog)?;
+        if self
+            .retained_pin(access, pin, &catalog)?
+            .expires_at
+            .is_some()
+        {
+            return Err(invalid("admission pin conflicts with a temporary upload"));
+        }
         Ok(true)
     }
 
@@ -986,14 +1034,41 @@ impl TargetFileHost for DiskFileStore {
         Ok(removed)
     }
 
+    fn release_upload(&self, access: &FileAccess<'_>, pin: &FilePin) -> Result<()> {
+        let source = Self::staged_source(pin)?;
+        self.member_authority(access, &source, FileAction::Pin)?;
+        let (_lock, mut catalog) = self.load()?;
+        let uploader = self.operation_key(access, "upload-owner", &())?;
+        if let Some(stored) = catalog.pins.get_mut(&self.pin_key(access, pin)?)
+            && stored.expires_at.is_some()
+            && stored.uploader.as_ref() == Some(&uploader)
+        {
+            stored.blob = None;
+            self.save(&catalog)?;
+            self.reclaim_locked(&catalog)?;
+        }
+        Ok(())
+    }
+
     fn release(&self, access: &FileAccess<'_>, pin: &FilePin) -> Result<()> {
         let source = Self::staged_source(pin)?;
         let partition = self.member_authority(access, &source, FileAction::Pin)?;
         let (_lock, mut catalog) = self.load()?;
+        let identity = self.pin_key(access, pin)?;
+        // Refused managed admission never owns a colliding caller-selected upload.
+        if catalog
+            .pins
+            .get(&identity)
+            .is_some_and(|pin| pin.expires_at.is_some())
+        {
+            return Ok(());
+        }
         catalog
             .pins
-            .entry(self.pin_key(access, pin)?)
+            .entry(identity)
             .or_insert(Pin {
+                expires_at: None,
+                uploader: None,
                 owner: None,
                 partition,
                 source,

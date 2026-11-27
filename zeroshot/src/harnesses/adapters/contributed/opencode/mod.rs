@@ -190,7 +190,7 @@ impl OpenCodeAdapter {
                 &invocation.response,
                 &result.message,
                 turn.dialect,
-                Some(&turn.files.workspace),
+                Some(invocation.filepaths(&turn.files.workspace)),
             )?;
             feedback
                 .report_correction(turn.control, &answer, response.corrections_exhausted())

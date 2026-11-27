@@ -49,6 +49,22 @@ impl ProductionCapsuleAllocator {
                 .to_string_lossy()
                 .into_owned(),
         );
+        if matches!(phase, HookPhase::Startup)
+            && let Some(files) = &self.config.workspace_files
+            && !files
+                .file_input_roots(request.delivery_run_id)
+                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?
+                .is_empty()
+        {
+            values.insert(
+                "ZEROSHOT_INPUTS".into(),
+                files
+                    .input_location(request.delivery_run_id)
+                    .map_err(|_| CapsuleAllocationUnavailable::Runtime)?
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+        }
         values.insert(
             "PATH".to_owned(),
             environment::search_path(&state.run_root, &self.config.executable_search_path),

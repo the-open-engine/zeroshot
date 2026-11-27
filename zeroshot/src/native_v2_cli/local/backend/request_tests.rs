@@ -111,6 +111,22 @@ async fn suspended_run(
     backend: &LocalCliBackend,
     expired: bool,
 ) -> (LocalRecoveryDocument, SqliteRunLedger) {
+    suspended_run_with_output(
+        backend,
+        expired,
+        match suspension() {
+            RunSuspension::Request { request, .. } => request.output,
+            _ => unreachable!(),
+        },
+    )
+    .await
+}
+
+async fn suspended_run_with_output(
+    backend: &LocalCliBackend,
+    expired: bool,
+    output: openengine_cluster_protocol::PayloadType,
+) -> (LocalRecoveryDocument, SqliteRunLedger) {
     let RunSuspension::Request {
         node,
         mut request,
@@ -119,6 +135,7 @@ async fn suspended_run(
     else {
         unreachable!()
     };
+    request.output = output;
     if expired {
         request.expires_at =
             openengine_cluster_protocol::UnixTimestampMillis::new(2000).assert_value();
@@ -332,6 +349,55 @@ async fn answer_preflight_errors_leave_no_successor_or_recovery_mutation() {
         .assert_value();
 }
 
+#[tokio::test]
+async fn refused_local_answer_preserves_files_owned_by_another_attempt() {
+    let root = TestDirectory::new("local-refused-answer-files");
+    let root_path = root.path().canonicalize().assert_value();
+    let workspace = root_path.join("workspace");
+    std::fs::create_dir(&workspace).assert_value();
+    let backend = LocalCliBackend::new(
+        root_path.join("state"),
+        root_path.join("missing-controller"),
+        workspace.clone(),
+        "git".into(),
+    );
+    let (_, _ledger) = suspended_run(&backend, false).await;
+    let params = resume(Some(RunResumeFrom::Answer {
+        signals: Default::default(),
+        output: json!({"feedback": false}),
+    }));
+    let original = workspace.join("data");
+    std::fs::write(&original, "accepted bytes").assert_value();
+    let files = crate::native_v2_cli::files::workspace_files(&backend.state_root).assert_value();
+    let frozen = files
+        .freeze_file_inputs(crate::native_v2_files::inputs::InputAdmission {
+            run_id: &params.successor_run_id,
+            owner: &params.run_id,
+            key: &IdempotencyKey::new("earlier-answer").assert_value(),
+            schema: &openengine_cluster_protocol::PayloadType::Filepath,
+            value: &json!(original),
+            local_root: Some(&workspace),
+        })
+        .assert_value();
+    backend
+        .run_resume(None, params.clone(), false)
+        .await
+        .assert_error();
+    std::fs::write(&original, "user edit").assert_value();
+    assert_eq!(
+        files
+            .materialize_file_inputs(&params.run_id, true)
+            .unwrap_or_else(|error| panic!("materialize accepted file input failed: {error}"))
+            .len(),
+        1
+    );
+    assert_eq!(
+        std::fs::read(frozen.value.as_str().unwrap()).assert_value(),
+        b"accepted bytes"
+    );
+    assert_eq!(std::fs::read(original).assert_value(), b"user edit");
+}
+
 pub(in crate::native_v2_cli::local) async fn assert_local_inbox_reads_do_not_continue_requests() {
     use openengine_cluster_protocol::{
         InboxListParams, RequestState, RunVectorsParams, RunVectorParams, VectorId,
@@ -458,5 +524,254 @@ pub(in crate::native_v2_cli::local) async fn assert_local_inbox_reads_do_not_con
                 .storage()
                 .exists()
         );
+    }
+}
+
+#[tokio::test]
+async fn file_answer_claims_freeze_replays_and_release_only_before_admission() {
+    use super::super::local_contract_tests::prepared_local_run;
+    use openengine_cluster_protocol::RequestResolution;
+    for admitted in [false, true] {
+        let root =
+            tempfile::tempdir_in(std::env::temp_dir().canonicalize().assert_value()).assert_value();
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir(&workspace).assert_value();
+        let backend = LocalCliBackend::new(
+            root.path().join("state"),
+            "unused".into(),
+            workspace.clone(),
+            "git".into(),
+        );
+        let schema = serde_json::from_value(json!({"kind":"record","fields":{
+            "file":{"required":true,"type":{"kind":"filepath"}}
+        }}))
+        .assert_value();
+        let (recovery, _) = suspended_run_with_output(&backend, false, schema).await;
+        let original = workspace.join("answer.csv");
+        std::fs::write(&original, "accepted answer").assert_value();
+        let params = resume(Some(RunResumeFrom::Answer {
+            signals: Default::default(),
+            output: json!({"file":original}),
+        }));
+        let mut prepared = prepared_local_run(
+            params.successor_run_id.clone(),
+            recovery.submission.clone(),
+            workspace,
+        );
+        prepared.delivery_run_id = params.run_id.clone();
+        let mut resolution = backend.resolve_local_request(&params).await.assert_value();
+        let claim = backend
+            .accept_request_files(&params, &prepared, &mut resolution)
+            .await
+            .assert_value()
+            .assert_value();
+        let Some(RequestResolution::Answer { answer }) = &resolution else {
+            panic!("expected answer")
+        };
+        let accepted = PathBuf::from(answer.output["file"].as_str().assert_value());
+        assert_ne!(accepted, original);
+        std::fs::write(&original, "edited original").assert_value();
+        let mut replay = backend.resolve_local_request(&params).await.assert_value();
+        assert!(
+            backend
+                .accept_request_files(&params, &prepared, &mut replay)
+                .await
+                .assert_value()
+                .is_none()
+        );
+        assert_eq!(replay, resolution);
+        let files =
+            crate::native_v2_cli::files::workspace_files(&backend.state_root).assert_value();
+        assert_eq!(
+            files
+                .materialize_file_inputs(&params.run_id, true)
+                .assert_value()
+                .len(),
+            1
+        );
+        assert_eq!(std::fs::read(&accepted).assert_value(), b"accepted answer");
+        if admitted {
+            create_contract_run(&backend, &params.successor_run_id, &recovery.submission).await;
+        }
+        backend
+            .release_refused_input_claim(&params.successor_run_id, &claim)
+            .await
+            .assert_value();
+        assert_eq!(
+            files.file_input_roots(&params.run_id).assert_value().len(),
+            usize::from(admitted)
+        );
+        assert_eq!(accepted.exists(), admitted);
+        assert_eq!(std::fs::read(&original).assert_value(), b"edited original");
+    }
+}
+
+#[tokio::test]
+async fn file_answer_validation_rolls_back_its_own_pin_without_dispatching() {
+    use super::super::local_contract_tests::prepared_local_run;
+    use openengine_cluster_protocol::{RequestAnswer, RequestResolution};
+    let root =
+        tempfile::tempdir_in(std::env::temp_dir().canonicalize().assert_value()).assert_value();
+    let workspace = root.path().join("workspace");
+    std::fs::create_dir(&workspace).assert_value();
+    let backend = LocalCliBackend::new(
+        root.path().join("state"),
+        "unused".into(),
+        workspace.clone(),
+        "git".into(),
+    );
+    let schema = serde_json::from_value(json!({"kind":"record","fields":{
+        "file":{"required":true,"type":{"kind":"filepath"}},
+        "feedback":{"required":true,"type":{"kind":"string"}}
+    }}))
+    .assert_value();
+    let (recovery, ledger) = suspended_run_with_output(&backend, false, schema).await;
+    let before = ledger
+        .get(&resume(None).run_id)
+        .await
+        .assert_value()
+        .assert_value();
+    let params = resume(None);
+    let mut prepared = prepared_local_run(
+        params.successor_run_id.clone(),
+        recovery.submission,
+        workspace.clone(),
+    );
+    prepared.delivery_run_id = params.run_id.clone();
+    let original = workspace.join("answer.csv");
+    std::fs::write(&original, "keep original").assert_value();
+    // Exercise the adapter's final validation after it has acquired a file claim.
+    let mut resolution = Some(RequestResolution::Answer {
+        answer: RequestAnswer {
+            signals: Default::default(),
+            output: json!({"file":original,"feedback":"x".repeat(crate::v2_run_ledger::MAX_EVENT_BYTES)}),
+        },
+    });
+    let error = backend
+        .accept_request_files(&params, &prepared, &mut resolution)
+        .await
+        .assert_error();
+    assert!(error.to_string().contains("exceeds"), "{error}");
+    let files = crate::native_v2_cli::files::workspace_files(&backend.state_root).assert_value();
+    assert!(
+        files
+            .file_input_roots(&params.run_id)
+            .assert_value()
+            .is_empty()
+    );
+    assert!(
+        !backend
+            .paths(&params.successor_run_id)
+            .assert_value()
+            .storage()
+            .exists()
+    );
+    assert_eq!(
+        ledger
+            .get(&params.run_id)
+            .await
+            .assert_value()
+            .assert_value(),
+        before
+    );
+    assert_eq!(std::fs::read(original).assert_value(), b"keep original");
+    assert!(
+        backend
+            .resolve_local_request(&params)
+            .await
+            .assert_value()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn file_answer_refusals_preserve_history_and_create_no_successor() {
+    use super::super::local_contract_tests::prepared_local_run;
+    use openengine_cluster_protocol::{RequestAnswer, RequestResolution};
+    for state in ["missing", "admitted", "upload-unavailable"] {
+        let root =
+            tempfile::tempdir_in(std::env::temp_dir().canonicalize().assert_value()).assert_value();
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir(&workspace).assert_value();
+        let original = workspace.join("original.csv");
+        std::fs::write(&original, "preserve original").assert_value();
+        let backend = LocalCliBackend::new(
+            root.path().join("state"),
+            "unused".into(),
+            workspace.clone(),
+            "git".into(),
+        );
+        let params = resume(Some(RunResumeFrom::Answer {
+            signals: Default::default(),
+            output: json!({"file":{"kind":"staged","runId":"missing-upload","operation":"answer"}}),
+        }));
+        let (submission, ledger) = if state == "upload-unavailable" {
+            let schema = serde_json::from_value(json!({"kind":"record","fields":{
+                "file":{"required":true,"type":{"kind":"filepath"}}
+            }}))
+            .assert_value();
+            let (recovery, ledger) = suspended_run_with_output(&backend, false, schema).await;
+            (recovery.submission, ledger)
+        } else {
+            let submission = contract_submission("file-answer-refusal");
+            let ledger = if state == "missing" {
+                let storage = backend.create_run_storage(&params.run_id).assert_value();
+                SqliteRunLedger::open(storage.join("runs.sqlite3")).assert_value()
+            } else {
+                create_contract_run(&backend, &params.run_id, &submission).await
+            };
+            (submission, ledger)
+        };
+        let before = ledger.get(&params.run_id).await.assert_value();
+        let mut prepared =
+            prepared_local_run(params.successor_run_id.clone(), submission, workspace);
+        prepared.delivery_run_id = params.run_id.clone();
+        let resolved = backend.resolve_local_request(&params).await;
+        if state == "upload-unavailable" {
+            assert!(resolved.assert_value().is_some());
+        } else {
+            let error = resolved.assert_error().to_string();
+            assert!(error.contains("suspended"), "{state}: {error}");
+        }
+        let RunResumeFrom::Answer { signals, output } = params.from.clone().assert_value() else {
+            unreachable!()
+        };
+        let mut resolution = Some(RequestResolution::Answer {
+            answer: RequestAnswer { signals, output },
+        });
+        let error = backend
+            .accept_request_files(&params, &prepared, &mut resolution)
+            .await
+            .assert_error()
+            .to_string();
+        let expected = match state {
+            "missing" => "request is unavailable",
+            "admitted" => "run has no request",
+            _ => "$.output:",
+        };
+        assert!(error.contains(expected), "{state}: {error}");
+        backend
+            .release_answer_uploads(&params.run_id, &json!({}))
+            .await
+            .assert_value();
+        assert_eq!(ledger.get(&params.run_id).await.assert_value(), before);
+        assert!(
+            !backend
+                .paths(&params.successor_run_id)
+                .assert_value()
+                .storage()
+                .exists()
+        );
+        if let Some(files) =
+            crate::native_v2_cli::files::input_files_if_present(&backend.state_root).assert_value()
+        {
+            assert!(
+                files
+                    .file_input_roots(&params.run_id)
+                    .assert_value()
+                    .is_empty()
+            );
+        }
+        assert_eq!(std::fs::read(original).assert_value(), b"preserve original");
     }
 }

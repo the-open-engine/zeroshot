@@ -323,6 +323,8 @@ impl CheckpointSeed {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct StorageConfiguration {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    inputs: Vec<PathBuf>,
     format: u32,
     repository: PathBuf,
     program: restic::ResticProgram,
@@ -346,6 +348,7 @@ struct CaptureState {
 
 /// Deduplicated local and direct-target storage backed by one Restic recovery-lineage repository.
 pub struct ResticCheckpointStore {
+    inputs: Vec<PathBuf>,
     run_log: OnceLock<(RunId, Arc<dyn crate::v2_run_ledger::RunLedger>)>,
     redactions: Vec<String>,
     #[cfg(test)]
@@ -376,6 +379,22 @@ pub(crate) struct ResticCheckpointStoreTestConfig {
     pub(crate) workspace: PathBuf,
     pub(crate) writers: BTreeSet<NodeName>,
     pub(crate) program: restic::ResticProgram,
+}
+
+fn copy_checkpoint_inputs(
+    inputs: &[PathBuf],
+    snapshot_root: &Path,
+    operation: &filesystem::SnapshotOperation,
+) -> std::io::Result<()> {
+    if inputs.is_empty() {
+        return Ok(());
+    }
+    let destination = snapshot_root.join("inputs");
+    crate::execution::platform::private_directory(&destination)?;
+    for (index, root) in inputs.iter().enumerate() {
+        operation.copy(root, &destination.join(index.to_string()))?;
+    }
+    Ok(())
 }
 
 impl ResticCheckpointStore {
@@ -425,6 +444,7 @@ impl ResticCheckpointStore {
             restic::ResticProgram::fake(&repository)
         });
         Ok(Self {
+            inputs: Vec::new(),
             run_log: OnceLock::new(),
             redactions: Vec::new(),
             #[cfg(test)]
@@ -445,6 +465,7 @@ impl ResticCheckpointStore {
     #[cfg(test)]
     pub(crate) fn with_program(config: ResticCheckpointStoreTestConfig) -> Self {
         Self {
+            inputs: Vec::new(),
             run_log: OnceLock::new(),
             redactions: Vec::new(),
             restic_deadline: None,
@@ -459,6 +480,12 @@ impl ResticCheckpointStore {
             writers: config.writers,
             state: Arc::default(),
         }
+    }
+
+    #[must_use]
+    pub fn with_file_inputs(mut self, inputs: Vec<PathBuf>) -> Self {
+        self.inputs = inputs;
+        self
     }
 
     #[must_use]
@@ -520,24 +547,26 @@ impl ResticCheckpointStore {
         let workspace = self.workspace.clone();
         let operation = filesystem::SnapshotOperation::current(self.stopping.clone());
         let conversations = self.conversations.lock().await.clone();
+        let inputs = self.inputs.clone();
         let operation_stop = self.stopping.clone();
         let (stage, snapshot) = tokio::task::spawn_blocking(move || {
             let stages = directory.join("staging");
             crate::execution::platform::private_directory(&stages)?;
             let stage = filesystem::private_stage(&stages, ".capture-")?;
+            // Windows canonicalization gives descendants an extended-length path. Accepted
+            // input names can otherwise exceed MAX_PATH inside this nested snapshot stage.
+            let stage_root = stage.path().canonicalize()?;
             let snapshot = filesystem::capture_with(
                 &workspace,
-                &stage.path().join("snapshots"),
+                &stage_root.join("snapshots"),
                 &(),
                 &operation,
             )?;
+            let snapshot_root = stage_root.join("snapshots").join(snapshot.as_str());
+            copy_checkpoint_inputs(&inputs, &snapshot_root, &operation)?;
             if let Some(conversations) = conversations {
                 // This optional payload must never prevent workspace checkpoint publication.
-                let target = stage
-                    .path()
-                    .join("snapshots")
-                    .join(snapshot.as_str())
-                    .join("conversations");
+                let target = snapshot_root.join("conversations");
                 let request = operation_stop
                     .clone()
                     .unwrap_or_else(|| tokio::sync::watch::channel(false).1);
@@ -584,6 +613,7 @@ impl ResticCheckpointStore {
     async fn prepare_storage(&self) -> Result<(), CheckpointError> {
         crate::execution::platform::private_directory(&self.directory)?;
         let expected = StorageConfiguration {
+            inputs: self.inputs.clone(),
             format: STORAGE_FORMAT,
             repository: std::path::absolute(&self.repository)?,
             program: self.program.clone(),
@@ -953,17 +983,48 @@ pub(crate) async fn restore_with(
             tokio::task::spawn_blocking(move || {
                 // Retain the disposable stage until validation and replacement have both completed.
                 let _stage = stage;
-                filesystem::restore_staged_with(&restored, &workspace, &operation)
+                restore_staged_checkpoint(&restored, &workspace, &configuration.inputs, &operation)
             })
             .await
             .map_err(|_| catalog::invalid("checkpoint replacement task failed"))?
         }
         // Hosted preparation drops this future on force-stop or at its timeout and then cleans up
         // the workspace. Replacement therefore stays inside one poll: no writer outlives the drop.
-        None => filesystem::restore_staged(&restored, workspace),
+        None => restore_staged_checkpoint(
+            &restored,
+            workspace,
+            &configuration.inputs,
+            &filesystem::SnapshotOperation::uncancelled(),
+        ),
     };
     replaced.map_err(|error| progress.failed("replacing the workspace", error))?;
     Ok(seed)
+}
+
+fn restore_staged_checkpoint(
+    restored: &Path,
+    workspace: &Path,
+    inputs: &[PathBuf],
+    operation: &filesystem::SnapshotOperation,
+) -> std::io::Result<()> {
+    let mut stages = Vec::new();
+    for (index, root) in inputs.iter().enumerate() {
+        let parent = root
+            .parent()
+            .ok_or_else(|| std::io::Error::other("input root has no parent"))?;
+        let stage = filesystem::private_stage(parent, ".input-restore-")?;
+        operation.copy(
+            &restored.join("inputs").join(index.to_string()),
+            &stage.path().join("tree"),
+        )?;
+        stages.push((stage, root));
+    }
+    filesystem::restore_staged_with(restored, workspace, operation)?;
+    for (stage, root) in stages {
+        crate::native_v2_files::inputs::remove_input_tree(root)?;
+        std::fs::rename(stage.path().join("tree"), root)?;
+    }
+    Ok(())
 }
 
 struct RestoreProgress {

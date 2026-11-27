@@ -1265,19 +1265,25 @@ fn explicit_stop_of_reconstructed_suspended_run_disposes_only_managed_folder() {
     for managed in [false, true] {
         let fixture = Fixture::new().outside_workspace();
         runtime(&fixture, true);
-        let state =
+        let text =
             json!({"kind":"record","fields":{"text":{"type":{"kind":"string"},"required":true}}});
+        let mut state = text.clone();
+        state["fields"]["data"] = json!({"type":{"kind":"filepath"},"required":true});
         let mut graph: Value =
             serde_json::from_slice(&fs::read(fixture.root.path("graph.json")).unwrap()).unwrap();
         graph["initialInput"] = state.clone();
         graph["root"]["state"] = state.clone();
         graph["root"]["children"] = json!([
-            {"kind":"verifier","name":"approval","worker":"builtin.request.ask@1","input":state,
+            {"kind":"verifier","name":"approval","worker":"builtin.request.ask@1","input":text,
              "output":{"kind":"record","fields":{}},"signals":{},"diagnostic":{"kind":"record","fields":{"message":{"type":{"kind":"string"},"required":true}}},
              "attempts":1,"inputBindings":[{"target":["text"],"value":{"source":"state","path":["text"]}}],"writeBindings":[]},
             {"kind":"succeed","name":"done","output":{"kind":"null"},"bindings":[]}]);
         fixture.write("graph.json", &graph);
-        fixture.write("input.json", &json!({"text":"Continue?"}));
+        fixture.write(
+            "input.json",
+            &json!({"text":"Continue?","data":fixture.workspace.join("seed")}),
+        );
+        fs::write(fixture.workspace.join("live-output"), "keep user output").unwrap();
         let mut plan: Value =
             serde_json::from_slice(&fs::read(fixture.root.path("runtime.json")).unwrap()).unwrap();
         plan["nodes"] = json!({"approval":{"kind":"request"}});
@@ -1290,6 +1296,22 @@ fn explicit_stop_of_reconstructed_suspended_run_disposes_only_managed_folder() {
         let id = receipt(&command.output().unwrap());
         let status = settled(&fixture, &id, "suspended");
         let root = Path::new(status["workspace"]["localDirectory"].as_str().unwrap());
+        let recovery: Value = serde_json::from_slice(
+            &fs::read(
+                fixture
+                    .root
+                    .path(&format!("state/runs/{id}/workspace-recovery.json")),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let input = Path::new(
+            recovery["submission"]["initialInput"]["data"]
+                .as_str()
+                .unwrap(),
+        );
+        assert_eq!(fs::read(input).unwrap(), b"seed");
+        fs::write(fixture.workspace.join("seed"), "latest user edit").unwrap();
         // Wait for the native process to exit, forcing reconstructed cleanup on every OS.
         let ready: Value = serde_json::from_slice(
             &fs::read(
@@ -1308,10 +1330,16 @@ fn explicit_stop_of_reconstructed_suspended_run_disposes_only_managed_folder() {
         }
         success(&fixture.command(&["force-stop", &id]).output().unwrap());
         assert_eq!(root.exists(), !managed);
-        if managed {
-            assert_eq!(input_objects(&fixture), 0);
-        }
-        assert_eq!(fs::read(fixture.workspace.join("seed")).unwrap(), b"seed");
+        assert!(!input.exists());
+        assert_eq!(input_objects(&fixture), 0);
+        assert_eq!(
+            fs::read(fixture.workspace.join("seed")).unwrap(),
+            b"latest user edit"
+        );
+        assert_eq!(
+            fs::read(fixture.workspace.join("live-output")).unwrap(),
+            b"keep user output"
+        );
     }
 }
 

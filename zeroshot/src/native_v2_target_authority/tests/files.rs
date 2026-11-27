@@ -117,6 +117,58 @@ async fn optional_file_mount_preserves_existing_host_authentication_before_body_
         response.json::<Value>().await.assert_value(),
         json!({"kind":"list", "paths":[]})
     );
+    let source = temp.path().join("upload");
+    std::fs::write(&source, b"private upload").unwrap();
+    let mut tree = Vec::new();
+    crate::native_v2_files::pack(&source, &mut tree).unwrap();
+    let metadata = serde_json::to_vec(&FileRequest::Stage {
+        run_id: RunId::new("upload"),
+        operation: IdempotencyKey::new("answer").unwrap(),
+    })
+    .unwrap();
+    let mut body = (metadata.len() as u32).to_be_bytes().to_vec();
+    body.extend(metadata);
+    body.extend(tree);
+    let response = client
+        .post(format!("http://{address}/native-v2/files"))
+        .bearer_auth("control-token")
+        .header("Content-Type", TARGET_FILES_MEDIA_TYPE)
+        .body(body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let objects = temp.path().join("files/objects");
+    assert_eq!(std::fs::read_dir(&objects).unwrap().count(), 1);
+    let metadata = serde_json::to_vec(&FileRequest::ReleaseStaged {
+        run_id: RunId::new("upload"),
+        operation: IdempotencyKey::new("answer").unwrap(),
+    })
+    .unwrap();
+    let mut body = (metadata.len() as u32).to_be_bytes().to_vec();
+    body.extend(metadata);
+    for (token, expected, remaining) in [
+        ("wrong-token", reqwest::StatusCode::UNAUTHORIZED, 1),
+        ("control-token", reqwest::StatusCode::OK, 0),
+        ("control-token", reqwest::StatusCode::OK, 0),
+    ] {
+        let response = client
+            .post(format!("http://{address}/native-v2/files"))
+            .bearer_auth(token)
+            .header("Content-Type", TARGET_FILES_MEDIA_TYPE)
+            .body(body.clone())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+        if expected == reqwest::StatusCode::OK {
+            assert_eq!(
+                response.json::<Value>().await.unwrap(),
+                json!({"kind":"released"})
+            );
+        }
+        assert_eq!(std::fs::read_dir(&objects).unwrap().count(), remaining);
+    }
     task.abort();
 }
 

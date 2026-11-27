@@ -32,6 +32,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Cannot list Windows portable CLI tests' }
 foreach ($required in $containedTests) {
     if ($inventory -notcontains "${required}: test") { throw "Missing Windows regression: $required" }
 }
+$inputOutput = 'startup::file_inputs::ordinary_state_path_allows_input_filepath_outputs_and_refuses_foreign_or_redirected_roots'
+if ($inventory -notcontains "${inputOutput}: test") { throw "Missing Windows regression: $inputOutput" }
 
 # Direct targets retain file-store ancestor guards while UI/profile state is atomically replaced.
 $library = @($tests | Where-Object { $_.target.name -eq 'zeroshot_engine' })
@@ -40,6 +42,8 @@ $stateInventory = @(& $library[0].executable --list)
 if ($LASTEXITCODE -ne 0) { throw 'Cannot list Windows native library tests' }
 $stateCommit = 'execution::platform::tests::private_state_round_trips_and_replaces_an_existing_file'
 if ($stateInventory -notcontains "${stateCommit}: test") { throw "Missing Windows regression: $stateCommit" }
+$inputAlias = 'native_v2_files::tests::inputs::readonly_input_alias_cannot_change_external_file_permissions'
+if ($stateInventory -notcontains "${inputAlias}: test") { throw "Missing Windows regression: $inputAlias" }
 
 # The observation suite invokes isolated wire-contract controls. Compile their leaf tests here
 # as well, before CI starts the bounded native execution host (including the non-UI profile).

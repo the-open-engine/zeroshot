@@ -589,8 +589,21 @@ fn build_local_candidate_config(
         workspace: workspace.to_owned(),
         delivery,
     };
+    let roots = if let Some(state) = storage.parent().and_then(Path::parent) {
+        match crate::native_v2_cli::files::input_files_if_present(state)
+            .map_err(|_| LocalCompositionError::Storage)?
+        {
+            Some(files) => files
+                .file_input_authority_roots(&delivery_run_id)
+                .map_err(|_| LocalCompositionError::Storage)?,
+            None => Vec::new(),
+        }
+    } else {
+        Vec::new()
+    };
     if owner_scoped {
         build_local_owner_native_v2_candidate(admitted, config, native_environment.clone())
+            .map(|runner| runner.with_file_inputs(roots))
             .map_err(Into::into)
     } else {
         build_local_native_v2_candidate_with_authority(
@@ -605,6 +618,7 @@ fn build_local_candidate_config(
                 local_git_environment: Some(native_environment.clone()),
             },
         )
+        .map(|runner| runner.with_file_inputs(roots))
         .map_err(Into::into)
     }
 }

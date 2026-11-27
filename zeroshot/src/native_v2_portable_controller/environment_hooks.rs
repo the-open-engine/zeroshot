@@ -62,7 +62,7 @@ impl EnvironmentHooks {
         {
             return None;
         }
-        let shell = HookShell {
+        let mut shell = HookShell {
             workspace: bootstrap.workspace.clone(),
             readiness: bootstrap.storage.join("startup-status"),
             environment: bootstrap
@@ -72,6 +72,17 @@ impl EnvironmentHooks {
                 .map(|(name, value)| (name.clone(), value.clone()))
                 .collect(),
         };
+        if let Some(state) = bootstrap.storage.parent().and_then(std::path::Path::parent)
+            && let Ok(Some(files)) = crate::native_v2_cli::files::input_files_if_present(state)
+            && let Ok(roots) = files.file_input_roots(&bootstrap.delivery_run_id)
+            && !roots.is_empty()
+            && let Ok(location) = files.input_location(&bootstrap.delivery_run_id)
+        {
+            shell.environment.insert(
+                "ZEROSHOT_INPUTS".into(),
+                location.to_string_lossy().into_owned(),
+            );
+        }
         Some(Arc::new(Self {
             shell,
             workspace_identity: identity.clone(),
@@ -105,6 +116,12 @@ impl EnvironmentHooks {
         );
         let mut shell = self.shell.clone();
         shell.environment.extend(values);
+        // The stored location is host-owned, independently of authored variables/connections.
+        if let Some(location) = self.shell.environment.get("ZEROSHOT_INPUTS") {
+            shell
+                .environment
+                .insert("ZEROSHOT_INPUTS".into(), location.clone());
+        }
         shell
             .environment
             .insert("ZEROSHOT_RUN_ID".into(), request.run_id.as_str().into());

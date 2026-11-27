@@ -16,6 +16,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use super::*;
 
+#[path = "file_answer_tests.rs"]
+mod file_answer_tests;
 #[path = "reconnect_tests.rs"]
 mod reconnect_tests;
 #[path = "steering_command_tests.rs"]
@@ -73,6 +75,10 @@ struct StubConnector<T = FailingTransport> {
     transport: Arc<T>,
     hosted_status: Option<CliRunStatusResult>,
     status_reads: Mutex<Vec<(String, RunStatusParams)>>,
+    answer_files: Option<(
+        openengine_cluster_protocol::InboxShowResult,
+        crate::native_v2_files::WorkspaceFiles,
+    )>,
 }
 
 impl StubConnector {
@@ -83,6 +89,7 @@ impl StubConnector {
             }),
             hosted_status,
             status_reads: Mutex::default(),
+            answer_files: None,
         }
     }
 }
@@ -97,6 +104,46 @@ where
     T: SubscriptionTransport + Send + Sync + 'static,
 {
     type Transport = T;
+
+    async fn validate_request_ask(&self, _name: &str) -> Result<(), NativeV2CliError> {
+        self.answer_files
+            .as_ref()
+            .map(|_| ())
+            .ok_or_else(|| called("validate_request_ask"))
+    }
+
+    async fn hosted_inbox_show(
+        &self,
+        name: &str,
+        params: openengine_cluster_protocol::InboxShowParams,
+    ) -> Result<Option<openengine_cluster_protocol::InboxShowResult>, NativeV2CliError> {
+        assert_eq!(name, "remote");
+        if let Some((request, _)) = &self.answer_files {
+            assert_eq!(params.run_id, request.run_id);
+            assert!(params.part_id.is_none() || params.part_id.as_ref() == Some(&request.part_id));
+            return Ok(Some(request.clone()));
+        }
+        Ok(None)
+    }
+
+    async fn release_staged_uploads(
+        &self,
+        name: &str,
+        uploads: &[crate::native_v2_files::FilePin],
+    ) -> Result<(), NativeV2CliError> {
+        assert_eq!(name, "remote");
+        let (_, files) = self.answer_files.as_ref().expect("request file host");
+        for upload in uploads {
+            files.host.release_upload(
+                &crate::native_v2_files::FileAccess {
+                    target: &files.target,
+                    identity: &files.identity,
+                },
+                upload,
+            )?;
+        }
+        Ok(())
+    }
 
     async fn add(&self, _request: TargetAdd) -> Result<(), NativeV2CliError> {
         Err(called("add"))

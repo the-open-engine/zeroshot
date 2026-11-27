@@ -66,6 +66,14 @@ impl TargetHttpControlAuthority {
 
 #[async_trait]
 impl TargetControlAuthority for TargetHttpControlAuthority {
+    async fn release_staged_uploads(
+        &self,
+        target: &TargetRecord,
+        uploads: &[zeroshot_engine::native_v2_files::FilePin],
+    ) -> Result<(), TargetAuthorityError> {
+        self.release_uploads(target, uploads).await
+    }
+
     fn redact_error(&self, error: TargetAuthorityError) -> TargetAuthorityError {
         match &self.machine {
             Some(machine) => error.redact_secret(&machine.api_key),

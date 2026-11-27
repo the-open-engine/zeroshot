@@ -38,6 +38,7 @@ async fn named_steer_routes_to_observed_part_and_checks_the_receipt_before_print
             transport: Arc::new(NdjsonTransport::new(client_read, client_write)),
             hosted_status: Some(active),
             status_reads: Mutex::default(),
+            answer_files: None,
         });
         let peer = tokio::spawn(async move {
             let mut read = BufReader::new(server_read);

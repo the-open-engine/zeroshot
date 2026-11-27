@@ -310,7 +310,7 @@ impl<'a> CopilotRpc<'a> {
             &self.invocation.response,
             text,
             ProviderSchemaDialect::OpenAiStrict,
-            Some(&self.workspace),
+            Some(self.invocation.filepaths(&self.workspace)),
         )?;
         if let Some(error) = response.correction_error() {
             if let Some(mut output) = provider_error_output("Copilot", &error, &self.redactions)? {

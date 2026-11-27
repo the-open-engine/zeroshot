@@ -65,3 +65,29 @@ pub(crate) fn workspace_files(
         directory: root.join("workspace-inputs"),
     })
 }
+
+/// Scalar-only local runs need no file service or private input state.
+pub(crate) fn input_files_if_present(
+    root: &std::path::Path,
+) -> Result<Option<crate::native_v2_files::WorkspaceFiles>, NativeV2CliError> {
+    if !root
+        .join("workspace-inputs/file-inputs")
+        .try_exists()
+        .map_err(|error| NativeV2CliError::Usage(error.to_string()))?
+    {
+        return Ok(None);
+    }
+    workspace_files(root).map(Some)
+}
+
+/// Refused uploads may exist before any accepted-input manifest has been created.
+pub(crate) fn release_staged_uploads(
+    root: &std::path::Path,
+    schema: &openengine_cluster_protocol::PayloadType,
+    value: &serde_json::Value,
+) -> Result<(), NativeV2CliError> {
+    if root.join("files").try_exists()? {
+        workspace_files(root)?.release_staged_inputs(schema, value)?;
+    }
+    Ok(())
+}

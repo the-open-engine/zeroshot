@@ -29,6 +29,16 @@ fn file_capability_is_independent_and_legacy_discovery_readers_ignore_it() {
 
 #[test]
 fn file_requests_are_byte_free_strict_and_validate_portable_members() {
+    let release = json!({"action":"release_staged", "runId":"upload", "operation":"selection"});
+    assert_eq!(
+        serde_json::to_value(serde_json::from_value::<FileRequest>(release.clone()).unwrap())
+            .unwrap(),
+        release
+    );
+    assert_eq!(
+        serde_json::to_value(FileResponse::Released {}).unwrap(),
+        json!({"kind":"released"})
+    );
     let selection = json!({"address":{"scope":{"kind":"user"},"path":"datasets/tree"},"member":"nested/file.bin"});
     let request = json!({"action":"download", "selection":selection});
     assert_eq!(

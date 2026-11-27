@@ -24,6 +24,32 @@ pub(in super::super) enum FileReply {
 }
 
 impl TargetHttpControlAuthority {
+    pub(super) async fn release_uploads(
+        &self,
+        target: &TargetRecord,
+        uploads: &[zeroshot_engine::native_v2_files::FilePin],
+    ) -> Result<(), TargetAuthorityError> {
+        let scratch = self.refresh_lock_directory.join("file-transfers");
+        let staged = new_transfer(&scratch).map_err(file_io)?;
+        for upload in uploads {
+            match self
+                .file_request(
+                    target,
+                    &FileRequest::ReleaseStaged {
+                        run_id: upload.run_id.clone(),
+                        operation: upload.operation.clone(),
+                    },
+                    (&staged, &scratch),
+                )
+                .await?
+            {
+                FileReply::Json(FileResponse::Released {}) => {}
+                _ => return Err(authority_error("unexpected upload release response")),
+            }
+        }
+        Ok(())
+    }
+
     pub(in super::super) async fn file_request(
         &self,
         target: &TargetRecord,

@@ -106,6 +106,7 @@ fn invocation(session: Arc<dyn NodeSession>, successor: bool, harness: &str) -> 
     }
     .into_request();
     DriverInvocation {
+        file_roots: Vec::new(),
         dispatch: Default::default(),
         host_context: None,
         node: request.invocation,

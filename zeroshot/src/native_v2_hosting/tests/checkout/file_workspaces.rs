@@ -64,8 +64,10 @@ async fn root_direct_workspace_startup_observes_seeds_before_selected_checkpoint
 
 async fn exercise_workspace_recovery(startup: bool, exit: RunRuntimeExit) {
     let mut fixture = fixture(None).await;
-    let files = crate::native_v2_cli::files::workspace_files(&fixture.root.child("library-state"))
-        .assert_value();
+    let mut files =
+        crate::native_v2_cli::files::workspace_files(&fixture.root.child("library-state"))
+            .assert_value();
+    files.directory = fixture.config.storage_root.join("workspace-inputs");
     let source = fixture.root.child("source-folder");
     fs::create_dir_all(source.join("empty")).assert_value();
     fs::write(source.join("data"), b"original seed").assert_value();
@@ -92,9 +94,20 @@ async fn exercise_workspace_recovery(startup: bool, exit: RunRuntimeExit) {
             local_root: None,
         })
         .assert_value();
+    let frozen = files
+        .freeze_file_inputs(crate::native_v2_files::inputs::InputAdmission {
+            run_id: &fixture.run_id,
+            owner: &fixture.run_id,
+            key: &IdempotencyKey::new("explicit-input").assert_value(),
+            schema: &openengine_cluster_protocol::PayloadType::Filepath,
+            value: &json!(source.join("data")),
+            local_root: Some(&source),
+        })
+        .assert_value();
+    let input = PathBuf::from(frozen.value.as_str().unwrap());
     fixture.admitted.environment = Some(
         serde_json::from_value(if startup {
-            json!({"startup":"test ! -d .git; test -d nested/empty; pwd > startup-path"})
+            json!({"startup":"test ! -d .git; test -d nested/empty; test -n \"$ZEROSHOT_INPUTS\"; find \"$ZEROSHOT_INPUTS\" -type f -exec cat {} \\; > explicit-input.txt; pwd > startup-path"})
         } else {
             json!({})
         })
@@ -135,12 +148,21 @@ async fn exercise_workspace_recovery(startup: bool, exit: RunRuntimeExit) {
         );
     }
     assert!(!workspace.join(".git").exists());
+    assert_eq!(fs::read(&input).assert_value(), b"original seed");
+    if startup {
+        assert_eq!(
+            fs::read(workspace.join("explicit-input.txt")).assert_value(),
+            b"original seed"
+        );
+    }
+    fs::write(&input, b"selected explicit input").assert_value();
     fs::write(workspace.join("nested/data"), b"checkpoint edit").assert_value();
     capture_checkpoint(&capsule).await;
     let selected = fixture.checkpoints(&fixture.run_id).await.checkpoints[0]
         .checkpoint_id
         .clone();
     fs::write(workspace.join("nested/data"), b"later run edit").assert_value();
+    fs::write(&input, b"later explicit edit").assert_value();
     fs::write(source.join("data"), b"new library bytes").assert_value();
     upload(&files, &selection, &source, "replacement");
     fs::remove_dir_all(&source).assert_value();
@@ -150,6 +172,17 @@ async fn exercise_workspace_recovery(startup: bool, exit: RunRuntimeExit) {
         .destroy_or_confirm_absent(RunRuntimeExit::Failed)
         .await
         .assert_value();
+    #[cfg(unix)]
+    if unsafe { libc::geteuid() } == 0 {
+        use std::os::unix::fs::MetadataExt;
+        let metadata = fs::metadata(input.parent().unwrap()).assert_value();
+        assert_eq!(
+            metadata.uid(),
+            0,
+            "retained input roots return to the controller"
+        );
+        assert_eq!(metadata.mode() & 0o777, 0o700);
+    }
     rebuild(&mut fixture);
     let successor = RunId::new("workspace-successor");
     let restored = fixture
@@ -169,6 +202,7 @@ async fn exercise_workspace_recovery(startup: bool, exit: RunRuntimeExit) {
         b"checkpoint edit"
     );
     assert!(!workspace.join(".git").exists());
+    assert_eq!(fs::read(&input).assert_value(), b"selected explicit input");
     assert_eq!(
         fs::read(fixture.root.child("git-script.attempts")).assert_value(),
         b""
@@ -178,6 +212,10 @@ async fn exercise_workspace_recovery(startup: bool, exit: RunRuntimeExit) {
         .destroy_or_confirm_absent(exit)
         .await
         .assert_value();
+    assert!(
+        !input.exists(),
+        "final recovery closure releases explicit inputs"
+    );
     let destination = fixture.root.child("released-input-probe");
     fs::create_dir(&destination).assert_value();
     assert!(files.materialize(&fixture.run_id, &destination).is_err());

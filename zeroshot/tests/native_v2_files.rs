@@ -135,6 +135,29 @@ fn assert_tree(path: &Path) {
 async fn actual_cli_round_trips_local_binary_tree_empty_members_and_scopes() {
     let fixture = Fixture::new();
     let source = fixture.source();
+    let private = fixture
+        .cli(&["file", "stage", source.to_str().unwrap()])
+        .await;
+    assert_eq!(private["kind"], "staged");
+    let replay = fixture
+        .cli(&[
+            "file",
+            "stage",
+            source.to_str().unwrap(),
+            "--run-id",
+            private["runId"].as_str().unwrap(),
+            "--operation",
+            private["operation"].as_str().unwrap(),
+        ])
+        .await;
+    assert_eq!(replay, private);
+    assert!(
+        fixture.cli(&["file", "list"]).await["paths"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
     fixture
         .cli(&[
             "file",
@@ -257,6 +280,36 @@ async fn actual_cli_direct_target_preserves_volume_after_process_restart_and_rej
         added.status.success(),
         "{}",
         String::from_utf8_lossy(&added.stderr)
+    );
+    let private = fixture
+        .cli(&[
+            "file",
+            "stage",
+            source.to_str().unwrap(),
+            "--target",
+            "disk",
+        ])
+        .await;
+    assert_eq!(private["kind"], "staged");
+    let replay = fixture
+        .cli(&[
+            "file",
+            "stage",
+            source.to_str().unwrap(),
+            "--target",
+            "disk",
+            "--run-id",
+            private["runId"].as_str().unwrap(),
+            "--operation",
+            private["operation"].as_str().unwrap(),
+        ])
+        .await;
+    assert_eq!(replay, private);
+    assert!(
+        fixture.cli(&["file", "list", "--target", "disk"]).await["paths"]
+            .as_array()
+            .unwrap()
+            .is_empty()
     );
     fixture
         .cli(&[

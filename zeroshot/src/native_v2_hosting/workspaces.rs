@@ -17,6 +17,9 @@ pub struct HostedWorkspaceRequest<'a> {
     pub run_id: &'a RunId,
     pub workspace: &'a Path,
     pub checkpoint_directory: &'a Path,
+    /// Run-owned mutable input roots outside the checkout. Capture and restore these alongside
+    /// workspace bytes, including Git mode; they never belong to Git staging or publication.
+    pub file_inputs: &'a [std::path::PathBuf],
     /// Admitted per-run policy. False skips workspace and conversation snapshots, never durable
     /// run history, final output, comment publications or delivery receipts.
     pub workspace_checkpoints: bool,

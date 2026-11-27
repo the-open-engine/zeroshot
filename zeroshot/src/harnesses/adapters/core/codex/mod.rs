@@ -620,7 +620,7 @@ async fn resolve_codex_output(
         &turn.invocation.response,
         output.final_message()?,
         ProviderSchemaDialect::OpenAiStrict,
-        Some(turn.execution.workspace()),
+        Some(turn.invocation.filepaths(turn.execution.workspace())),
     )?;
     state
         .retry

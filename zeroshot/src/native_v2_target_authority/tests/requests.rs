@@ -10,6 +10,10 @@ use openengine_cluster_protocol::{
 #[derive(Default)]
 struct RequestAllocator {
     claims: std::sync::Mutex<BTreeMap<RunId, RunId>>,
+    files: Option<crate::native_v2_files::WorkspaceFiles>,
+    clock: Option<Arc<std::sync::atomic::AtomicU64>>,
+    refuse_claim: std::sync::atomic::AtomicBool,
+    rollback: Option<Arc<request_files::AnswerRollback>>,
 }
 #[async_trait]
 impl CapsuleAllocator for RequestAllocator {
@@ -17,12 +21,65 @@ impl CapsuleAllocator for RequestAllocator {
         true
     }
     fn suspension_policy(&self) -> Option<crate::native_v2_wait::WaitPolicy> {
-        Some(Default::default())
+        let clock = self.clock.clone();
+        Some(crate::native_v2_wait::WaitPolicy {
+            wall_clock: Arc::new(move || {
+                clock
+                    .as_ref()
+                    .map_or_else(crate::native_v2_runner::current_timestamp, |clock| {
+                        UnixTimestampMillis::new(clock.load(std::sync::atomic::Ordering::SeqCst))
+                            .unwrap()
+                    })
+            }),
+            ..Default::default()
+        })
+    }
+    async fn accept_answer_files(
+        &self,
+        request: crate::native_v2_files::inputs::InputAdmission<'_>,
+    ) -> Result<crate::native_v2_files::inputs::FrozenFileInputs, String> {
+        match &self.files {
+            Some(files) => files
+                .freeze_answer_inputs(request)
+                .map_err(|error| error.to_string()),
+            None => Ok(crate::native_v2_files::inputs::FrozenFileInputs {
+                run_id: request.run_id.clone(),
+                value: request.value.clone(),
+                claim: None,
+            }),
+        }
+    }
+    async fn release_answer_uploads(
+        &self,
+        schema: &openengine_cluster_protocol::PayloadType,
+        value: &Value,
+    ) {
+        if let Some(files) = &self.files {
+            files.release_staged_inputs(schema, value).unwrap();
+        }
+    }
+    async fn release_unadmitted_answer(
+        &self,
+        claim: &crate::native_v2_files::inputs::FileInputClaim,
+    ) {
+        if let Some(rollback) = &self.rollback {
+            rollback.entered.notify_one();
+            rollback.proceed.notified().await;
+        }
+        if let Some(files) = &self.files {
+            files.release_file_input_claim(claim).unwrap();
+        }
     }
     async fn claim_controller(
         &self,
         run: &RunId,
     ) -> Result<Arc<dyn ExclusiveControllerClaim>, ControllerClaimUnavailable> {
+        if self
+            .refuse_claim
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(ControllerClaimUnavailable);
+        }
         NoAllocation.claim_controller(run).await
     }
     async fn allocate(
@@ -102,6 +159,14 @@ impl TargetControllerFactory for RequestFactory {
     }
 }
 pub(super) async fn seed(ledger: &FakeRunLedger, index: u8, expired: bool) -> RunId {
+    seed_with_output(ledger, index, expired, json!({"kind":"record","fields":{}})).await
+}
+async fn seed_with_output(
+    ledger: &FakeRunLedger,
+    index: u8,
+    expired: bool,
+    output: Value,
+) -> RunId {
     let id = RunId::new(format!("018f5e78-7f95-7c22-8d98-3f15af20c9{index:02}"));
     let mut submission = request().submission;
     submission.graph = serde_json::from_value(json!({
@@ -124,7 +189,7 @@ pub(super) async fn seed(ledger: &FakeRunLedger, index: u8, expired: bool) -> Ru
                     "name": "approval",
                     "worker": crate::native_v2_request::ASK_WORKER_REF,
                     "input": crate::native_v2_request::input_schema().assert_value(),
-                    "output": {"kind": "record", "fields": {}},
+                    "output": output,
                     "signals": {"decision": ["approved", "rejected"]},
                     "diagnostic": crate::native_v2_wait::diagnostic_schema().assert_value(),
                     "inputBindings": [{
@@ -155,7 +220,7 @@ pub(super) async fn seed(ledger: &FakeRunLedger, index: u8, expired: bool) -> Ru
         })
         .await
         .assert_value();
-    let suspension:RunSuspension=serde_json::from_value(json!({"reason":"request","node":"approval","createdAt":1000,"request":{"id":format!("question-{index}"),"text":"Approve?","signals":{"decision":["approved","rejected"]},"output":{"kind":"record","fields":{}},"expiresAt":if expired {1001} else {UnixTimestampMillis::new(openengine_cluster_protocol::MAX_SAFE_GENERATION).assert_value().get()}}})).assert_value();
+    let suspension:RunSuspension=serde_json::from_value(json!({"reason":"request","node":"approval","createdAt":1000,"request":{"id":format!("question-{index}"),"text":"Approve?","signals":{"decision":["approved","rejected"]},"output":output,"expiresAt":if expired {1001} else {UnixTimestampMillis::new(openengine_cluster_protocol::MAX_SAFE_GENERATION).assert_value().get()}}})).assert_value();
     let RunSuspension::Request {
         request: question, ..
     } = &suspension
@@ -407,3 +472,6 @@ async fn an_earlier_question_bookmark_finds_the_new_question_and_keeps_both_vect
     assert_eq!(other.request.id.as_str(), "question-3");
     server.abort();
 }
+
+#[path = "request_files.rs"]
+mod request_files;

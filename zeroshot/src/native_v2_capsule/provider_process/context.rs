@@ -39,6 +39,19 @@ fn apply_for_platform(
     invocation: &DriverInvocation,
     windows: bool,
 ) -> Result<(), NodeRunnerError> {
+    environment.retain(|name, _| {
+        if windows {
+            !name.eq_ignore_ascii_case("ZEROSHOT_INPUTS")
+        } else {
+            name != "ZEROSHOT_INPUTS"
+        }
+    });
+    if let Some(location) = invocation.file_roots.first().and_then(|root| root.parent()) {
+        environment.insert(
+            "ZEROSHOT_INPUTS".into(),
+            location.to_string_lossy().into_owned(),
+        );
+    }
     let kind = match invocation.role {
         NodeRole::Worker => "step",
         NodeRole::Verifier => "verifier",

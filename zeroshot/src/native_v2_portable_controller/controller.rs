@@ -505,6 +505,21 @@ where
         let source =
             seed_predecessor_history(bootstrap, &mut runtime, prepared, preparation_deadline)
                 .await?;
+        if let Some(input_state) = bootstrap.storage.parent().and_then(Path::parent)
+            && let Some(input_files) =
+                crate::native_v2_cli::files::input_files_if_present(input_state)
+                    .map_err(|_| PortableControllerError::Bootstrap)?
+        {
+            input_files
+                .materialize_file_inputs(
+                    &bootstrap.delivery_run_id,
+                    bootstrap.checkpoint.is_none()
+                        && source.as_ref().is_none_or(|restore| {
+                            !matches!(restore.selection, CheckpointRestoreSelection::Continue)
+                        }),
+                )
+                .map_err(PortableControllerError::Io)?;
+        }
         require_preparing(prepared, preparation_deadline)?;
         let runtime = configure_workspace_checkpoints(prepared, bootstrap, runtime)?;
         if let Some(source) = source {
@@ -738,6 +753,20 @@ fn configure_workspace_checkpoints(
                 fallback.as_deref(),
             )
             .map_err(|error| PortableControllerError::Io(error.0))?
+            .with_file_inputs({
+                if let Some(state) = bootstrap.storage.parent().and_then(Path::parent) {
+                    match crate::native_v2_cli::files::input_files_if_present(state)
+                        .map_err(|_| PortableControllerError::Bootstrap)?
+                    {
+                        Some(files) => files
+                            .file_input_roots(&bootstrap.delivery_run_id)
+                            .map_err(PortableControllerError::Io)?,
+                        None => Vec::new(),
+                    }
+                } else {
+                    Vec::new()
+                }
+            })
             .with_redactions(super::process::startup_redactions(bootstrap))
             .with_stop_request(prepared.stopping.clone()),
         ));
@@ -838,11 +867,11 @@ impl CapsuleCleanup for PortableCheckpointCleanup {
         if matches!(exit, RunRuntimeExit::Completed) || explicit_stop {
             if let Some(workspace) = &self.managed_workspace {
                 remove_directory_if_present(workspace).map_err(|_| CapsuleCleanupUnavailable)?;
-                crate::native_v2_cli::local::release_workspace_inputs(
-                    self.directory.parent().ok_or(CapsuleCleanupUnavailable)?,
-                )
-                .map_err(|_| CapsuleCleanupUnavailable)?;
             }
+            crate::native_v2_cli::local::release_workspace_inputs(
+                self.directory.parent().ok_or(CapsuleCleanupUnavailable)?,
+            )
+            .map_err(|_| CapsuleCleanupUnavailable)?;
         }
         // Provider cleanup is authoritative; checkpoint scratch collection is best effort.
         let _ = remove_directory_if_present(&self.directory.join("staging"));
@@ -1019,13 +1048,13 @@ impl CapsuleAllocator for SingleRunAllocator {
                     None
                 };
                 remove_directory_if_present(workspace).map_err(|_| CapsuleCleanupUnavailable)?;
-                crate::native_v2_cli::local::release_workspace_inputs(
-                    self.checkpoint_directory
-                        .parent()
-                        .ok_or(CapsuleCleanupUnavailable)?,
-                )
-                .map_err(|_| CapsuleCleanupUnavailable)?;
             }
+            crate::native_v2_cli::local::release_workspace_inputs(
+                self.checkpoint_directory
+                    .parent()
+                    .ok_or(CapsuleCleanupUnavailable)?,
+            )
+            .map_err(|_| CapsuleCleanupUnavailable)?;
             crate::native_v2_supervisor::checkpoints::discard_recorded_lineage(
                 &self.checkpoint_directory,
             )

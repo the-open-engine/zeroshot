@@ -24,7 +24,10 @@ pub(super) fn validate_graph_input(
     if graph.profile != GraphProfile::Full {
         return Err(NativeV2AdmissionError::UnsupportedGraphProfile);
     }
-    graph.initial_input.validate_value(initial_input)?;
+    if let Err(error) = graph.initial_input.validate_value(initial_input) {
+        crate::native_v2_files::inputs::validate_input(&graph.initial_input, initial_input)
+            .map_err(|_| NativeV2AdmissionError::InitialInput(error))?;
+    }
     Ok(())
 }
 

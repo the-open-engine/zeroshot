@@ -983,7 +983,9 @@ fn nested_worker_and_verifier_filepaths_validate_without_publishing_plain_string
     };
     let value = json!({"paths":["tree","tree/file"],"text":"missing"});
     let outcome = worker.parse_agent_value(value).unwrap();
-    worker.validate_filepaths(&outcome, temp.path()).unwrap();
+    worker
+        .validate_filepaths(&outcome, temp.path().into())
+        .unwrap();
     let verifier = NodeResponseContract::Verifier {
         output,
         signals: Default::default(),
@@ -992,10 +994,56 @@ fn nested_worker_and_verifier_filepaths_validate_without_publishing_plain_string
     let value =
         json!({"output":{"paths":["tree/file"],"text":"missing"},"signals":{},"diagnostic":"tree"});
     let outcome = verifier.parse_agent_value(value).unwrap();
-    verifier.validate_filepaths(&outcome, temp.path()).unwrap();
+    verifier
+        .validate_filepaths(&outcome, temp.path().into())
+        .unwrap();
     std::fs::remove_file(temp.path().join("tree/file")).unwrap();
     let error = verifier
-        .validate_filepaths(&outcome, temp.path())
+        .validate_filepaths(&outcome, temp.path().into())
         .unwrap_err();
     assert!(error.to_string().contains("paths[0]"));
+}
+
+#[test]
+fn accepted_input_filepaths_are_confined_to_host_owned_roots() {
+    let temp = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+    let workspace = temp.path().join("workspace");
+    let inputs = temp.path().join("inputs");
+    std::fs::create_dir(&workspace).unwrap();
+    std::fs::create_dir(&inputs).unwrap();
+    std::fs::write(inputs.join("data.csv"), "accepted").unwrap();
+    let foreign = temp.path().join("foreign");
+    std::fs::write(&foreign, "outside").unwrap();
+    let contract = NodeResponseContract::Worker {
+        output: PayloadType::Filepath,
+    };
+    let roots = vec![inputs.clone()];
+    let context = FilepathContext {
+        workspace: &workspace,
+        inputs: &roots,
+    };
+    let outcome = contract
+        .parse_agent_value(json!(inputs.join("data.csv")))
+        .unwrap();
+    contract.validate_filepaths(&outcome, context).unwrap();
+    assert!(
+        contract
+            .validate_filepaths(&outcome, workspace.as_path().into())
+            .is_err()
+    );
+    for path in [foreign.clone(), inputs.join("../foreign")] {
+        let outcome = contract.parse_agent_value(json!(path)).unwrap();
+        assert!(contract.validate_filepaths(&outcome, context).is_err());
+    }
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&foreign, inputs.join("escape")).unwrap();
+        let outcome = contract
+            .parse_agent_value(json!(inputs.join("escape")))
+            .unwrap();
+        assert!(contract.validate_filepaths(&outcome, context).is_err());
+        std::fs::rename(&inputs, temp.path().join("moved")).unwrap();
+        std::os::unix::fs::symlink(temp.path().join("moved"), &inputs).unwrap();
+        assert!(contract.validate_filepaths(&outcome, context).is_err());
+    }
 }

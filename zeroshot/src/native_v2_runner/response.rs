@@ -62,6 +62,35 @@ impl ResponseDelivery {
     }
 }
 
+/// Filesystem authority supplied by the host, never inferred from an authored string.
+#[derive(Clone, Copy)]
+pub(crate) struct FilepathContext<'a> {
+    pub(crate) workspace: &'a Path,
+    pub(crate) inputs: &'a [std::path::PathBuf],
+}
+impl<'a> From<&'a Path> for FilepathContext<'a> {
+    fn from(workspace: &'a Path) -> Self {
+        Self {
+            workspace,
+            inputs: &[],
+        }
+    }
+}
+impl FilepathContext<'_> {
+    fn resolve(self, path: &str) -> std::io::Result<std::path::PathBuf> {
+        crate::native_v2_files::workspace_path(self.workspace, path).or_else(|original| {
+            if Path::new(path).is_absolute() {
+                for root in self.inputs {
+                    if let Ok(path) = crate::native_v2_files::input_workspace_path(root, path) {
+                        return Ok(path);
+                    }
+                }
+            }
+            Err(original)
+        })
+    }
+}
+
 impl NodeResponseContract {
     pub(crate) fn provider_schema(&self, dialect: ProviderSchemaDialect) -> Value {
         closed_object_schema(
@@ -158,7 +187,7 @@ impl NodeResponseContract {
     pub(crate) fn validate_filepaths(
         &self,
         outcome: &WorkerOutcome,
-        workspace: &Path,
+        workspace: FilepathContext<'_>,
     ) -> Result<(), NodeResponseError> {
         match (self, outcome) {
             (Self::Worker { output: schema }, WorkerOutcome::Verified { output, .. }) => {
@@ -341,7 +370,7 @@ pub(crate) fn resolve_agent_response_with_delivery(
     contract: &NodeResponseContract,
     response: &str,
     delivery: ResponseDelivery,
-    workspace: Option<&Path>,
+    workspace: Option<FilepathContext<'_>>,
 ) -> Result<AgentResponse, NodeRunnerError> {
     resolve_agent_response_rendering(
         contract,
@@ -355,7 +384,7 @@ pub(crate) fn resolve_agent_response_with_dialect(
     contract: &NodeResponseContract,
     response: &str,
     dialect: ProviderSchemaDialect,
-    workspace: Option<&Path>,
+    workspace: Option<FilepathContext<'_>>,
 ) -> Result<AgentResponse, NodeRunnerError> {
     resolve_agent_response_rendering(
         contract,
@@ -371,7 +400,7 @@ pub(crate) fn resolve_agent_response_with_schema(
     contract: &NodeResponseContract,
     response: &str,
     dialect: ProviderSchemaDialect,
-    workspace: Option<&Path>,
+    workspace: Option<FilepathContext<'_>>,
 ) -> Result<AgentResponse, NodeRunnerError> {
     resolve_agent_response_rendering(
         contract,
@@ -393,7 +422,7 @@ fn resolve_agent_response_rendering(
     contract: &NodeResponseContract,
     response: &str,
     correction: CorrectionRendering,
-    workspace: Option<&Path>,
+    workspace: Option<FilepathContext<'_>>,
 ) -> Result<AgentResponse, NodeRunnerError> {
     let dialect = match correction {
         CorrectionRendering::Contract(_, dialect) | CorrectionRendering::Schema(dialect) => dialect,
@@ -720,7 +749,7 @@ fn payload_schema(payload: &PayloadType, dialect: ProviderSchemaDialect) -> Valu
 fn validate_paths(
     schema: &PayloadType,
     value: &Value,
-    workspace: &Path,
+    workspace: FilepathContext<'_>,
     field: &str,
 ) -> Result<(), NodeResponseError> {
     match schema {
@@ -728,11 +757,9 @@ fn validate_paths(
             let path = value
                 .as_str()
                 .ok_or_else(|| NodeResponseError::new(format!("{field} requires a filepath")))?;
-            crate::native_v2_files::workspace_path(workspace, path)
-                .map(|_| ())
-                .map_err(|error| {
-                    NodeResponseError::new(format!("{field} filepath {path:?}: {error}"))
-                })
+            workspace.resolve(path).map(|_| ()).map_err(|error| {
+                NodeResponseError::new(format!("{field} filepath {path:?}: {error}"))
+            })
         }
         PayloadType::Record { fields } => {
             for (name, schema) in fields {

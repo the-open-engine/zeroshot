@@ -22,6 +22,16 @@ use crate::native_v2_cli::{
 pub trait TargetConnector: Send + Sync {
     type Transport: SubscriptionTransport + Send + Sync + 'static;
 
+    async fn release_staged_uploads(
+        &self,
+        _name: &str,
+        _uploads: &[crate::native_v2_files::FilePin],
+    ) -> Result<(), NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target upload release is unavailable".into(),
+        ))
+    }
+
     async fn review_cache_namespace(
         &self,
         _name: &str,

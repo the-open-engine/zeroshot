@@ -195,6 +195,18 @@ where
 {
     type Transport = D::Transport;
 
+    async fn release_staged_uploads(
+        &self,
+        name: &str,
+        uploads: &[zeroshot_engine::native_v2_files::FilePin],
+    ) -> Result<(), NativeV2CliError> {
+        let target = self.target(name)?;
+        self.authority
+            .release_staged_uploads(&target, uploads)
+            .await
+            .map_err(|error| self.authority.redact_error(error).into_cli(&target))
+    }
+
     async fn review_cache_namespace(
         &self,
         name: &str,

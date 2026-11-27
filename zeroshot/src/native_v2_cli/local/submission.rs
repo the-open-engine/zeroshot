@@ -31,10 +31,11 @@ impl LocalCliBackend {
         workspace: Option<&Path>,
     ) -> Result<(), NativeV2CliError> {
         let paths = self.paths(run_id)?;
-        if self
-            .successor_claim_is_live_or_admitted(run_id, paths.storage(), Duration::ZERO)
-            .await
-            .is_ok_and(|owned| !owned)
+        if !paths.storage().try_exists().map_err(local_error)?
+            || self
+                .successor_claim_is_live_or_admitted(run_id, paths.storage(), Duration::ZERO)
+                .await
+                .is_ok_and(|owned| !owned)
         {
             if let Some(workspace) = workspace {
                 let _ =
@@ -42,8 +43,22 @@ impl LocalCliBackend {
                         workspace,
                     );
             }
+            if !self
+                .state_root
+                .join("workspace-inputs")
+                .try_exists()
+                .map_err(local_error)?
+            {
+                return Ok(());
+            }
             crate::native_v2_cli::files::workspace_files(&self.state_root)?
                 .release(run_id)
+                .map_err(local_error)?;
+            crate::native_v2_cli::files::workspace_files(&self.state_root)?
+                .release_file_inputs(run_id)
+                .map_err(local_error)?;
+            crate::native_v2_cli::files::workspace_files(&self.state_root)?
+                .release_file_input_part(run_id)
                 .map_err(local_error)?;
         }
         Ok(())
@@ -93,6 +108,63 @@ impl LocalCliBackend {
     }
 
     pub(super) async fn submit_prepared(
+        &self,
+        prepared: PreparedLocalRun,
+        worktree: Option<crate::native_v2_cli::LocalWorktreeBase>,
+    ) -> Result<RunId, NativeV2CliError> {
+        let run_id = prepared.run_id.clone();
+        let has_files = crate::native_v2_files::inputs::has_file_inputs(
+            &prepared.submission.graph.initial_input,
+            &prepared.submission.initial_input,
+        );
+        let uploads = prepared.submission.initial_input.clone();
+        let schema = prepared.submission.graph.initial_input.clone();
+        let result = self.submit_prepared_with_inputs(prepared, worktree).await;
+        let _ = crate::native_v2_cli::files::release_staged_uploads(
+            &self.state_root,
+            &schema,
+            &uploads,
+        );
+        if result.is_err() && has_files {
+            let _submission_lock = self.acquire_submission_lock().await?;
+            self.discard_unadmitted_workspace(&run_id, None).await?;
+        }
+        result
+    }
+
+    fn freeze_submission_inputs(
+        &self,
+        prepared: &mut PreparedLocalRun,
+    ) -> Result<(), NativeV2CliError> {
+        if crate::native_v2_files::inputs::has_file_inputs(
+            &prepared.submission.graph.initial_input,
+            &prepared.submission.initial_input,
+        ) {
+            let files = crate::native_v2_cli::files::workspace_files(&self.state_root)?;
+            let frozen = files
+                .freeze_file_inputs(crate::native_v2_files::inputs::InputAdmission {
+                    run_id: &prepared.run_id,
+                    owner: &prepared.delivery_run_id,
+                    key: &prepared.submission.submission_key,
+                    schema: &prepared.submission.graph.initial_input,
+                    value: &prepared.submission.initial_input,
+                    local_root: Some(&self.current_directory),
+                })
+                .map_err(local_error)?;
+            files
+                .release_staged_inputs(
+                    &prepared.submission.graph.initial_input,
+                    &prepared.submission.initial_input,
+                )
+                .map_err(local_error)?;
+            prepared.run_id = frozen.run_id.clone();
+            prepared.delivery_run_id = frozen.run_id;
+            prepared.submission.initial_input = frozen.value;
+        }
+        Ok(())
+    }
+
+    async fn submit_prepared_with_inputs(
         &self,
         mut prepared: PreparedLocalRun,
         worktree: Option<crate::native_v2_cli::LocalWorktreeBase>,
@@ -192,6 +264,7 @@ impl LocalCliBackend {
         crate::native_v2_local::validate_clean_checkout(&prepared, &self.git_program)
             .await
             .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
+        self.freeze_submission_inputs(&mut prepared)?;
         let harnesses = crate::harnesses::HarnessRegistry::local();
         let sizes = crate::native_v2_hosting::host_run_sizes();
         let admitted = NativeV2Admission
@@ -340,24 +413,23 @@ pub(crate) fn release_workspace_inputs(storage: &Path) -> Result<(), NativeV2Cli
         Err(_) if !storage.join(RECOVERY_FILE).exists() => return Ok(()),
         Err(error) => return Err(error),
     };
-    if !recovery
-        .submission
-        .workspace
-        .as_ref()
-        .is_some_and(|spec| !spec.is_in_place())
-    {
+    let Some(origin) = recovery.delivery_run_id else {
         return Ok(());
-    }
-    let origin = recovery
-        .delivery_run_id
-        .ok_or_else(|| local_message("workspace input identity is missing"))?;
+    };
     let state = storage
         .parent()
         .and_then(Path::parent)
         .ok_or_else(|| local_message("run storage has no state root"))?;
-    crate::native_v2_cli::files::workspace_files(state)?
-        .release(&origin)
-        .map_err(local_error)
+    if !state
+        .join("workspace-inputs")
+        .try_exists()
+        .map_err(local_error)?
+    {
+        return Ok(());
+    }
+    let files = crate::native_v2_cli::files::workspace_files(state)?;
+    files.release(&origin).map_err(local_error)?;
+    files.release_file_inputs(&origin).map_err(local_error)
 }
 
 #[cfg(test)]

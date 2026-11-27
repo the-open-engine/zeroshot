@@ -143,6 +143,20 @@ fn workspace_identity_survives_restart_and_move_but_not_store_replacement() {
             .assert_value()
     );
     assert!(!root.join(PROFILES_FILE).exists());
+    #[cfg(windows)]
+    {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            match std::fs::rename(&root, &moved) {
+                Ok(()) => break,
+                Err(_) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                Err(error) => panic!("moving the profile store failed: {error}"),
+            }
+        }
+    }
+    #[cfg(not(windows))]
     std::fs::rename(&root, &moved).assert_value();
     assert_eq!(
         first,

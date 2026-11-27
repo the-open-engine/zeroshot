@@ -155,7 +155,7 @@ async fn parse_output(
         .and_then(|outcome| {
             invocation
                 .response
-                .validate_filepaths(&outcome, workspace)?;
+                .validate_filepaths(&outcome, invocation.filepaths(workspace))?;
             Ok(outcome)
         }) {
         Ok(outcome) => outcome,

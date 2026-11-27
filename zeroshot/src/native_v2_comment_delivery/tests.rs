@@ -432,6 +432,7 @@ async fn invocation(adapter: &NativeV2CommentDeliveryAdapter, input: Value) -> D
     };
     let session = adapter.open(&node, &environment).await.unwrap();
     DriverInvocation {
+        file_roots: Vec::new(),
         dispatch: Default::default(),
         host_context: None,
         node,

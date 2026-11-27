@@ -141,7 +141,7 @@ pub(super) async fn create_contract_run(
     ledger
 }
 
-fn prepared_local_run(
+pub(super) fn prepared_local_run(
     run_id: RunId,
     submission: RunSubmission,
     workspace: PathBuf,

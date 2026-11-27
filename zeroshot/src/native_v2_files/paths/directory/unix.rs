@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -121,9 +122,60 @@ impl Directory {
         check(unsafe { libc::unlinkat(self.0.as_raw_fd(), name.as_ptr(), 0) })
     }
 
-    pub fn remove_tree(&self, name: &OsStr) -> Result<()> {
+    fn child_for_removal(&self, name: &OsStr) -> Result<Self> {
         match self.child(name) {
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                #[cfg(target_os = "linux")]
+                {
+                    // O_PATH needs no read/search permission on this directory. O_DIRECTORY
+                    // excludes file aliases, and open_at refuses links. As in workspace copying,
+                    // the private proc descriptor bridge addresses the pinned inode, not its name.
+                    let file = open_at(
+                        self.0.as_raw_fd(),
+                        &component(name)?,
+                        libc::O_PATH | libc::O_DIRECTORY,
+                    )?;
+                    std::fs::set_permissions(
+                        format!("/proc/self/fd/{}", file.as_raw_fd()),
+                        std::fs::Permissions::from_mode(0o700),
+                    )?;
+                    let readable =
+                        open_at(file.as_raw_fd(), c".", libc::O_RDONLY | libc::O_DIRECTORY)?;
+                    Ok(Self(Arc::new(readable)))
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    // Darwin has no O_PATH. Repair relative to the pinned parent: the trailing
+                    // slash requires a directory and NOFOLLOW_ANY rejects every link, including
+                    // one substituted during lookup. Neither links nor file aliases can be chmod'd.
+                    let directory = CString::new([name.as_bytes(), b"/"].concat())
+                        .map_err(|_| invalid("invalid file name"))?;
+                    component(name)?;
+                    const AT_SYMLINK_NOFOLLOW_ANY: i32 = 0x0800;
+                    check(unsafe {
+                        libc::fchmodat(
+                            self.0.as_raw_fd(),
+                            directory.as_ptr(),
+                            0o700,
+                            AT_SYMLINK_NOFOLLOW_ANY,
+                        )
+                    })?;
+                    self.child(name)
+                }
+                #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+                Err(error)
+            }
+            result => result,
+        }
+    }
+
+    pub fn remove_tree(&self, name: &OsStr) -> Result<()> {
+        match self.child_for_removal(name) {
             Ok(child) => {
+                // Only the pinned disposable directory is changed; links are never opened here.
+                child
+                    .0
+                    .set_permissions(std::fs::Permissions::from_mode(0o700))?;
                 for member in child.entries()? {
                     child.remove_tree(&member?)?;
                 }
