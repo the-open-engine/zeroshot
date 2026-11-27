@@ -761,7 +761,7 @@ class Client:
             and isinstance(self.target, DirectTarget)
             and self._direct_directory is not None
         ):
-            environment["ZEROSHOT_CONFIG_DIR"] = self._direct_directory.name
+            environment["ZEROSHOT_CONFIG_DIR"] = str(Path(self._direct_directory.name).resolve())
         environment["ZEROSHOT_ERROR_FORMAT"] = "json"
         return environment, secrets
 

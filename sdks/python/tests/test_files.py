@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,25 @@ from zeroshot import (
     UniformRuntime,
 )
 from zeroshot._projection import _human_request, _status
+
+
+@pytest.mark.skipif(os.name == "nt", reason="requires a directory symlink")
+def test_direct_files_resolve_linked_system_temp_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_native: Path
+) -> None:
+    physical_root = tmp_path.resolve() / "physical"
+    physical_root.mkdir()
+    linked_root = tmp_path / "linked"
+    linked_root.symlink_to(physical_root, target_is_directory=True)
+    monkeypatch.setattr(tempfile, "tempdir", str(linked_root))
+
+    async def exercise() -> Path:
+        async with Client(target=DirectTarget("http://127.0.0.1:8080")) as client:
+            assert (await client.list_files())["kind"] == "list"
+            return Path(client._environment()[0]["ZEROSHOT_CONFIG_DIR"])
+
+    config = asyncio.run(exercise())
+    assert config.is_relative_to(physical_root)
 
 
 @pytest.mark.parametrize(
