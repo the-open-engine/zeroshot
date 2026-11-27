@@ -381,6 +381,22 @@ pub(crate) struct ResticCheckpointStoreTestConfig {
     pub(crate) program: restic::ResticProgram,
 }
 
+fn copy_checkpoint_inputs(
+    inputs: &[PathBuf],
+    snapshot_root: &Path,
+    operation: &filesystem::SnapshotOperation,
+) -> std::io::Result<()> {
+    if inputs.is_empty() {
+        return Ok(());
+    }
+    let destination = snapshot_root.join("inputs");
+    crate::execution::platform::private_directory(&destination)?;
+    for (index, root) in inputs.iter().enumerate() {
+        operation.copy(root, &destination.join(index.to_string()))?;
+    }
+    Ok(())
+}
+
 impl ResticCheckpointStore {
     pub fn new(
         directory: PathBuf,
@@ -537,30 +553,20 @@ impl ResticCheckpointStore {
             let stages = directory.join("staging");
             crate::execution::platform::private_directory(&stages)?;
             let stage = filesystem::private_stage(&stages, ".capture-")?;
+            // Windows canonicalization gives descendants an extended-length path. Accepted
+            // input names can otherwise exceed MAX_PATH inside this nested snapshot stage.
+            let stage_root = stage.path().canonicalize()?;
             let snapshot = filesystem::capture_with(
                 &workspace,
-                &stage.path().join("snapshots"),
+                &stage_root.join("snapshots"),
                 &(),
                 &operation,
             )?;
-            if !inputs.is_empty() {
-                let destination = stage
-                    .path()
-                    .join("snapshots")
-                    .join(snapshot.as_str())
-                    .join("inputs");
-                crate::execution::platform::private_directory(&destination)?;
-                for (index, root) in inputs.iter().enumerate() {
-                    operation.copy(root, &destination.join(index.to_string()))?;
-                }
-            }
+            let snapshot_root = stage_root.join("snapshots").join(snapshot.as_str());
+            copy_checkpoint_inputs(&inputs, &snapshot_root, &operation)?;
             if let Some(conversations) = conversations {
                 // This optional payload must never prevent workspace checkpoint publication.
-                let target = stage
-                    .path()
-                    .join("snapshots")
-                    .join(snapshot.as_str())
-                    .join("conversations");
+                let target = snapshot_root.join("conversations");
                 let request = operation_stop
                     .clone()
                     .unwrap_or_else(|| tokio::sync::watch::channel(false).1);
