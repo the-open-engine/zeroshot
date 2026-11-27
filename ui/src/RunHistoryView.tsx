@@ -271,20 +271,16 @@ function RunHistoryContent({
   const latest = safePosition === moments.length - 1;
   const pendingHandoff = pendingHandoffAtHead(history, latest, listedPartId, listedPhase);
   const toggle = <RunViewToggle layout={layout} setLayout={switchLayout} />;
-  const context =
-    run &&
-    document &&
-    projection &&
-    runContext(run, document, projection, {
-      terminal: displayedTerminal,
-      artifacts: definition.artifacts,
-      currentFailure,
-      open: !displayedTerminal && (history.isLiveRun || !latest || !history.loadedHead),
-      following,
-      pendingHandoff,
-      answerable: current && run.phase === 'suspended',
-      partHref,
-    });
+  const context = runContext(run, document, projection, {
+    terminal: displayedTerminal,
+    artifacts: definition.artifacts,
+    currentFailure,
+    open: !displayedTerminal && (history.isLiveRun || !latest || !history.loadedHead),
+    following,
+    pendingHandoff,
+    answerable: current && run?.phase === 'suspended',
+    partHref,
+  });
   return (
     <main className="workspace history-workspace">
       {run && document && projection ? (
@@ -448,9 +444,9 @@ function RunViewToggle({
 
 /** What the Steps view reads about the run at this position. */
 function runContext(
-  run: RunDetail,
-  document: Document,
-  projection: NonNullable<ReturnType<typeof useProjection>>,
+  run: RunDetail | undefined,
+  document: Document | undefined,
+  projection: ReturnType<typeof useProjection>,
   position: Pick<
     RunContext,
     | 'terminal'
@@ -462,7 +458,8 @@ function runContext(
     | 'partHref'
     | 'pendingHandoff'
   >
-): RunContext {
+): RunContext | undefined {
+  if (!run || !document || !projection) return;
   const successor = projection.successorRunId;
   return {
     ...position,

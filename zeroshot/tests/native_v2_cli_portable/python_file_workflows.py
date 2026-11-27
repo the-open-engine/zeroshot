@@ -217,6 +217,17 @@ async def local(managed):
             assert work.joinpath("report/draft.txt").read_text() == "live edit"
 
 
+async def wait_for_target(client, server):
+    async with asyncio.timeout(30):
+        while True:
+            try:
+                await client.list_files()
+                return
+            except TargetError:
+                assert server.poll() is None, "target exited; inspect target.log"
+                await asyncio.sleep(0.05)
+
+
 async def direct():
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -249,16 +260,7 @@ async def direct():
                 json_output=False,
             )
             async with Client(target=HostedTarget("file-fixture")) as client:
-                async with asyncio.timeout(30):
-                    while True:
-                        try:
-                            await client.list_files()
-                            break
-                        except TargetError:
-                            assert server.poll() is None, (
-                                "target exited; inspect target.log"
-                            )
-                            await asyncio.sleep(0.05)
+                await wait_for_target(client, server)
                 source = root / "direct-source"
                 source.mkdir()
                 source.joinpath("bytes").write_bytes(b"\x00\xff")
