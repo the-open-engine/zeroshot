@@ -222,6 +222,13 @@ it('llms.txt links only to pages an agent can read without JavaScript', () => {
   }
 });
 
+it('llms.txt links the page listing what a graph is made of', () => {
+  assert.ok(
+    read(LLMS).includes('https://zeroshot.sh/docs/current/concepts/graphs/'),
+    `${LLMS} must link the graph building blocks page`
+  );
+});
+
 it('llms.txt and the README state the delivery default the CLI applies', () => {
   const cliDefault = read('docs/zeroshot-cli.md').match(/Defaults to (\w+) for software-change/);
   assert.ok(

@@ -9,6 +9,10 @@ Zeroshot executes an explicit graph of software agents. Workers make changes; in
 judge the evidence, and the graph decides when to repair or deliver. A successful run means the
 graph reached its declared outcome; it does not always mean a pull request was created or merged.
 
+Steps can also be scripts, people or timed waits.
+[What a graph is made of](https://zeroshot.sh/docs/current/concepts/graphs/)
+lists every building block.
+
 Use the connected server's tool schemas for MCP calls and installed CLI help for CLI commands.
 
 ## Choose access
@@ -54,6 +58,11 @@ together as a stack on Platform (see Submit a stack).
 Never start a Zeroshot run merely because the skill is available. The user must ask to use Zeroshot.
 A worker already executing inside a Zeroshot run should perform its assigned work directly, not start
 another run. A failed Platform run does not authorize silently implementing the task locally.
+
+Before telling the user Zeroshot cannot do something, check
+[What a graph is made of](https://zeroshot.sh/docs/current/concepts/graphs/)
+and the graph and runtime plan references. A search with no hits is not evidence that a feature is
+missing.
 
 ## Platform through MCP
 
@@ -202,19 +211,26 @@ one from scratch:
 2. Make the change the user asked for: add a reviewer with one job (security, an end-to-end test
    that boots the app, design), or change the loop's `maxIterations`. Different models or harnesses
    per node need a full `--runtime-config` plan instead of the uniform file. The
-   [review loop guide](https://the-open-engine.github.io/zeroshot/current/guides/review-loop/)
+   [review loop guide](https://zeroshot.sh/docs/current/guides/review-loop/)
    shows the node shapes and a cross-vendor plan.
-3. Validate by replacing `--template software-change` with `--graph graph.json` in the run command
-   above, then run it.
-4. Save it so later requests use it, with `--runtime-config PLAN.json` in place of the uniform file
-   when nodes use different models or harnesses:
+3. For a check a script can decide, use a script verifier that emits signals. It needs a full
+   `--runtime-config` plan that binds the node to `{"kind": "script", "command": [...]}`, even when
+   every agent uses the same model, because the uniform file binds verifiers to agents. Script
+   bindings run locally only. For a decision a person must make, use an ask node. For a delay, use
+   a wait node. The uniform file supplies the request binding for both.
+   [What a graph is made of](https://zeroshot.sh/docs/current/concepts/graphs/) shows where each can go.
+4. Validate by replacing `--template software-change` with `--graph graph.json` in the run command
+   above (and the uniform file with `--runtime-config PLAN.json` when step 3 added a script), then
+   run it.
+5. Save it so later requests use it, with `--runtime-config PLAN.json` in place of the uniform file
+   when nodes use different models or harnesses, or when the graph has a script node:
 
    ```console
    zeroshot profile set NAME --graph graph.json \
      --uniform-runtime-config RUNTIME.json --default
    ```
 
-5. When runs keep failing the same way, or a problem gets past the reviewers, suggest the reviewer
+6. When runs keep failing the same way, or a problem gets past the reviewers, suggest the reviewer
    that would catch it and ask before changing the graph.
 
 ## Prepare the execution environment
@@ -256,7 +272,7 @@ Preparation failures stop before agent execution without spending repair attempt
 failed phase and logs; fix the environment instead of requesting unrelated code repairs. Resume
 reuses the accepted definition, so an edited environment requires a new run. For a pinned Node
 installation and service/Docker conventions, see the
-[environment guide](https://the-open-engine.github.io/zeroshot/current/guides/runtime-environments/).
+[environment guide](https://zeroshot.sh/docs/current/guides/runtime-environments/).
 
 ## Expose a profile over ACP
 
