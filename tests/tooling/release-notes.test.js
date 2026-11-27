@@ -288,8 +288,21 @@ const recoveredReadmeSummaries = [
 ];
 
 describe('historical release metadata recovery', () => {
-  it('recovers only the recorded README summaries', () => {
+  it('recovers only the recorded documentation summaries', () => {
     for (const historical of [
+      {
+        hash: '7c49e94ae4ad3959821b2646f47d776b50689c64',
+        subject:
+          'docs: add a guide for the wait verifier and point to it from the graph reference (#1712)',
+        summary:
+          'Document timed waits with a working graph example and link the guide from the graph reference.',
+      },
+      {
+        hash: 'e8046799af57b6fa47139bb214ceed97bcc46cb3',
+        subject: 'docs: list what a graph is made of and point skills to it (#1714)',
+        summary:
+          'Add an overview of graph steps and structure, and link it from the Zeroshot and graph-design skills.',
+      },
       {
         hash: 'e6faeb5a9c41061da7e820e2e6bc394a0c8ca606',
         subject: 'docs(readme): write the name as zeroshot and open with the QA process (#1232)',
@@ -310,7 +323,7 @@ describe('historical release metadata recovery', () => {
       },
       ...recoveredReadmeSummaries,
     ]) {
-      const input = { ...historical, body: 'README change without a Summary heading.' };
+      const input = { ...historical, body: 'Documentation change without a Summary heading.' };
       assert.equal(parseReleaseCommit(input).summary, historical.summary);
       assert.throws(
         () => parseReleaseCommit({ ...input, hash: 'b'.repeat(40) }),

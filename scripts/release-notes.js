@@ -14,6 +14,14 @@ const RELEASE_SUBJECT =
 const PLAIN_SUMMARY_COMMIT_EXCEPTIONS = new Set(['78b7baa2d88dcd6a7640d8cf06d6fbce94d91f42']);
 const RECOVERED_COMMIT_SUMMARIES = new Map([
   [
+    '7c49e94ae4ad3959821b2646f47d776b50689c64',
+    'Document timed waits with a working graph example and link the guide from the graph reference.',
+  ],
+  [
+    'e8046799af57b6fa47139bb214ceed97bcc46cb3',
+    'Add an overview of graph steps and structure, and link it from the Zeroshot and graph-design skills.',
+  ],
+  [
     'e6faeb5a9c41061da7e820e2e6bc394a0c8ca606',
     'Write the README name as zeroshot and introduce its customizable QA graph with existing coding agents.',
   ],
