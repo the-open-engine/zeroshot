@@ -4,6 +4,7 @@ import { ControlText } from './ControlFields';
 import { Field } from './Field';
 import { PreparationConnections } from './PreparationConnections';
 import type { EnvironmentDefinition } from './environment-store';
+import type { SeedSelection } from './file-workflows';
 
 type Props = {
   value: EnvironmentDefinition;
@@ -40,6 +41,7 @@ export function EnvironmentEditor({ value, onChange }: Props) {
         />
       </Field>
       <EnvironmentVariables value={value} onChange={onChange} />
+      <EnvironmentSeeds value={value} onChange={onChange} />
       <div className="section-rule" />
       <PreparationConnections
         value={value.connections ?? {}}
@@ -49,6 +51,68 @@ export function EnvironmentEditor({ value, onChange }: Props) {
           onChange(next, 'connections');
         }}
       />
+    </section>
+  );
+}
+
+function EnvironmentSeeds({ value, onChange }: Props) {
+  const seeds = value.seeds ?? [];
+  function update(next: SeedSelection[]) {
+    const environment: EnvironmentDefinition = { ...value, seeds: next };
+    if (!next.length) delete environment.seeds;
+    onChange(environment, 'seeds');
+  }
+  function change(index: number, seed: SeedSelection) {
+    update(seeds.map((current, position) => (position === index ? seed : current)));
+  }
+  return (
+    <section aria-label="Workspace seeds">
+      <h3>Workspace seeds</h3>
+      {seeds.map((seed, index) => (
+        <div key={index}>
+          <Field label={`Seed ${index + 1} scope`}>
+            <select
+              value={seed.address.scope.kind}
+              onChange={(event) =>
+                change(index, {
+                  ...seed,
+                  address: {
+                    ...seed.address,
+                    scope: { kind: event.target.value as 'user' | 'org' },
+                  },
+                })
+              }
+            >
+              <option value="user">User library</option>
+              <option value="org">Organization library</option>
+            </select>
+          </Field>
+          <ControlText
+            label={`Seed ${index + 1} path`}
+            value={seed.address.path}
+            onCommit={(path) => change(index, { ...seed, address: { ...seed.address, path } })}
+          />
+          <ControlText
+            label={`Seed ${index + 1} member`}
+            value={seed.member}
+            onCommit={(member) => change(index, { ...seed, member })}
+          />
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => update(seeds.filter((_, position) => position !== index))}
+          >
+            <Trash2 size={14} /> Remove seed {index + 1}
+          </button>
+        </div>
+      ))}
+      <AddEnvironmentField
+        onClick={() =>
+          update([...seeds, { address: { scope: { kind: 'user' }, path: '' }, member: '' }])
+        }
+      >
+        Add seed
+      </AddEnvironmentField>
     </section>
   );
 }

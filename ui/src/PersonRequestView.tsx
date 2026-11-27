@@ -1,5 +1,6 @@
 import { humanize, type PersonRequest } from './run-history';
 import type { PendingHandoff } from './run-story';
+import { RequestAttachments } from './PublishedFiles';
 
 /** The run lists' date and time format, local time; another year is named. */
 const dateTime = new Intl.DateTimeFormat(undefined, {
@@ -108,6 +109,7 @@ export function PersonRequestView({
   return (
     <div className="person-request">
       <blockquote>{request.text}</blockquote>
+      <RequestAttachments requestId={request.id} runId={request.runId ?? runId} />
       {fields.length > 0 && (
         <div className="request-options">
           {fields.map(([field, labels]) => (

@@ -121,7 +121,7 @@ cargo test --locked --package zeroshot --features ui --lib -- \
   native_v2_runner::response native_v2_request::tests \
   native_v2_cli::execution::request_tests native_v2_cli::oecp::tests::file_answer_tests \
   native_v2_observability::tests::publications \
-  profile_ui::runs::tests::status::request_attachments \
+  profile_ui::runs::tests::status::request_attachments profile_ui::tests::file_workflows \
   native_v2_admission::tests::requests::artifact \
   native_v2_admission::profile_expansion::wire_contract::profile_linking
 cargo test --locked --package openengine-cluster-protocol --test payload_subtyping --test canonical

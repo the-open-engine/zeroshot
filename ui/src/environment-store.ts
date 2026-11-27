@@ -1,10 +1,13 @@
 import { ApiError, createApiClient } from './api';
+import { isSeedSelection, type SeedSelection } from './file-workflows';
 
 export type EnvironmentDefinition = {
   setup?: string;
   startup?: string;
   variables?: Record<string, string>;
   connections?: Record<string, string[]>;
+  /** Host resolves these target selections into submission.workspace.seeds, never runtime.environment. */
+  seeds?: SeedSelection[];
 };
 export type EnvironmentSummary = { id: string; name: string; revision: string };
 export type Environment = EnvironmentSummary & { definition: EnvironmentDefinition };
@@ -87,6 +90,7 @@ export function isEnvironmentDefinition(value: unknown): value is EnvironmentDef
   if (!record(value)) return false;
   return Object.entries(value).every(([name, field]) => {
     if (name === 'setup' || name === 'startup') return typeof field === 'string';
+    if (name === 'seeds') return Array.isArray(field) && field.every(isSeedSelection);
     if (name === 'variables')
       return record(field) && Object.values(field).every((entry) => typeof entry === 'string');
     if (name === 'connections')

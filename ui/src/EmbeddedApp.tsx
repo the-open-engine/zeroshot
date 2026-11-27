@@ -8,7 +8,8 @@ import { EnvironmentWorkspace } from './EnvironmentWorkspace';
 import { createEnvironmentStore, type EnvironmentStore } from './environment-store';
 import { WorkspaceBridge, type WorkspaceInit } from './workspace-bridge';
 import { createWorkspaceServices, type WorkspaceServices } from './workspace-services';
-import { ApiError, type Bootstrap } from './api';
+import { ApiError, createApiClient, type Bootstrap } from './api';
+import { createHostFileAccess } from './run-history-source';
 
 export function EmbeddedApp() {
   const [host, setHost] = useState<WorkspaceBridge>();
@@ -95,6 +96,12 @@ function useHostedServices(configuration?: WorkspaceInit, host?: WorkspaceBridge
       createEmbeddedFetch(base, configuration.csrf),
       base
     );
+    if (configuration.files)
+      services.history.files = createHostFileAccess(
+        createApiClient(base, createEmbeddedFetch(base, configuration.csrf)),
+        configuration.files,
+        (selection) => host.openFile(selection)
+      );
     void services
       .catalog(controller.signal)
       .then((bootstrap) => {

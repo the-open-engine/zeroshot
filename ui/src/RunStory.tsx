@@ -140,7 +140,11 @@ export function RunStory({
             line={firstProse(terminal.output)}
             open={steps.isOpen(END)}
             toggle={() => steps.toggle(END)}
-            detail={hasValue(terminal.output) && <RunResultDetail output={terminal.output} />}
+            detail={
+              (hasValue(terminal.output) || Object.keys(run.artifacts ?? {}).length > 0) && (
+                <RunResultDetail output={terminal.output} artifacts={run.artifacts} />
+              )
+            }
           />
         )
       )}

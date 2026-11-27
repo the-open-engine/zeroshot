@@ -248,3 +248,26 @@ exposes excerpts, message modes, optional network origin metadata and confirmed 
 at its next tool call or prompt. `await run.vector(steer.id)` reads its full text, and
 `await run.vectors()` includes `steer` and `steer_receipt` entries. Direction is limited to 262,144
 UTF-8 bytes and is stored as given; do not include secrets. Existing SDK error types report refusals.
+
+## File workflows
+
+The async client also delegates `stage_file`, `upload_file`, `list_files`, `download_file`,
+`remove_file` and `cleanup` to the packaged CLI, returning its JSON receipts. These operations
+use the client's local, direct or named target and stream bytes outside run JSON. Unsupported
+targets fail with the existing typed native error; cancellation reaps the CLI child.
+
+`RunRequest(workspace=True)` selects file work without a Git source. Local placement defaults to
+in-place; `copy_workspace=True` freezes a managed copy. `workspace_seeds=("user:PATH",)` or
+`workspace_placement="managed"` selects a managed workspace; named targets are always managed.
+File inputs and answers use managed copies independently of workspace placement.
+
+`RunResult.artifacts` contains explicit final publications, including for a null result.
+`(await run.request()).request.artifacts` contains authorized request attachments; ordinary status
+omits them. A managed reference's `address.scope.runId` identifies the producing part for
+`download_file(path, output, run_id=...)`. A local reference denotes a live path on the local
+machine. `cleanup(all=True)` removes the age filter for eligible publications/checkpoints;
+it preserves pending work, library files, live local outputs and ledgers.
+
+See [the complete example](examples/file_workflow.py) and the
+[file workflow guide](https://zeroshot.sh/docs/current/guides/file-workflows/) for target selection,
+current-byte capture, lifetimes and CLI equivalents.

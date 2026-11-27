@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -32,6 +32,13 @@ class RunRequest:
         branch: Named-target source branch override.
         revision: Named-target exact source commit override.
         submission_key: Stable idempotency key; None generates one before native preflight.
+        workspace: Execute without a Git source or delivery. Omission keeps repository mode.
+        workspace_placement: In-place locally or managed on targets by default. Seeds and
+            copy_workspace select managed placement. In-place uses the exact cwd folder.
+        workspace_seeds: Target library selections, user:PATH or org:PATH with optional #MEMBER.
+            Requires workspace. Native admission freezes the selected current bytes.
+        copy_workspace: Freeze the local cwd contents into a disposable managed workspace.
+            Requires workspace and cannot be used with a target or seeds.
     """
 
     title: str
@@ -46,6 +53,10 @@ class RunRequest:
     branch: str | None = None
     revision: str | None = None
     submission_key: str | None = None
+    workspace: bool = False
+    workspace_placement: Literal["in-place", "managed"] | None = None
+    workspace_seeds: tuple[str, ...] = ()
+    copy_workspace: bool = False
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -130,6 +141,8 @@ class RunResult:
         delivery_receipt: Native delivery evidence, independent of output; None when unavailable.
         failure: Stable nonempty failure reason when succeeded is false.
         context: Structured safe failure evidence, or None for older run data.
+        artifacts: Named explicit publications, with the unchanged CLI managed or live local
+            references. Managed addresses use their producing part ID for file retrieval.
     """
 
     run_id: str
@@ -139,6 +152,7 @@ class RunResult:
     delivery_receipt: JsonValue = None
     failure: str | None = None
     context: FailureContext | None = None
+    artifacts: dict[str, JsonValue] = field(default_factory=dict)
 
     def raise_for_failure(self) -> None:
         """Raise RunFailedError for a failed graph result; otherwise return None."""
@@ -189,6 +203,7 @@ class RunStatus:
         recorded_at: Ledger recording time of the event producing a watch notification, in Unix
             milliseconds. None for status responses and old events without timing. Imported
             history carries its import time, not the original execution time. Cursor defines order.
+        workspace: Native placement and selected folder metadata, or None in repository mode.
     """
 
     run_id: str
@@ -212,6 +227,7 @@ class RunStatus:
     steers: tuple[RunSteer, ...] = ()
     omitted_steers: int = 0
     recorded_at: int | None = None
+    workspace: JsonValue = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -236,6 +252,7 @@ class RunSummary:
         created_at: Suspension time in Unix epoch milliseconds.
         due_at: Earliest continuation time for a suspended wait, in epoch milliseconds.
         request: Human request contract when suspended for a request.
+        workspace: Native workspace selection, or None in repository mode.
     """
 
     run_id: str
@@ -255,6 +272,7 @@ class RunSummary:
     created_at: int | None = None
     due_at: int | None = None
     request: HumanRequest | None = None
+    workspace: JsonValue = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -360,6 +378,7 @@ class HumanRequest:
         signals: Declared signals and their allowed labels.
         output: Closed record payload schema.
         expires_at: Exclusive answer deadline in Unix epoch milliseconds.
+        artifacts: Explicit attachments on an authorized inbox read; omitted on status views.
     """
 
     id: str
@@ -367,6 +386,7 @@ class HumanRequest:
     signals: JsonValue
     output: JsonValue
     expires_at: int
+    artifacts: dict[str, JsonValue] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

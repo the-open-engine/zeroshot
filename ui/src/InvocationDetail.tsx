@@ -2,6 +2,7 @@ import { ChevronRight } from 'lucide-react';
 import { RecordedValue } from './RecordedValue';
 import { Transcript } from './Transcript';
 import { humanize, stateLabel, type Invocation } from './run-history';
+import { PersonRequestView, type RequestContext } from './PersonRequestView';
 
 /** One execution's state, input, result and transcript, for the inspector and inline details. */
 export function InvocationView({
@@ -10,12 +11,16 @@ export function InvocationView({
   reveal,
   follow,
   reading,
+  requestContext,
+  runId,
 }: {
   invocation: Invocation;
   showNode: boolean;
   reveal: () => void;
   follow: boolean;
   reading: (value: boolean) => void;
+  requestContext?: RequestContext;
+  runId?: string;
 }) {
   const outcome = invocation.outcome;
   return (
@@ -31,7 +36,11 @@ export function InvocationView({
           <ChevronRight size={15} />
         </button>
       )}
-      <ValueSection title="Input" value={invocation.input} />
+      {invocation.request && runId && requestContext ? (
+        <PersonRequestView request={invocation.request} runId={runId} context={requestContext} />
+      ) : (
+        <ValueSection title="Input" value={invocation.input} />
+      )}
       {outcome && (
         <details className="history-value invocation-output" open>
           <summary>Output</summary>
