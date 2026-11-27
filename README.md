@@ -82,6 +82,9 @@ Open your agent in a repo and ask for a change. For example:
 use zeroshot to let users export their data as CSV. Keep the changes local.
 ```
 
+Local runs don’t require a zeroshot account. Run history stays on your machine.
+[See what the CLI connects to.](https://zeroshot.sh/docs/current/reference/installation/#network-access)
+
 Run locally with your agent's existing login and subscription. Watch with `zeroshot ui`.
 The [CLI quick start](docs/getting-started/first-run.md) walks through a run directly in the terminal.
 
