@@ -23,6 +23,12 @@ def address(identifier, path, resumed):
         path.write_text(content)
     pathlib.Path('address.json').write_text(json.dumps({'id':identifier, 'content':path.read_text(), 'path':str(path)}))
 
+if harness == 'opencode' and args[:2] == ['auth', 'export']:
+    print('[]', flush=True)
+    sys.exit(0)
+if harness == 'opencode' and args[:2] == ['auth', 'import']:
+    sys.stdin.read()
+    sys.exit(0)
 if harness == 'codex':
     if not args or args[0] != 'exec':
         emit({})
@@ -81,7 +87,7 @@ elif harness == 'pi':
 elif harness == 'opencode':
     sys.stdin.read()
     identifier=option('--session','ses_checkpoint')
-    address(identifier,pathlib.Path(os.environ['HOME'])/'.local/share/opencode/opencode.db','--session' in args)
+    address(identifier,pathlib.Path(os.environ['XDG_DATA_HOME'])/'opencode/opencode.db','--session' in args)
     emit({'type':'text','sessionID':identifier,'part':{'id':'text','messageID':'message','text':answer}})
     emit({'type':'step_finish','sessionID':identifier,'part':{'id':'finish','messageID':'message','reason':'stop','tokens':{'input':10,'output':2,'reasoning':0,'cache':{'read':0,'write':0}}}})
 elif harness == 'hermes':

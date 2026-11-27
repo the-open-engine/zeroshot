@@ -3,26 +3,21 @@ use serde_json::Value;
 use crate::native_v2_runner::NodeRunnerError;
 
 pub(super) fn classify(error: &Value) -> Option<NodeRunnerError> {
-    let name = error.get("name")?.as_str()?;
-    let data = error.get("data")?;
-    let detail = data.get("message").and_then(Value::as_str).unwrap_or(name);
-    match name {
-        "ProviderAuthError" => Some(NodeRunnerError::AuthenticationRequired(detail.to_owned())),
-        "APIError" if data.get("statusCode").and_then(Value::as_u64) == Some(401) => {
-            Some(NodeRunnerError::AuthenticationRequired(detail.to_owned()))
-        }
-        // A 404 alone does not establish that the requested model was rejected.
-        "APIError" => {
-            let body: Value = serde_json::from_str(data.get("responseBody")?.as_str()?).ok()?;
-            (body.pointer("/error/code")?.as_str()? == "model_not_found")
-                .then(|| NodeRunnerError::ModelUnavailable(detail.to_owned()))
-        }
-        "ProviderModelNotFoundError" => {
-            let model = data.get("modelID")?.as_str()?;
-            Some(NodeRunnerError::ModelUnavailable(format!(
-                "model {model}: {detail}"
-            )))
-        }
-        _ => None,
+    let kind = error.get("type")?.as_str()?;
+    let detail = error.get("message").and_then(Value::as_str).unwrap_or(kind);
+    let status = error.get("status").and_then(Value::as_u64);
+    if kind == "provider.auth" || status == Some(401) {
+        return Some(NodeRunnerError::AuthenticationRequired(detail.to_owned()));
     }
+    if kind == "provider.invalid-request" && status == Some(404) {
+        // A 404 alone does not establish that the requested model was rejected.
+        let body: Value = serde_json::from_str(error.pointer("/response/body")?.as_str()?).ok()?;
+        if body.pointer("/error/code")?.as_str()? == "model_not_found" {
+            return Some(NodeRunnerError::ModelUnavailable(detail.to_owned()));
+        }
+    }
+    if kind == "provider.no-route" && detail.starts_with("Model unavailable:") {
+        return Some(NodeRunnerError::ModelUnavailable(detail.to_owned()));
+    }
+    None
 }

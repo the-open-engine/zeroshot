@@ -2,7 +2,9 @@ use super::*;
 use crate::active_memory::hooks::{ActiveMemoryHooks, ActiveMemorySource, HookQuery};
 use crate::execution::process::HostedProcessScope;
 use crate::native_v2_candidate::test_support::TestDirectory;
+use crate::native_v2_contract::NodeRuntimeBinding;
 use crate::native_v2_runner::test_support::control;
+use crate::worker_catalog::ReasoningEffort;
 
 pub(super) fn adapter(directory: &TestDirectory, body: &str) -> OpenCodeAdapter {
     let executable = directory.write_executable("opencode", body);
@@ -35,6 +37,7 @@ pub(super) fn invocation(fields: &[(&str, &str)]) -> DriverInvocation {
         Arc::new(OpenCodeSession {
             core: ProviderSessionCore::new(),
             id: Mutex::new(None),
+            login: Mutex::new(None),
         }),
     )
 }
@@ -43,7 +46,7 @@ fn script(answer: &str) -> String {
     let text = text_event("t1", "m1", answer).to_string();
     let finish = finish_event("f1", "m1", "stop").to_string();
     format!(
-        "#!/bin/sh\nif [ \"$1\" = debug ]; then printf '%s\\n' '{{}}'; exit 0; fi\ncat >/dev/null\nprintf '%s\\n' '{text}' '{finish}'\n"
+        "#!/bin/sh\nif [ \"$1\" = auth ]; then printf '[]\\n'; exit 0; fi\nif [ \"$1\" = debug ]; then printf '%s\\n' '{{}}'; exit 0; fi\ncat >/dev/null\nprintf '%s\\n' '{text}' '{finish}'\n"
     )
 }
 
@@ -116,7 +119,10 @@ async fn local_declared_execution_keeps_native_policy_without_debug_or_auto() {
     let marker = forbidden.to_string_lossy().replace('\'', "'\\''");
     let body = format!(
         "#!/bin/sh\nfor arg in \"$@\"; do case \"$arg\" in debug|--auto) printf forbidden > '{marker}'; exit 99;; esac; done\n{}",
-        script("{\"response\":null}")
+        script("{\"response\":null}").replace(
+            "cat >/dev/null",
+            &format!("{LOADS_PLUGINS}\ncat >/dev/null"),
+        )
     );
     let mut adapter = adapter(&directory, &body);
     adapter.local_environment.insert(
@@ -173,7 +179,6 @@ fn declared_provider_keeps_native_homes_resources_and_mcp_configuration() {
     );
     for name in [
         "XDG_CONFIG_HOME",
-        "XDG_DATA_HOME",
         "OPENCODE_CONFIG",
         "OPENCODE_CONFIG_DIR",
         "OPENCODE_MODELS_PATH",
@@ -191,28 +196,86 @@ fn declared_provider_keeps_native_homes_resources_and_mcp_configuration() {
 }
 
 #[test]
-fn native_pure_mode_is_kept_without_declared_authentication() {
-    let directory = TestDirectory::new("opencode-native-pure-mode");
-    let mut adapter = adapter(&directory, "#!/bin/sh\nexit 0\n");
-    adapter
-        .local_environment
-        .insert("OPENCODE_PURE".to_owned(), "1".to_owned());
+fn launch_arguments_carry_effort_in_the_model_and_use_a_private_server() {
+    let directory = TestDirectory::new("opencode-launch-arguments");
+    let adapter = adapter(&directory, "#!/bin/sh\nexit 0\n");
     let files =
         ProviderExecutionFiles::for_test(directory.path(), HostedProcessScope::WriterExecution(1))
             .assert_value();
-    let native = invocation(&[]);
-    let native = command::command(command::CommandRequest {
+
+    // Effort travels in the model; the run starts a private server for the invocation.
+    let mut effort_invocation = invocation(&[]);
+    let model = {
+        let NodeRuntimeBinding::Agent { model, effort, .. } = &mut effort_invocation.node.binding
+        else {
+            panic!("expected an agent binding");
+        };
+        let model = model.as_str().to_owned();
+        *effort = Some(ReasoningEffort::High);
+        model
+    };
+    let command = command::command(command::CommandRequest {
         adapter: &adapter,
-        invocation: &native,
+        invocation: &effort_invocation,
+        files: &files,
+        session_id: Some("ses_test"),
+    })
+    .assert_value();
+    let mut expected = vec![
+        "run".to_owned(),
+        "--standalone".to_owned(),
+        "--format".to_owned(),
+        "json".to_owned(),
+        "--model".to_owned(),
+    ];
+    expected.push(format!("anthropic/{model}#high"));
+    expected.push("--session".to_owned());
+    expected.push("ses_test".to_owned());
+    assert!(command.argv.starts_with(&expected), "{:?}", command.argv);
+    assert!(
+        !command.argv.iter().any(|arg| arg == "--variant"),
+        "{:?}",
+        command.argv
+    );
+
+    // Without effort the model carries no suffix.
+    let no_effort = invocation(&[]);
+    let model = {
+        let NodeRuntimeBinding::Agent { model, .. } = &no_effort.node.binding else {
+            panic!("expected an agent binding");
+        };
+        model.as_str().to_owned()
+    };
+    let command = command::command(command::CommandRequest {
+        adapter: &adapter,
+        invocation: &no_effort,
         files: &files,
         session_id: None,
     })
     .assert_value();
-    assert_eq!(native.environment["OPENCODE_PURE"], "1");
-    let declared = invocation(&[("ANTHROPIC_API_KEY", "declared-key")]);
+    let mut expected = vec![
+        "run".to_owned(),
+        "--standalone".to_owned(),
+        "--format".to_owned(),
+        "json".to_owned(),
+        "--model".to_owned(),
+    ];
+    expected.push(format!("anthropic/{model}"));
+    assert!(command.argv.starts_with(&expected), "{:?}", command.argv);
     assert!(
-        matches!(command::command(command::CommandRequest { adapter: &adapter, invocation: &declared, files: &files, session_id: None }),
-        Err(NodeRunnerError::DriverDetail(message)) if message.contains("pure mode disables"))
+        !command.argv.iter().any(|arg| arg == "--variant"),
+        "{:?}",
+        command.argv
+    );
+    let model_index = command
+        .argv
+        .iter()
+        .position(|arg| arg == "--model")
+        .unwrap();
+    assert!(
+        !command.argv[model_index + 1].contains('#'),
+        "{:?}",
+        command.argv
     );
 }
 
@@ -310,13 +373,9 @@ fn native_context_captures_managed_location_and_project_discovery_controls() {
 }
 
 #[test]
-fn a_declared_key_suppresses_stored_auth_and_uses_environment_interpolation() {
+fn a_declared_key_drops_foreign_keys_and_uses_environment_interpolation() {
     let directory = TestDirectory::new("opencode-declared-auth");
     let mut adapter = adapter(&directory, "#!/bin/sh\nexit 0\n");
-    adapter.local_environment.insert(
-        "OPENCODE_AUTH_CONTENT".to_owned(),
-        r#"{"anthropic":{"type":"api","key":"native-secret"}}"#.to_owned(),
-    );
     adapter
         .local_environment
         .insert("OPENAI_API_KEY".to_owned(), "foreign-secret".to_owned());
@@ -331,13 +390,6 @@ fn a_declared_key_suppresses_stored_auth_and_uses_environment_interpolation() {
         session_id: None,
     })
     .assert_value();
-    assert_eq!(
-        command
-            .environment
-            .get("OPENCODE_AUTH_CONTENT")
-            .map(String::as_str),
-        Some("{}")
-    );
     assert!(!command.environment.contains_key("OPENAI_API_KEY"));
     let config: Value =
         serde_json::from_str(&command.environment["OPENCODE_CONFIG_CONTENT"]).assert_value();
@@ -346,7 +398,8 @@ fn a_declared_key_suppresses_stored_auth_and_uses_environment_interpolation() {
         "{env:ANTHROPIC_API_KEY}"
     );
     assert!(!config.to_string().contains("declared-secret"));
-    assert_eq!(command.argv[4], "anthropic/opaque/model");
+    assert_eq!(command.argv[5], "anthropic/zeroshot-guarded");
+    owned_plugin(&command, "zeroshot-provider-auth");
 }
 
 #[test]
@@ -408,13 +461,10 @@ fn a_declared_key_does_not_promote_ambient_endpoint_over_native_configuration() 
 fn contained_configuration_discards_native_homes_and_authentication() {
     let directory = TestDirectory::new("opencode-contained-native-state");
     let mut configuration = adapter(&directory, "#!/bin/sh\nexit 0\n").config;
-    configuration.native_environment = LocalHarnessEnvironment::new(BTreeMap::from([
-        ("ANTHROPIC_API_KEY".to_owned(), "ambient-secret".to_owned()),
-        (
-            "OPENCODE_AUTH_CONTENT".to_owned(),
-            r#"{"anthropic":{"type":"api","key":"stored-secret"}}"#.to_owned(),
-        ),
-    ]));
+    configuration.native_environment = LocalHarnessEnvironment::new(BTreeMap::from([(
+        "ANTHROPIC_API_KEY".to_owned(),
+        "ambient-secret".to_owned(),
+    )]));
     let contained = OpenCodeAdapter::new(configuration).assert_value();
     assert!(contained.config.local_user_home.is_none());
     assert!(contained.local_environment.is_empty());
@@ -439,7 +489,6 @@ fn contained_configuration_discards_native_homes_and_authentication() {
     contained.apply_permission_default(&mut command);
     assert!(command.argv.iter().any(|argument| argument == "--auto"));
     assert_eq!(command.environment["ANTHROPIC_API_KEY"], "declared-secret");
-    assert_eq!(command.environment["OPENCODE_AUTH_CONTENT"], "{}");
     assert_eq!(command.environment["HOME"], files.home().to_string_lossy());
 }
 
@@ -563,11 +612,12 @@ fn a_session_write_that_never_settles_does_not_hold_the_tool_call() {
     let plugin = NativePlugin::new("opencode-native-memory-unsettled");
     let reply = json!({"context":" recalled-marker","steer":"<steer>\n[id] go\n</steer>"});
     let receipts = memory_callback_receipts(&plugin.files, reply.to_string(), &["read"]);
-    let source_code = r#"const {default:create}=await import(process.argv[1]);
+    let source_code = r#"const {default:plugin}=await import(new URL('index.js',process.argv[1]));
 let writes=0;
-const client={session:{prompt:()=>{ writes+=1; return new Promise(()=>{}); }}};
-const plugin=await create({directory:process.argv[2],client});
-await plugin['tool.execute.after']({tool:'read',sessionID:'ses_fixture',callID:'call1',args:{filePath:'README.md'}},{output:'original'});
+const hooks={};
+const ctx={location:{directory:process.argv[2]},tool:{hook:async (name,fn)=>{hooks[name]=fn;}},session:{synthetic:()=>{ writes+=1; return new Promise(()=>{}); }}};
+await plugin.setup(ctx);
+await hooks['execute.after']({tool:'read',sessionID:'ses_fixture',input:{filePath:'README.md'},status:'completed',result:{output:'original'}});
 console.log(JSON.stringify({writes}));"#;
     let output = node_command()
         .args(["--input-type=module", "-e", source_code, &plugin.url])
@@ -588,6 +638,39 @@ console.log(JSON.stringify({writes}));"#;
         vec![None],
         "a message that was not stored is not acknowledged"
     );
+}
+
+#[test]
+fn a_failed_tool_call_still_stores_the_steer() {
+    let plugin = NativePlugin::new("opencode-native-memory-failed-tool");
+    let reply = json!({"context":"","steer":"<steer>\n[id] go\n</steer>"});
+    let receipts = memory_callback_receipts(&plugin.files, reply.to_string(), &["read"]);
+    let source_code = r#"const {default:plugin}=await import(new URL('index.js',process.argv[1]));
+const stored=[];
+const hooks={};
+const ctx={location:{directory:process.argv[2]},tool:{hook:async (name,fn)=>{hooks[name]=fn;}},session:{synthetic:async (request)=>{
+  stored.push(request); return {id:'msg_'+stored.length};
+}}};
+await plugin.setup(ctx);
+await hooks['execute.after']({tool:'read',sessionID:'ses_fixture',input:{filePath:'README.md'},status:'error'});
+console.log(JSON.stringify({stored}));"#;
+    let output = node_command()
+        .args(["--input-type=module", "-e", source_code, &plugin.url])
+        .arg(&plugin.files.workspace)
+        .output()
+        .assert_value();
+    let receipts = receipts.join().assert_value();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let returned: Value = serde_json::from_slice(&output.stdout).assert_value();
+    assert_eq!(
+        returned["stored"],
+        json!([{"sessionID":"ses_fixture","text":"<steer>\n[id] go\n</steer>","delivery":"steer","resume":false}])
+    );
+    assert_eq!(receipts, vec![Some(1)]);
 }
 
 /// The memory plugin as a real command installs it, with the files its capability lives in.
@@ -624,14 +707,7 @@ impl NativePlugin {
         let config: Value =
             serde_json::from_str(&command.environment["OPENCODE_CONFIG_CONTENT"]).assert_value();
         assert_eq!(config["permission"]["edit"], "deny");
-        let url = config["plugin"]
-            .as_array()
-            .assert_value()
-            .last()
-            .assert_value()
-            .as_str()
-            .assert_value()
-            .to_owned();
+        let url = owned_plugin(&command, "zeroshot-active-memory");
         Self {
             _directory: directory,
             _adapter: adapter,
@@ -658,27 +734,30 @@ fn exercise_native_plugin_messages(context: &str, steer: &str) {
         reply,
         &["read", "nativeproof_record", "nativeproof_record"],
     );
-    // Like OpenCode's client, `session.prompt` resolves to data or to an error; it does not throw.
-    let source_code = r#"const {default:create}=await import(process.argv[1]);
+    // Like OpenCode 2, `session.synthetic` rejects when it cannot store a message.
+    let source_code = r#"const {default:plugin}=await import(new URL('index.js',process.argv[1]));
 const stored=[];
-const client={session:{prompt:async (request)=>{
-  if (request.path.id==='ses_refused') return {error:{name:'NotFoundError'}};
-  stored.push(request); return {data:{info:{id:'msg_'+stored.length}}};
+const hooks={};
+const ctx={location:{directory:process.argv[2]},tool:{hook:async (name,fn)=>{hooks[name]=fn;}},session:{synthetic:async (request)=>{
+  if (request.sessionID==='ses_refused') throw new Error('Session.NotFoundError');
+  stored.push(request); return {id:'msg_'+stored.length};
 }}};
-const plugin=await create({directory:process.argv[2],client});
-const output={title:'read',output:'original',metadata:{}};
-const builtin=structuredClone(output);
-await plugin['tool.execute.after']({tool:'read',sessionID:'ses_fixture',callID:'call1',args:{filePath:'README.md'}},output);
-const mcp={content:[
+await plugin.setup(ctx);
+const after=hooks['execute.after'];
+const first={tool:'read',sessionID:'ses_fixture',input:{filePath:'README.md'},status:'completed',result:{content:'original',output:'original',metadata:{}}};
+const builtin=structuredClone(first.result);
+await after(first);
+const mcpResult={content:[
   {type:'text',text:'original MCP text',annotations:{priority:0.5}},
   {type:'image',mimeType:'image/png',data:'AAAA'},
   {type:'resource',resource:{uri:'file:///native.pdf',mimeType:'application/pdf',blob:'AA=='}},
   {type:'resource_link',uri:'file:///native.txt',name:'native attachment'}
 ],output:'MCP extension output',structuredContent:{result:{count:2}},metadata:{native:true},_meta:{native:'unchanged'},isError:false};
-const before=structuredClone(mcp);
-await plugin['tool.execute.after']({tool:'nativeproof_record',sessionID:'ses_fixture',callID:'call2',args:{marker:'mcp-fixture'}},mcp);
-await plugin['tool.execute.after']({tool:'nativeproof_record',sessionID:'ses_refused',callID:'call3',args:{marker:'mcp-fixture'}},null);
-console.log(JSON.stringify({output,builtin,mcp,before,stored}));"#;
+const before=structuredClone(mcpResult);
+const second={tool:'nativeproof_record',sessionID:'ses_fixture',input:{marker:'mcp-fixture'},status:'completed',result:mcpResult};
+await after(second);
+await after({tool:'nativeproof_record',sessionID:'ses_refused',input:{marker:'mcp-fixture'},status:'error'});
+console.log(JSON.stringify({output:first.result,builtin,mcp:second.result,before,stored}));"#;
     let output = node_command()
         .args(["--input-type=module", "-e", source_code, &plugin_url])
         .arg(&files.workspace)
@@ -695,7 +774,7 @@ console.log(JSON.stringify({output,builtin,mcp,before,stored}));"#;
     assert_eq!(returned["output"], returned["builtin"]);
     assert_eq!(returned["mcp"], returned["before"]);
     // Each text is a message of its own, stored without starting a model turn, the steer first.
-    let message = |text: &str| json!({"path":{"id":"ses_fixture"},"body":{"noReply":true,"parts":[{"type":"text","text":text}]}});
+    let message = |text: &str| json!({"sessionID":"ses_fixture","text":text,"delivery":"steer","resume":false});
     let expected: Vec<Value> = [steer, context]
         .into_iter()
         .filter(|text| !text.is_empty())
@@ -705,12 +784,144 @@ console.log(JSON.stringify({output,builtin,mcp,before,stored}));"#;
     assert_eq!(stored.len(), 2 * expected.len());
     assert_eq!(&stored[..expected.len()], expected.as_slice());
     assert_eq!(&stored[expected.len()..], expected.as_slice());
+    assert!(
+        std::path::Path::new(&files.scratch_text().assert_value())
+            .join("zeroshot-plugins")
+            .join("zeroshot-active-memory.loaded")
+            .exists(),
+        "the owned plugin must have written its load marker"
+    );
     drop(adapter);
     assert_eq!(
         receipts,
         vec![Some(1), Some(1), None],
         "stored messages are acknowledged; a session that stores nothing acknowledges nothing"
     );
+}
+
+#[tokio::test]
+async fn a_turn_whose_owned_plugin_did_not_load_fails_the_node() {
+    let directory = TestDirectory::new("opencode-plugin-load-missing");
+    let body = script("{\"response\":null}");
+    let missing = adapter(&directory, &body);
+    let first = invocation(&[("ANTHROPIC_API_KEY", "declared-key")]);
+    let error = run(&missing, first).await.err().assert_value();
+    let message = error.to_string();
+    assert!(
+        message.contains("OpenCode plugin zeroshot-provider-auth did not load"),
+        "{message}"
+    );
+    assert!(!message.contains("declared-key"), "{message}");
+
+    let directory = TestDirectory::new("opencode-plugin-load-present");
+    let body = script("{\"response\":null}").replace(
+        "cat >/dev/null",
+        &format!("{LOADS_PLUGINS}\ncat >/dev/null"),
+    );
+    let present = adapter(&directory, &body);
+    let second = invocation(&[("ANTHROPIC_API_KEY", "declared-key")]);
+    run(&present, second).await.assert_value();
+
+    let directory = TestDirectory::new("opencode-plugin-load-once");
+    let body = script("{\"response\":null}").replace(
+        "cat >/dev/null",
+        &format!(
+            "if [ ! -f loaded-once ]; then : > loaded-once; {LOADS_PLUGINS}; fi\ncat >/dev/null"
+        ),
+    );
+    let once = adapter(&directory, &body);
+    let third = invocation(&[("ANTHROPIC_API_KEY", "declared-key")]);
+    run(&once, third.clone()).await.assert_value();
+    let error = run(&once, third).await.err().assert_value();
+    assert!(
+        error
+            .to_string()
+            .contains("OpenCode plugin zeroshot-provider-auth did not load"),
+        "stale load markers from a previous turn must not count"
+    );
+}
+
+#[tokio::test]
+async fn a_worker_cannot_remove_an_owned_plugin_from_the_load_check() {
+    let directory = TestDirectory::new("opencode-plugin-root-removed");
+    let remover = r##"root=$(printf '%s' "$OPENCODE_CONFIG_CONTENT" | grep -o 'file://[^"]*/zeroshot-plugins/' | head -n 1 | sed 's#^file://##'); [ -n "$root" ] && rm -rf "$root" && [ ! -e "$root" ] && : > removed-plugins"##;
+    let body = script("{\"response\":null}")
+        .replace("cat >/dev/null", &format!("{remover}\ncat >/dev/null"));
+    let adapter = adapter(&directory, &body);
+    let error = run(
+        &adapter,
+        invocation(&[("ANTHROPIC_API_KEY", "declared-key")]),
+    )
+    .await
+    .err()
+    .assert_value();
+    assert!(
+        adapter.config.workspace.join("removed-plugins").exists(),
+        "the plugin root named by the inline configuration must have been removed"
+    );
+    let message = error.to_string();
+    assert!(
+        message.contains("OpenCode plugin zeroshot-provider-auth did not load"),
+        "{message}"
+    );
+    assert!(!message.contains("declared-key"), "{message}");
+}
+
+#[tokio::test]
+async fn a_declared_provider_conflict_is_reported_instead_of_the_native_error() {
+    let directory = TestDirectory::new("opencode-declared-provider-conflict");
+    let native_error = json!({
+        "type": "error",
+        "error": {"type": "provider.invalid-output", "message": "Failed to read stream"}
+    })
+    .to_string();
+    let body = script("{\"response\":null}").replace(
+        "cat >/dev/null",
+        &format!(
+            "{LOADS_PLUGINS}\nprintf '%s' 'Zeroshot OpenCode declared provider conflict: x-api-key' > \"$TMPDIR/zeroshot-plugins/zeroshot-provider-auth.conflict\"\ncat >/dev/null\nprintf '%s\\n' '{native_error}'\nexit 1\n"
+        ),
+    );
+    let adapter = adapter(&directory, &body);
+    let detail = run(
+        &adapter,
+        invocation(&[("ANTHROPIC_API_KEY", "declared-key")]),
+    )
+    .await
+    .err()
+    .assert_value()
+    .to_string();
+    assert!(
+        detail.contains("Zeroshot OpenCode declared provider conflict: x-api-key"),
+        "{detail}"
+    );
+    assert!(!detail.contains("Failed to read stream"), "{detail}");
+}
+
+#[tokio::test]
+async fn an_unexpected_conflict_file_is_reported_without_its_content() {
+    let directory = TestDirectory::new("opencode-unexpected-conflict-content");
+    let native_error = json!({
+        "type": "error",
+        "error": {"type": "provider.invalid-output", "message": "Failed to read stream"}
+    })
+    .to_string();
+    let body = script("{\"response\":null}").replace(
+        "cat >/dev/null",
+        &format!(
+            "{LOADS_PLUGINS}\nprintf '%s' 'Zeroshot OpenCode declared provider conflict: x-api-key=leaked!' > \"$TMPDIR/zeroshot-plugins/zeroshot-provider-auth.conflict\"\ncat >/dev/null\nprintf '%s\\n' '{native_error}'\nexit 1\n"
+        ),
+    );
+    let adapter = adapter(&directory, &body);
+    let detail = run(
+        &adapter,
+        invocation(&[("ANTHROPIC_API_KEY", "declared-key")]),
+    )
+    .await
+    .err()
+    .assert_value()
+    .to_string();
+    assert!(detail.contains("declared provider conflict"), "{detail}");
+    assert!(!detail.contains("leaked"), "{detail}");
 }
 
 #[tokio::test]
@@ -736,7 +947,11 @@ async fn native_args_and_config_are_isolated_and_survive_reused_sessions() {
     assert_eq!(configs.len(), 3);
     assert_eq!(configs[0]["permission"]["edit"], "deny");
     assert_eq!(configs[1]["permission"]["edit"], "deny");
-    assert!(configs[2].get("permission").is_none());
+    assert_eq!(configs[0]["permission"]["opencode_session_move"], "deny");
+    assert_eq!(
+        configs[2]["permission"],
+        json!({"opencode_session_move": "deny"})
+    );
 }
 
 #[tokio::test]
@@ -744,7 +959,7 @@ async fn native_configuration_rejection_is_terminal_with_native_stderr() {
     let directory = TestDirectory::new("opencode-native-rejection");
     let adapter = adapter(
         &directory,
-        "#!/bin/sh\nprintf 'launch\\n' >> launches\nprintf '%s\\n' 'invalid --title native-value' >&2\nexit 2\n",
+        "#!/bin/sh\nif [ \"$1\" = auth ]; then printf '[]\\n'; exit 0; fi\nprintf 'launch\\n' >> launches\nprintf '%s\\n' 'invalid --title native-value' >&2\nexit 2\n",
     );
     let mut invocation = invocation(&[]);
     crate::harnesses::native_config::tests::set(
@@ -766,13 +981,34 @@ async fn native_configuration_rejection_is_terminal_with_native_stderr() {
 }
 
 #[tokio::test]
+async fn a_failed_process_reports_its_own_failure_without_a_load_marker() {
+    let directory = TestDirectory::new("opencode-failed-process-without-load-marker");
+    let adapter = adapter(
+        &directory,
+        "#!/bin/sh\nif [ \"$1\" = auth ]; then printf '[]\\n'; exit 0; fi\nprintf '%s\\n' 'invalid --title native-value' >&2\nexit 2\n",
+    );
+    let mut invocation = invocation(&[("ANTHROPIC_API_KEY", "declared-key")]);
+    crate::harnesses::native_config::tests::set(
+        &mut invocation.node.binding,
+        json!({"args":["--title","native-value"]}),
+    );
+    let detail = run(&adapter, invocation).await.unwrap_err().to_string();
+    assert!(
+        detail.contains("--title") && detail.contains("opencode"),
+        "{detail}"
+    );
+    assert!(!detail.contains("did not load"), "{detail}");
+    assert!(!detail.contains("declared-key"), "{detail}");
+}
+
+#[tokio::test]
 async fn per_node_pure_mode_is_rejected_before_launch_with_or_without_owned_plugins() {
     let directory = TestDirectory::new("opencode-pure-native-config");
     for memory in [false, true] {
         for fields in [&[][..], &[("ANTHROPIC_API_KEY", "declared-key")][..]] {
             let mut adapter = adapter(
                 &directory,
-                "#!/bin/sh\nprintf 'launch\\n' >> launches\nexit 0\n",
+                "#!/bin/sh\nif [ \"$1\" = auth ]; then printf '[]\\n'; exit 0; fi\nprintf 'launch\\n' >> launches\nexit 0\n",
             );
             if memory {
                 let source = Arc::new(RecallMemory);
@@ -830,4 +1066,84 @@ async fn dispatch_metadata_reaches_opencode_correction_processes() {
             "step",
         );
     }
+}
+
+#[test]
+fn a_declared_lane_keeps_its_effort_on_the_guarded_model() {
+    let directory = TestDirectory::new("opencode-declared-guarded-effort");
+    let adapter = adapter(&directory, "#!/bin/sh\nexit 0\n");
+    let files =
+        ProviderExecutionFiles::for_test(directory.path(), HostedProcessScope::WriterExecution(1))
+            .assert_value();
+    let mut invocation = invocation(&[("ANTHROPIC_API_KEY", "declared-secret")]);
+    let NodeRuntimeBinding::Agent { effort, .. } = &mut invocation.node.binding else {
+        panic!("agent binding expected");
+    };
+    *effort = Some(ReasoningEffort::High);
+    let command = command::command(command::CommandRequest {
+        adapter: &adapter,
+        invocation: &invocation,
+        files: &files,
+        session_id: None,
+    })
+    .assert_value();
+    assert_eq!(command.argv[5], "anthropic/zeroshot-guarded#high");
+}
+
+#[tokio::test]
+async fn a_missing_guarded_model_without_the_auth_plugin_reports_the_plugin() {
+    let directory = TestDirectory::new("opencode-guarded-model-without-plugin");
+    let native_error = json!({
+        "type": "error",
+        "sessionID": "ses_fixture",
+        "error": {"type": "provider.no-route", "message": "Model unavailable: anthropic/zeroshot-guarded"}
+    })
+    .to_string();
+    let body = format!(
+        "#!/bin/sh\nif [ \"$1\" = auth ]; then printf '[]\\n'; exit 0; fi\ncat >/dev/null\nprintf '%s\\n' '{native_error}'\nexit 1\n"
+    );
+    let adapter = adapter(&directory, &body);
+    let detail = run(
+        &adapter,
+        invocation(&[("ANTHROPIC_API_KEY", "declared-key")]),
+    )
+    .await
+    .err()
+    .assert_value()
+    .to_string();
+    assert!(
+        detail.contains("OpenCode plugin zeroshot-provider-auth did not load"),
+        "{detail}"
+    );
+    assert!(!detail.contains("declared-key"), "{detail}");
+}
+
+#[tokio::test]
+async fn an_unknown_lane_model_with_the_auth_plugin_names_the_lane_model() {
+    let directory = TestDirectory::new("opencode-guarded-model-unknown");
+    let native_error = json!({
+        "type": "error",
+        "sessionID": "ses_fixture",
+        "error": {"type": "provider.no-route", "message": "Model unavailable: anthropic/zeroshot-guarded"}
+    })
+    .to_string();
+    let body = format!(
+        "#!/bin/sh\nif [ \"$1\" = auth ]; then printf '[]\\n'; exit 0; fi\n{LOADS_PLUGINS}\ncat >/dev/null\nprintf '%s\\n' '{native_error}'\nexit 1\n"
+    );
+    let adapter = adapter(&directory, &body);
+    let error = run(
+        &adapter,
+        invocation(&[("ANTHROPIC_API_KEY", "declared-key")]),
+    )
+    .await
+    .err()
+    .assert_value();
+    let detail = error.to_string();
+    assert!(
+        matches!(error, NodeRunnerError::ModelUnavailable(_)),
+        "{detail}"
+    );
+    assert!(detail.contains("anthropic/opaque/model"), "{detail}");
+    assert!(!detail.contains("zeroshot-guarded"), "{detail}");
+    assert!(!detail.contains("did not load"), "{detail}");
 }

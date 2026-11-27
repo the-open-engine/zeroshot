@@ -2,7 +2,7 @@
 pub mod hermes;
 pub mod opencode;
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod test_support;
 
 pub(crate) fn register(registry: &mut crate::harnesses::HarnessRegistry) {

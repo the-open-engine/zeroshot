@@ -5,7 +5,8 @@ use crate::native_v2_runner::conversations::{ConversationLayout, select_files};
 pub(super) fn layout(home: &Path) -> ConversationLayout {
     ConversationLayout {
         harness: "opencode",
-        storage: home.join(".local/share/opencode"),
+        // `XDG_DATA_HOME` of the private store (see `store::private_environment`).
+        storage: home.join("opencode").join("data").join("opencode"),
         select,
         relocate: None,
     }

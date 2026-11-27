@@ -3,11 +3,13 @@ use std::collections::BTreeMap;
 #[cfg(unix)]
 use std::sync::Arc;
 
-use openengine_cluster_protocol::NodeName;
+use openengine_cluster_protocol::{HarnessConfiguration, NodeName};
 use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::{Value, json};
 
 use super::*;
+#[cfg(unix)]
+use crate::execution::process::ProcessSessionCommand;
 use crate::execution::SessionScope;
 use crate::native_v2_capsule::provider_process::turn::ProviderTranscript;
 use crate::native_v2_capsule::provider_process::{ProviderProcessFailure, ProviderProcessFailureKind};
@@ -24,6 +26,35 @@ fn node_command() -> std::process::Command {
     command.env_clear();
     command
 }
+
+#[cfg(unix)]
+pub(super) const LOADS_PLUGINS: &str = r#"for plugin in $(printf '%s' "$OPENCODE_CONFIG_CONTENT" | grep -o 'zeroshot-plugins/[^/"]*/' | cut -d/ -f2); do mkdir -p "$TMPDIR/zeroshot-plugins"; : > "$TMPDIR/zeroshot-plugins/$plugin.loaded"; done"#;
+
+#[cfg(unix)]
+pub(super) fn owned_plugin(command: &ProcessSessionCommand, id: &str) -> String {
+    let config: Value =
+        serde_json::from_str(&command.environment["OPENCODE_CONFIG_CONTENT"]).assert_value();
+    let suffix = format!("/zeroshot-plugins/{id}/");
+    let matches = config["plugins"]
+        .as_array()
+        .assert_value()
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|url| url.ends_with(&suffix))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        matches.len(),
+        1,
+        "expected exactly one owned plugin for {id}"
+    );
+    matches.into_iter().next().assert_value().to_owned()
+}
+
+#[cfg(unix)]
+pub(super) const PLUGIN_SETUP: &str = r#"const {default:plugin} = await import(new URL('index.js', process.argv[1]));
+const hooks = {};
+const ctx = {location:{directory:process.argv[2]}, tool:{hook: async (name, fn) => { hooks['tool.' + name] = fn; }}, session:{hook: async (name, fn) => { hooks['session.' + name] = fn; }}, model:{transform: async (fn) => { hooks['model.transform'] = fn; }}};
+await plugin.setup(ctx);"#;
 
 fn event(kind: &str, id: &str, message: &str) -> Value {
     json!({"type":kind,"sessionID":"ses_fixture","part":{"id":id,"messageID":message}})
@@ -204,18 +235,17 @@ fn clean_stderr() -> Option<ProviderProcessFailure> {
 }
 
 #[test]
-fn answer_step_after_tools_settles_on_a_clean_exit_with_unknown_usage() {
+fn answer_step_after_tools_without_its_final_step_fails() {
     for process_failure in [None, clean_stderr()] {
         let transcript = unfinished_tool_turn();
         assert!(!transcript.is_success());
-        assert!(transcript.token_usage().is_none());
-        match transcript.finish(process_failure).assert_value() {
-            ProviderAttempt::Complete(result) => {
-                assert_eq!(result.message, "{\"response\":\"done\"}");
-                assert_eq!(result.session_id.as_deref(), Some("ses_fixture"));
-            }
-            ProviderAttempt::Failed(_) => panic!("2.x answer step must settle on a clean exit"),
-        }
+        assert!(
+            matches!(
+                transcript.finish(process_failure).assert_value(),
+                ProviderAttempt::Failed(_)
+            ),
+            "an answer step without its final step must fail"
+        );
     }
 }
 
@@ -231,7 +261,7 @@ fn reported_answer_step_after_tools_keeps_complete_usage() {
 }
 
 #[test]
-fn unfinished_steps_without_the_exact_two_x_shape_still_fail() {
+fn unfinished_steps_still_fail() {
     let failed_exit = Some(ProviderProcessFailure {
         kind: ProviderProcessFailureKind::Completion,
         detail: "exit status 1".to_owned(),
@@ -241,7 +271,7 @@ fn unfinished_steps_without_the_exact_two_x_shape_still_fail() {
     let mut native_error = unfinished_tool_turn();
     push(
         &mut native_error,
-        &json!({"type":"error","sessionID":"ses_fixture","error":{"name":"APIError"}}),
+        &json!({"type":"error","sessionID":"ses_fixture","error":{"type":"provider.unknown","message":"connection reset"}}),
     );
     cases.push(("native error", native_error, None));
 
@@ -292,6 +322,7 @@ fn declared_launch_controls_cannot_restore_native_managed_authority() {
         "opencode_test_managed_config_dir",
         "OPENCODE_CONFIG",
         "OPENCODE_PURE",
+        "OPENCODE_PERMISSION",
         "ProgramData",
         "pRoGrAmDaTa",
         "HOME",
@@ -321,12 +352,7 @@ fn declared_launch_controls_cannot_restore_native_managed_authority() {
             "{name}"
         );
     }
-    for name in [
-        "OPENAI_API_KEY",
-        "ANTHROPIC_BASE_URL",
-        "OPENCODE_PERMISSION",
-        "CUSTOM_CONTEXT",
-    ] {
+    for name in ["OPENAI_API_KEY", "ANTHROPIC_BASE_URL", "CUSTOM_CONTEXT"] {
         command::validate_connection_name(name, true).assert_value();
         command::validate_connection_name(name, false).assert_value();
     }
@@ -375,30 +401,59 @@ mod providers;
 #[path = "tests/github.rs"]
 mod github;
 
+#[cfg(unix)]
+#[path = "tests/store.rs"]
+mod store;
+
+#[cfg(unix)]
+#[path = "tests/oauth_renewal.rs"]
+mod oauth_renewal;
+
+#[cfg(unix)]
+#[path = "tests/plugin.rs"]
+mod plugin;
+
+#[cfg(unix)]
+#[path = "tests/session_tools.rs"]
+mod session_tools;
+
+#[path = "tests/lifecycle.rs"]
+mod lifecycle;
+
 #[test]
 fn native_authentication_and_model_errors_preserve_machine_classification() {
-    for error in [
-        json!({"name":"ProviderAuthError","data":{"providerID":"openai","message":"denied"}}),
-        json!({"name":"APIError","data":{"statusCode":401,"message":"denied"}}),
-        json!({"name":"APIError","data":{"statusCode":404,"message":"missing-model rejected",
-            "responseBody":"{\"error\":{\"code\":\"model_not_found\"}}"}}),
-        json!({"name":"ProviderModelNotFoundError","data":{"modelID":"missing-model"}}),
+    for (error, model_text) in [
+        (
+            json!({"type":"provider.auth","message":"bad key","status":401,
+                "response":{"body":"{\"error\": {\"message\": \"bad key\", \"type\": \"invalid_request_error\", \"code\": \"invalid_api_key\"}}"}}),
+            None,
+        ),
+        (json!({"type":"provider.auth","message":"denied"}), None),
+        (
+            json!({"type":"provider.invalid-request","message":"The model does not exist","status":404,
+                "response":{"body":"{\"error\": {\"message\": \"The model does not exist\", \"type\": \"invalid_request_error\", \"code\": \"model_not_found\"}}"}}),
+            Some("The model does not exist"),
+        ),
+        (
+            json!({"type":"provider.no-route","message":"Model unavailable: probe/nomodel"}),
+            Some("probe/nomodel"),
+        ),
     ] {
-        let auth = error["name"] == "ProviderAuthError" || error["data"]["statusCode"] == 401;
         let mut transcript = transcript::OpenCodeTranscript::new(None, vec![]);
         push(
             &mut transcript,
             &json!({"type":"error","sessionID":"ses_fixture","error":error}),
         );
         let result = transcript.finish(None);
-        if auth {
-            assert!(matches!(
-                result,
-                Err(NodeRunnerError::AuthenticationRequired(_))
-            ));
+        if let Some(model_text) = model_text {
+            assert!(
+                matches!(result, Err(NodeRunnerError::ModelUnavailable(detail)) if detail.contains(model_text)),
+                "{error}"
+            );
         } else {
             assert!(
-                matches!(result, Err(NodeRunnerError::ModelUnavailable(detail)) if detail.contains("missing-model"))
+                matches!(result, Err(NodeRunnerError::AuthenticationRequired(_))),
+                "{error}"
             );
         }
     }
@@ -407,9 +462,9 @@ fn native_authentication_and_model_errors_preserve_machine_classification() {
 #[test]
 fn unclassified_native_errors_and_cut_streams_remain_crashes() {
     for error in [
-        json!({"name":"APIError","data":{"statusCode":404,"message":"model not found"}}),
-        json!({"name":"UnknownError","data":{"message":"invalid API key"}}),
-        json!({"name":"APIError","data":{"message":"connection reset","isRetryable":true}}),
+        json!({"type":"provider.invalid-request","message":"model not found","status":404}),
+        json!({"type":"provider.no-route","message":"Variant unavailable for example/model: nonsense"}),
+        json!({"type":"provider.unknown","message":"connection reset"}),
     ] {
         let mut transcript = transcript::OpenCodeTranscript::new(None, vec![]);
         push(
@@ -420,5 +475,35 @@ fn unclassified_native_errors_and_cut_streams_remain_crashes() {
             transcript.finish(None),
             Ok(ProviderAttempt::Failed(_))
         ));
+    }
+}
+
+#[test]
+fn node_options_cannot_set_runtime_owned_controls_under_their_opencode_2_names() {
+    for name in [
+        "plugin",
+        "plugins",
+        "provider",
+        "providers",
+        "agent",
+        "agents",
+        "command",
+        "commands",
+    ] {
+        let config = HarnessConfiguration::new(json!({"options": {name: ["file:///node-plugin"]}}))
+            .assert_value();
+        assert!(native_config::validate(&config).is_err(), "{name}");
+    }
+}
+
+#[test]
+fn user_arguments_cannot_choose_the_server() {
+    for args in [
+        ["--standalone"].as_slice(),
+        ["--server", "http://x"].as_slice(),
+        ["--worktree"].as_slice(),
+    ] {
+        let config = HarnessConfiguration::new(json!({"args": args})).assert_value();
+        assert!(native_config::validate(&config).is_err(), "{args:?}");
     }
 }

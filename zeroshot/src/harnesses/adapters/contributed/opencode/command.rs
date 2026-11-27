@@ -23,16 +23,10 @@ pub(super) const LOCAL_ENVIRONMENT: &[&str] = &[
     "OPENCODE_CONFIG",
     "OPENCODE_CONFIG_DIR",
     "OPENCODE_CONFIG_CONTENT",
-    "OPENCODE_AUTH_CONTENT",
-    "OPENCODE_PERMISSION",
     "OPENCODE_GIT_BASH_PATH",
     "OPENCODE_MODELS_PATH",
-    "OPENCODE_DISABLE_AUTOCOMPACT",
     "OPENCODE_DISABLE_MODELS_FETCH",
-    "OPENCODE_DISABLE_LSP_DOWNLOAD",
-    "OPENCODE_DISABLE_DEFAULT_PLUGINS",
     "OPENCODE_DISABLE_PROJECT_CONFIG",
-    "OPENCODE_PURE",
     "OPENAI_API_KEY",
     "OPENAI_BASE_URL",
     "OPENAI_API_BASE",
@@ -89,7 +83,6 @@ const AUTHENTICATION: &[&str] = &[
     "GATEWAY_API_KEY",
     "OPENCODE_API_KEY",
     "AWS_BEARER_TOKEN_BEDROCK",
-    "OPENCODE_AUTH_CONTENT",
     "AWS_PROFILE",
     "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY",
@@ -104,6 +97,9 @@ const AUTHENTICATION: &[&str] = &[
     "AWS_CONFIG_FILE",
     "AWS_SHARED_CREDENTIALS_FILE",
 ];
+
+/// Model alias that only the owned auth plugin creates; a run without that plugin has no model.
+pub(super) const GUARDED_MODEL: &str = "zeroshot-guarded";
 
 pub(super) fn native_provider(provider: &str) -> &str {
     match provider {
@@ -166,13 +162,14 @@ pub(super) fn command(
         }
     }
     configure_provider(adapter, invocation, &mut environment, &mut config)?;
+    deny_session_move(&mut config)?;
     environment.insert(
         "OPENCODE_CONFIG_CONTENT".to_owned(),
         serde_json::to_string(&config).map_err(|_| NodeRunnerError::Driver)?,
     );
     let mut command = ProcessSessionCommand {
         program: adapter.config.executable.clone(),
-        argv: arguments(adapter, invocation, session_id)?,
+        argv: arguments(adapter, invocation, session_id, declared)?,
         environment,
         workspace: WorkspaceCapability {
             current_dir: files.workspace.clone(),
@@ -267,6 +264,9 @@ fn process_environment(
             .map_err(|error| NodeRunnerError::DriverDetail(error.to_string()))?,
     );
     environment.insert("OPENCODE_DISABLE_AUTOUPDATE".to_owned(), "1".to_owned());
+    for (name, value) in super::store::private_environment(files.home())? {
+        environment.insert(name.to_owned(), value);
+    }
     if adapter.runners.is_hosted() {
         environment.insert("OPENCODE_DISABLE_PROJECT_CONFIG".to_owned(), "1".to_owned());
     }
@@ -285,15 +285,14 @@ pub(super) fn validate_connection_name(name: &str, windows: bool) -> Result<(), 
         "XDG_CACHE_HOME",
         "XDG_STATE_HOME",
     ];
-    let native_control = upper.starts_with("OPENCODE_")
-        && !["OPENCODE_PERMISSION", "OPENCODE_API_KEY"].contains(&name);
+    let native_control = upper.starts_with("OPENCODE_") && name != "OPENCODE_API_KEY";
     let reserved = reserved.contains(&name) || (windows && reserved.contains(&upper.as_str()));
     let native_names = LOCAL_ENVIRONMENT
         .iter()
         .chain(AWS_ENVIRONMENT)
         .chain(CREDENTIALS);
     let alias = windows && name != upper && native_names.into_iter().any(|field| *field == upper);
-    let host_control = ["ProgramData", super::login::SOURCE_ENV]
+    let host_control = ["ProgramData"]
         .iter()
         .any(|candidate| name.eq_ignore_ascii_case(candidate));
     if native_control || reserved || alias || host_control {
@@ -308,27 +307,37 @@ fn arguments(
     adapter: &OpenCodeAdapter,
     invocation: &DriverInvocation,
     session_id: Option<&str>,
+    guarded: bool,
 ) -> Result<Vec<String>, NodeRunnerError> {
     let NodeRuntimeBinding::Agent { model, effort, .. } = &invocation.node.binding else {
         return Err(NodeRunnerError::InvalidRole);
     };
+    // A declared lane selects the alias of its owned auth plugin, so it fails closed without it.
+    let selected = if guarded {
+        GUARDED_MODEL
+    } else {
+        model.as_str()
+    };
+    let model_spec = match effort {
+        Some(effort) => format!(
+            "{}/{}#{}",
+            native_provider(&adapter.config.provider),
+            selected,
+            effort_token(*effort)
+        ),
+        None => format!("{}/{}", native_provider(&adapter.config.provider), selected),
+    };
     let mut argv = adapter.config.prefix_arguments.clone();
     argv.extend([
         "run".to_owned(),
+        "--standalone".to_owned(),
         "--format".to_owned(),
         "json".to_owned(),
         "--model".to_owned(),
-        format!(
-            "{}/{}",
-            native_provider(&adapter.config.provider),
-            model.as_str()
-        ),
+        model_spec,
     ]);
     if let Some(id) = session_id {
         argv.extend(["--session".to_owned(), id.to_owned()]);
-    }
-    if let Some(effort) = effort {
-        argv.extend(["--variant".to_owned(), effort_token(*effort).to_owned()]);
     }
     let native = crate::harnesses::native_config::invocation_args(
         invocation,
@@ -359,6 +368,91 @@ fn merge_options(target: &mut Value, options: &Value) {
             }
         }
     }
+}
+
+/// The deny rule appended to the native `permissions` array. OpenCode applies the last
+/// matching rule, so it must stay the final entry; it hides `opencode_session_move` from
+/// the direct tool list, the Code Mode catalog and `search`.
+fn session_move_rule() -> Value {
+    json!({
+        "action": "opencode_session_move",
+        "resource": "*",
+        "effect": "deny",
+    })
+}
+
+/// Applies the v1 `permission` map rule to a `serde_json::Map`. Other rules of the map stay;
+/// a string value becomes the wildcard rule. Any other `permission` value is refused instead
+/// of being dropped.
+fn apply_v1_permission_rule(
+    object: &mut serde_json::Map<String, Value>,
+) -> Result<(), NodeRunnerError> {
+    const TOOL: &str = "opencode_session_move";
+    let mut rules = match object.remove("permission") {
+        Some(Value::Object(rules)) => rules,
+        Some(Value::String(all)) => {
+            serde_json::Map::from_iter([("*".to_owned(), Value::String(all))])
+        }
+        None | Some(Value::Null) => serde_json::Map::new(),
+        Some(_) => {
+            return Err(NodeRunnerError::DriverDetail(
+                "OpenCode permission must be a rule object or a single action".to_owned(),
+            ));
+        }
+    };
+    rules.remove(TOOL);
+    rules.insert(TOOL.to_owned(), json!("deny"));
+    object.insert("permission".to_owned(), Value::Object(rules));
+    Ok(())
+}
+
+/// Appends the native deny rule to the `permissions` array of a `serde_json::Map`. Existing
+/// entries keep their order and the deny rule goes last. A missing or null value becomes an
+/// array holding only the rule; any other value is refused instead of being dropped.
+fn apply_native_permissions_rule(
+    object: &mut serde_json::Map<String, Value>,
+) -> Result<(), NodeRunnerError> {
+    let mut rules = match object.remove("permissions") {
+        Some(Value::Array(rules)) => rules,
+        None | Some(Value::Null) => Vec::new(),
+        Some(_) => {
+            return Err(NodeRunnerError::DriverDetail(
+                "OpenCode permissions must be an array".to_owned(),
+            ));
+        }
+    };
+    rules.push(session_move_rule());
+    object.insert("permissions".to_owned(), Value::Array(rules));
+    Ok(())
+}
+
+/// A managed session keeps the working directory Zeroshot assigned, so OpenCode's
+/// `opencode_session_move` tool is denied: it then leaves the direct tool list, the Code Mode
+/// catalog and `search`. The deny is also the last native `permissions` rule, globally and for
+/// every inline agent, because OpenCode applies the last matching rule. Other rules of a node's
+/// own `permission` value stay; a string value becomes the wildcard rule. Any other `permission`
+/// value is refused instead of being dropped.
+pub(super) fn deny_session_move(config: &mut Value) -> Result<(), NodeRunnerError> {
+    let object = config.as_object_mut().ok_or(NodeRunnerError::Driver)?;
+    apply_v1_permission_rule(object)?;
+    apply_native_permissions_rule(object)?;
+    if let Some(Value::Object(agents)) = object.get_mut("agents") {
+        for entry in agents.values_mut() {
+            if let Some(entry) = entry.as_object_mut() {
+                apply_native_permissions_rule(entry)?;
+            }
+        }
+    }
+    for key in ["agent", "mode"] {
+        if let Some(Value::Object(entries)) = object.get_mut(key) {
+            for entry in entries.values_mut() {
+                if let Some(entry) = entry.as_object_mut() {
+                    apply_v1_permission_rule(entry)?;
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn inline_configuration(environment: &BTreeMap<String, String>) -> Result<Value, NodeRunnerError> {
@@ -399,11 +493,7 @@ fn inline_parse_options() -> jsonc_parser::ParseOptions {
 
 pub(super) fn configuration_secrets(environment: &BTreeMap<String, String>) -> Vec<String> {
     let mut values = Vec::new();
-    for name in [
-        "OPENCODE_AUTH_CONTENT",
-        "OPENCODE_CONFIG_CONTENT",
-        super::login::SOURCE_ENV,
-    ] {
+    for name in ["OPENCODE_CONFIG_CONTENT"] {
         if let Some(value) = environment
             .get(name)
             .and_then(|value| serde_json::from_str::<Value>(value).ok())
@@ -485,6 +575,49 @@ pub(super) fn configure_provider(
         declared.then_some(field),
         endpoint.as_deref(),
     )?;
+    if declared {
+        if provider == "bedrock" {
+            let options = provider_options(config, "amazon-bedrock")?;
+            options.insert("region".to_owned(), json!(environment["AWS_REGION"]));
+            if let Some(endpoint) = &endpoint {
+                options.insert("endpoint".to_owned(), json!(endpoint));
+            }
+        }
+        if provider == "gateway" {
+            let (npm, _) = gateway_protocol(environment)?;
+            let NodeRuntimeBinding::Agent { model, .. } = &invocation.node.binding else {
+                return Err(NodeRunnerError::InvalidRole);
+            };
+            let gateway = config
+                .as_object_mut()
+                .ok_or(NodeRunnerError::Driver)?
+                .entry("provider")
+                .or_insert_with(|| json!({}))
+                .as_object_mut()
+                .ok_or(NodeRunnerError::Driver)?
+                .entry("gateway")
+                .or_insert_with(|| json!({}));
+            gateway
+                .as_object_mut()
+                .ok_or(NodeRunnerError::Driver)?
+                .insert("npm".to_owned(), json!(npm));
+            let models = gateway
+                .as_object_mut()
+                .ok_or(NodeRunnerError::Driver)?
+                .entry("models")
+                .or_insert_with(|| json!({}));
+            if !models
+                .as_object()
+                .ok_or(NodeRunnerError::Driver)?
+                .contains_key(model.as_str())
+            {
+                models
+                    .as_object_mut()
+                    .ok_or(NodeRunnerError::Driver)?
+                    .insert(model.as_str().to_owned(), json!({"name": model.as_str()}));
+            }
+        }
+    }
     // Only the selected lane's ambient credentials enter this child.
     for foreign in CREDENTIALS.iter().copied() {
         if foreign != field {

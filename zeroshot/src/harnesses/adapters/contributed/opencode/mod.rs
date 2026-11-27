@@ -9,12 +9,12 @@
 mod auth;
 mod command;
 mod conversation;
-mod login;
 mod memory;
 mod native_config;
 mod permissions;
 mod plugin;
 mod registration;
+mod store;
 mod transcript;
 
 pub(crate) use registration::registration;
@@ -211,20 +211,66 @@ impl OpenCodeAdapter {
             .core
             .ensure_live(ClosedSessionFailure::SessionLost)?;
         let expected = turn.session.id.lock().await.clone();
+        let login = {
+            let mut login = turn.session.login.lock().await;
+            let transferred = store::transfer_login(store::TransferRequest {
+                adapter: self,
+                invocation: turn.invocation,
+                files: &turn.files,
+                control: turn.control,
+                previous: login.as_ref(),
+            })
+            .await?;
+            let secrets = transferred.secrets.clone();
+            *login = Some(transferred);
+            secrets
+        };
+        let scratch = std::path::PathBuf::from(
+            turn.files
+                .scratch_text()
+                .map_err(|error| NodeRunnerError::DriverDetail(error.to_string()))?,
+        );
+        plugin::reset(&scratch).map_err(|_| {
+            NodeRunnerError::DriverDetail("OpenCode plugin state could not be reset".to_owned())
+        })?;
         let mut command = command::command(command::CommandRequest {
             adapter: self,
             invocation: turn.invocation,
             files: &turn.files,
             session_id: expected.as_deref(),
         })?;
+        let owned = plugin::owned(&command, turn.files.home());
         let mut redactions = self.redactions(&turn.invocation.environment);
+        redactions.extend(login.iter().cloned());
         self.apply_permission_default(&mut command);
         redactions.extend(command::configuration_secrets(&command.environment));
         let transcript = transcript::OpenCodeTranscript::new(expected.clone(), redactions.clone());
         let attempt = match turn::open(turn.files.clone(), command, turn.control).await? {
             ProviderProcessStart::Ready(mut process) => {
-                turn::finish_process(&mut process, prompt.as_bytes(), transcript, turn.control)
-                    .await
+                let result =
+                    turn::finish_process(&mut process, prompt.as_bytes(), transcript, turn.control)
+                        .await;
+                if let Some(message) = plugin::conflict(&scratch) {
+                    if !matches!(
+                        result,
+                        Err(NodeRunnerError::Cancelled) | Err(NodeRunnerError::CleanupUnconfirmed)
+                    ) {
+                        return Err(NodeRunnerError::DriverDetail(message));
+                    }
+                }
+                if let Some(id) = plugin::missing(&owned, &scratch) {
+                    // Without the auth plugin the guarded model does not exist.
+                    if matches!(
+                        result,
+                        Ok(ProviderAttempt::Complete(_))
+                            | Err(NodeRunnerError::ModelUnavailable(_))
+                    ) {
+                        return Err(NodeRunnerError::DriverDetail(format!(
+                            "OpenCode plugin {id} did not load"
+                        )));
+                    }
+                }
+                result
                     .map_err(|error| match error {
                         NodeRunnerError::ModelUnavailable(detail) => {
                             let crate::native_v2_contract::NodeRuntimeBinding::Agent {
@@ -233,6 +279,7 @@ impl OpenCodeAdapter {
                             else {
                                 return NodeRunnerError::Driver;
                             };
+                            let detail = detail.replace(command::GUARDED_MODEL, model.as_str());
                             NodeRunnerError::ModelUnavailable(format!("model {model}: {detail}"))
                         }
                         error => error,
@@ -286,6 +333,7 @@ struct OpenCodeTurn<'a> {
 struct OpenCodeSession {
     core: ProviderSessionCore,
     id: Mutex<Option<String>>,
+    login: Mutex<Option<store::TransferredLogin>>,
 }
 
 impl_provider_node_session!(OpenCodeSession);
@@ -294,7 +342,8 @@ crate::native_v2_capsule::provider_process::impl_provider_session_factory!(
     OpenCodeAdapter,
     OpenCodeSession {
         core: ProviderSessionCore::new(),
-        id: Mutex::new(None)
+        id: Mutex::new(None),
+        login: Mutex::new(None)
     }
 );
 

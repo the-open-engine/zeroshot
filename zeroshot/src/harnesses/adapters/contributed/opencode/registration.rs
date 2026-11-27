@@ -11,9 +11,20 @@ use crate::native_v2_capsule::provider_process::LocalHarnessEnvironment;
 
 use super::{OpenCodeAdapter, OpenCodeConfig};
 
+// 2.4.0 is the first release that reads a declared GitHub Copilot token and offers the
+// `experimental.model.resolve` hook the guarded model of declared lanes depends on.
+const CLI_VERSION: crate::harnesses::HarnessCliVersion = crate::harnesses::HarnessCliVersion {
+    minimum: [2, 4, 0],
+    first_unsupported: None,
+    arguments: &["--version"],
+    parse: |reported| crate::harnesses::cli_version::release(reported.strip_prefix("opencode v")?),
+    upgrade: "Install OpenCode 2.4.0 or newer from https://opencode.ai; OpenCode 1.x is not supported.",
+    local_environment: |native| native.selected(super::command::LOCAL_ENVIRONMENT),
+};
+
 pub(crate) fn registration() -> HarnessRegistration {
     HarnessRegistration {
-        cli_version: None,
+        cli_version: Some(CLI_VERSION),
         descriptor: HarnessDescriptor {
             id: "opencode",
             label: "OpenCode",
