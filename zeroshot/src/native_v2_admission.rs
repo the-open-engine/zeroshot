@@ -261,6 +261,24 @@ impl NativeV2Admission {
         {
             return Err(NativeV2AdmissionError::StackDeliveryRequired { delivery });
         }
+        // Dependent runs build on a predecessor's branch, so it must stay mergeable with its base.
+        if let Some(node) = executable_declarations(&graph.root)
+            .iter()
+            .find(|declaration| {
+                workers.contains(&declaration.worker.as_str())
+                    && delivery == StackDelivery::StackedPullRequests
+                    && validation::declares_delivery_outcome(
+                        declaration,
+                        crate::native_v2_delivery::DELIVERY_OPENED_LABEL,
+                    )
+            })
+        {
+            return Err(NativeV2AdmissionError::InvalidRuntimeBinding {
+                node: node.name.clone(),
+                detail: "stack profiles cannot use pull-request delivery that accepts target drift"
+                    .to_owned(),
+            });
+        }
         if let Some(node) = runtime.nodes().iter().find_map(|(node, binding)| {
             let NodeRuntimeBinding::Agent { connections, .. } = binding else {
                 return None;
@@ -575,7 +593,7 @@ mod networks;
 mod validation;
 use networks::validate_graph_bindings;
 use concurrency::validate_delivery_concurrency;
-pub(crate) use validation::{sole_delivery_node, writer_nodes};
+pub(crate) use validation::{sole_delivery_declares_outcome, sole_delivery_node, writer_nodes};
 use validation::{
     ExecutableDeclaration, executable_declarations, validate_executable_bindings,
     validate_graph_input,

@@ -944,6 +944,7 @@ fn named_delivery(mode: &str) -> Result<TemplateDelivery, NativeV2CliError> {
         "none" => Ok(TemplateDelivery::None),
         "push" => Ok(TemplateDelivery::Push),
         "pull_request" => Ok(TemplateDelivery::PullRequest),
+        "pull_request_unsynced" => Ok(TemplateDelivery::PullRequestUnsynced),
         "merge" => Ok(TemplateDelivery::Merge),
         "comment" => Ok(TemplateDelivery::Comment),
         _ => Err(usage(format!("unknown template delivery mode {mode:?}"))),
@@ -967,7 +968,9 @@ fn flagged_delivery(
 fn delivery_supports_feedback(delivery: TemplateDelivery) -> bool {
     matches!(
         delivery,
-        TemplateDelivery::PullRequest | TemplateDelivery::Merge
+        TemplateDelivery::PullRequest
+            | TemplateDelivery::PullRequestUnsynced
+            | TemplateDelivery::Merge
     )
 }
 

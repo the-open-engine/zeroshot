@@ -120,6 +120,8 @@ mod merge_tests;
 #[path = "queue/tests.rs"]
 mod queue_tests;
 
+#[path = "policy/conflict_checks_tests.rs"]
+mod conflict_checks_tests;
 #[cfg(unix)]
 #[path = "policy_read_tests.rs"]
 mod policy_read_tests;
@@ -1074,6 +1076,7 @@ fn merge_actions_preserve_terminal_authority_and_queue_ownership() {
         head_update: None,
         pull_request_ready: false,
         observed_required_checks: Default::default(),
+        conflict_checks: None,
     };
     for (state, expected) in [
         (

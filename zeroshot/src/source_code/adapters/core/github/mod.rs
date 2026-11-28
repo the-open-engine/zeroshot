@@ -579,11 +579,13 @@ impl SourceDeliveryAuthority for GhCliDeliveryAuthority {
     ) -> Result<SourceReviewObservation, SourceDeliveryError> {
         let snapshot = self.policy_snapshot_with_logs(review, credential).await?;
         let head_update_required = snapshot.head_update.is_some();
-        Ok(review.observation_with_readiness(
+        let mut observation = review.observation_with_readiness(
             snapshot.state,
             snapshot.pull_request_ready,
             head_update_required,
-        ))
+        );
+        observation.conflict_checks = snapshot.conflict_checks;
+        Ok(observation)
     }
 
     async fn inspect_review_feedback(

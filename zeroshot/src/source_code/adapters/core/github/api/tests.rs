@@ -629,6 +629,7 @@ async fn native_job_log_retains_annotations_and_feedback_removes_terminal_contro
         head_update: None,
         pull_request_ready: false,
         observed_required_checks: Default::default(),
+        conflict_checks: None,
     };
     include_check_logs(&mut snapshot, &[(91, output)]);
     let SourceReviewState::Open {

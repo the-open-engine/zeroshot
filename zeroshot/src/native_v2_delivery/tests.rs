@@ -58,6 +58,8 @@ mod review_sync;
 mod routing;
 #[path = "tests/target_base.rs"]
 mod target_base;
+#[path = "tests/target_drift.rs"]
+mod target_drift;
 #[path = "tests/target_retry.rs"]
 mod target_retry;
 #[path = "tests/token_file.rs"]
@@ -1248,7 +1250,11 @@ async fn run_with_adapter_token(
     pull_request_feedback: PullRequestFeedback,
     token: Option<&str>,
 ) -> DeliveryExecution {
-    let mut handle = start_with_adapter_token(request, adapter, pull_request_feedback, token).await;
+    let handle = start_with_adapter_token(request, adapter, pull_request_feedback, token).await;
+    finish_execution(handle).await
+}
+
+async fn finish_execution(mut handle: crate::native_v2_runner::NodeHandle) -> DeliveryExecution {
     let mut durable = handle.take_initial_output().assert_value();
     let drain = async {
         let mut output = Vec::new();
@@ -1278,8 +1284,16 @@ async fn start_with_adapter_token(
     pull_request_feedback: PullRequestFeedback,
     token: Option<&str>,
 ) -> crate::native_v2_runner::NodeHandle {
-    let mut admitted =
-        admitted_with_feedback(request.repo, request.mode, pull_request_feedback).await;
+    let admitted = admitted_with_feedback(request.repo, request.mode, pull_request_feedback).await;
+    start_admitted(request, adapter, token, admitted).await
+}
+
+async fn start_admitted(
+    request: DeliveryRunRequest<'_>,
+    adapter: Arc<NativeV2DeliveryAdapter>,
+    token: Option<&str>,
+    mut admitted: crate::native_v2_contract::AdmittedRun,
+) -> crate::native_v2_runner::NodeHandle {
     if token.is_none() {
         for binding in admitted.runtime.nodes_mut().values_mut() {
             if let NodeRuntimeBinding::GitDelivery { connections, .. } = binding {
@@ -1351,7 +1365,16 @@ fn delivery_submission(
     mode: DeliveryMode,
     pull_request_feedback: PullRequestFeedback,
 ) -> RunSubmission {
-    let graph = full_graph(vec![delivery_node(mode), success_node()]);
+    delivery_submission_with_node(repo, mode, pull_request_feedback, delivery_node(mode))
+}
+
+fn delivery_submission_with_node(
+    repo: &TempRepo,
+    mode: DeliveryMode,
+    pull_request_feedback: PullRequestFeedback,
+    node: Value,
+) -> RunSubmission {
+    let graph = full_graph(vec![node, success_node()]);
     let binding = NodeRuntimeBinding::GitDelivery {
         connections: DeclaredConnections::single(
             "github",
@@ -1389,10 +1412,15 @@ fn target(repo: &TempRepo) -> DeliveryTarget {
 }
 
 fn delivery_node(mode: DeliveryMode) -> Value {
-    let labels = delivery_signal_labels(mode).assert_value();
+    delivery_node_for(mode, contract::TargetDrift::Reconcile)
+}
+
+fn delivery_node_for(mode: DeliveryMode, drift: contract::TargetDrift) -> Value {
+    let labels = contract::delivery_signal_labels_for(mode, drift).assert_value();
     json!({
         "kind":"verifier","name":"deliver","worker":mode.worker_ref(),
-        "input":{"kind":"null"},"output":delivery_result_schema(mode).assert_value(),
+        "input":{"kind":"null"},
+        "output":contract::delivery_result_schema_for(mode, drift).assert_value(),
         "inputBindings":[],"writeBindings":[],"attempts":1,
         "signals":{"delivery":labels},"diagnostic":delivery_diagnostic_schema().assert_value()
     })

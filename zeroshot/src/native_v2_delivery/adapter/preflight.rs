@@ -266,6 +266,7 @@ impl NativeV2DeliveryAdapter {
         }
         if DeliveryMode::from_worker(&preparation.invocation.node.worker)
             == Some(DeliveryMode::Push)
+            || accepts_target_drift(preparation)
         {
             return Ok(());
         }
@@ -323,6 +324,7 @@ impl NativeV2DeliveryAdapter {
                 if self.config.local_branch.is_some()
                     && known.published.is_none()
                     && preparation_mode(preparation)?.creates_review()
+                    && !accepts_target_drift(preparation)
                 {
                     self.reconcile_target_before_publication(preparation, commit_message)
                         .await?;
@@ -715,4 +717,12 @@ fn preparation_mode(
 ) -> Result<DeliveryMode, NodeRunnerError> {
     DeliveryMode::from_worker(&preparation.invocation.node.worker)
         .ok_or(NodeRunnerError::InvalidRole)
+}
+
+/// A node that accepts target drift publishes its candidate without integrating the target.
+fn accepts_target_drift(preparation: &DeliveryPreparation<'_, '_>) -> bool {
+    DeliveryMode::from_worker(&preparation.invocation.node.worker).is_some_and(|mode| {
+        contract::target_drift(mode, &preparation.invocation.response)
+            == contract::TargetDrift::Accept
+    })
 }

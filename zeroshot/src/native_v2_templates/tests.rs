@@ -7,7 +7,9 @@ use serde_json::{Value, json};
 
 use crate::native_v2_admission::{DeliveryPolicy, NativeV2Admission};
 use crate::native_v2_contract::RunSubmissionIntent;
-use crate::native_v2_delivery::{DELIVERY_MERGED_LABEL, DELIVERY_PUSHED_LABEL, DELIVERY_READY_LABEL};
+use crate::native_v2_delivery::{
+    DELIVERY_MERGED_LABEL, DELIVERY_OPENED_LABEL, DELIVERY_PUSHED_LABEL, DELIVERY_READY_LABEL,
+};
 use crate::full_v1_reducer::{
     Decision, DurableExecution, FullV1Reducer, Reduction, ReductionInput, TerminalProjection,
 };
@@ -40,6 +42,7 @@ fn built_in_templates_have_no_terminals_inside_parallel_branches() {
             TemplateDelivery::None,
             TemplateDelivery::Push,
             TemplateDelivery::PullRequest,
+            TemplateDelivery::PullRequestUnsynced,
             TemplateDelivery::Merge,
             TemplateDelivery::Comment,
         ] {
@@ -464,6 +467,7 @@ async fn accepted_reviews_complete_or_dispatch_pull_request_delivery() {
         TemplateDelivery::None,
         TemplateDelivery::Push,
         TemplateDelivery::PullRequest,
+        TemplateDelivery::PullRequestUnsynced,
     ] {
         let (verified, initial_input) = verified_software_template(delivery).await;
         let reviews = accepted_review_history(delivery);
@@ -485,6 +489,10 @@ async fn accepted_reviews_complete_or_dispatch_pull_request_delivery() {
         let (mode, outcome) = match delivery {
             TemplateDelivery::Push => (DeliveryMode::Push, DELIVERY_PUSHED_LABEL),
             TemplateDelivery::PullRequest => (DeliveryMode::PullRequestV2, DELIVERY_READY_LABEL),
+            // An unsynced pull request succeeds while its head is behind or conflicting.
+            TemplateDelivery::PullRequestUnsynced => {
+                (DeliveryMode::PullRequestV2, DELIVERY_OPENED_LABEL)
+            }
             _ => unreachable!(),
         };
         let receipt = delivery_receipt(mode, outcome);
@@ -937,4 +945,54 @@ async fn delivery_links_survive_state_promotion_and_terminal_projection() {
             "nested optional receipt links must survive the complete {mode:?} template",
         );
     }
+}
+
+#[test]
+fn unsynced_pull_request_template_never_declares_or_routes_conflict() {
+    let graph = BuiltinGraphTemplate::SoftwareChange
+        .materialize(TemplateDelivery::PullRequestUnsynced)
+        .assert_value();
+    let document = serde_json::to_string(&graph).assert_value();
+    assert!(document.contains(GIT_DELIVERY_PR_V2_WORKER_REF));
+    assert!(document.contains(&format!("\"{DELIVERY_OPENED_LABEL}\"")));
+    // The worker's authored guidance names `conflict`; no contract, state type or guard may.
+    assert!(
+        !document.contains(&format!("\"{DELIVERY_CONFLICT_LABEL}\"")),
+        "an unsynced graph must not declare or route conflict"
+    );
+    let reconciling = serde_json::to_string(
+        &BuiltinGraphTemplate::SoftwareChange
+            .materialize(TemplateDelivery::PullRequest)
+            .assert_value(),
+    )
+    .assert_value();
+    assert!(reconciling.contains(&format!("\"{DELIVERY_CONFLICT_LABEL}\"")));
+    let delivery = all_nodes(&graph.root)
+        .into_iter()
+        .find_map(|node| match node {
+            GraphNode::Verifier(verifier) if verifier.name.as_str() == DELIVERY_NODE => {
+                Some(verifier)
+            }
+            _ => None,
+        })
+        .assert_value();
+    let labels = delivery
+        .signals
+        .values()
+        .flat_map(|labels| {
+            labels
+                .values()
+                .iter()
+                .map(|label| label.as_str().to_owned())
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        labels,
+        [
+            DELIVERY_CI_FAILED_LABEL,
+            DELIVERY_OPENED_LABEL,
+            DELIVERY_READY_LABEL,
+            DELIVERY_REPAIR_REQUIRED_LABEL
+        ]
+    );
 }

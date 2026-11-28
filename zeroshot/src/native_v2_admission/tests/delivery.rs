@@ -143,6 +143,35 @@ async fn stack_profiles_must_match_the_stack_delivery() {
     validate_stack(&pull_request, StackDelivery::StackedPullRequests)
         .await
         .assert_value_with("stacked pull requests accept the sole pr@2 delivery worker");
+    // A dependent run builds on its predecessor's branch, which must stay mergeable.
+    let mut unsynced = delivery_verifier("deliver", DeliveryMode::PullRequestV2);
+    let drift = crate::native_v2_delivery::contract::TargetDrift::Accept;
+    unsynced["output"] = json!(
+        crate::native_v2_delivery::contract::delivery_result_schema_for(
+            DeliveryMode::PullRequestV2,
+            drift
+        )
+        .assert_value()
+    );
+    unsynced["signals"] = json!({
+        "delivery": crate::native_v2_delivery::contract::delivery_signal_labels_for(
+            DeliveryMode::PullRequestV2,
+            drift
+        )
+        .assert_value()
+    });
+    let unsynced = submission(
+        graph(vec![unsynced, succeed("done")]),
+        BTreeMap::from([(named("deliver"), delivery_binding())]),
+    );
+    NativeV2Admission
+        .validate_profile(&unsynced.graph, &unsynced.runtime, DeliveryPolicy::Required)
+        .await
+        .assert_value_with("an ordinary run admits pull-request delivery that accepts drift");
+    assert!(matches!(
+        validate_stack(&unsynced, StackDelivery::StackedPullRequests).await,
+        Err(NativeV2AdmissionError::InvalidRuntimeBinding { .. })
+    ));
     assert_eq!(
         validate_stack(&pull_request, StackDelivery::Merge).await,
         Err(NativeV2AdmissionError::StackDeliveryRequired {

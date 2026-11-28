@@ -1791,6 +1791,20 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Current software-change templates author `push@1`, `pr@2`, and `merge@3` Git delivery workers.
   Push publishes only the exact working branch revision. PR delivery stops only after required CI,
   freshness, and conflict checks pass; missing review approval is allowed and no merge is requested.
+  A `pr@2` node that declares `opened` in place of `conflict` accepts target drift (CLI
+  `--delivery pull_request_unsynced`): delivery publishes the candidate without integrating the
+  target, never updates the head or materializes a conflict, and reports the success outcome
+  `opened` for a behind head once required CI has passed; `ready` keeps its meaning. A forge
+  conflict state (GitHub conflict, GitLab `conflict` or `need_rebase`) carries separate
+  `conflict_checks` evidence for required checks that started on that head: a failure returns
+  `ci_failed`, a running check is awaited without limit, and passed checks report `opened`. A
+  required context that never reported counts as not started, because GitHub runs no
+  `pull_request` workflow for a conflicting pull request; when nothing starts within the poll
+  policy's two-minute start grace, counted from this invocation's first observation, delivery
+  reports `opened` and says no CI started. Reconciling delivery ignores that evidence. The
+  declared contract selects this, never the runtime binding; `pr@1`, push, and merge workers
+  cannot declare it, the delivery gate accepts an `opened` receipt only from a node that declared
+  it, and stack profiles reject it.
   PR and merge workers read all visible issue comments, review summaries, and inline comments behind
   one exact-head fence. A run checkpoint routes each new or edited item through the existing repair
   and verification loop once. Unresolved GitHub threads and GitLab discussions retain opaque IDs and

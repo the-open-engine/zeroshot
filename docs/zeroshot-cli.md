@@ -968,7 +968,9 @@ Options:
 
 
       --delivery <MODE>
-          Template delivery mode. Defaults to pull_request for software-change, comment for issue-review, pr-review and code-review, otherwise none
+          Template delivery mode. Defaults to pull_request for software-change, comment for issue-review, pr-review and code-review, otherwise none.
+
+          For software-change, pull_request_unsynced opens the pull request and still repairs CI failures and review feedback, but leaves a moved or conflicting target branch alone: it never merges the target or sends conflicts to repair. A head that is behind or conflicting reports `opened` once required CI has passed. Required checks that started are always awaited and a failure still goes to repair; if none starts for a conflicting head within two minutes, it reports `opened` without CI. Stacks reject it.
 
       --push
           Commit and push the run's working branch without opening a pull request: the checked-out branch locally, or the managed run branch with --worktree or on a target
@@ -1135,7 +1137,9 @@ Options:
           Write the complete graph as JSON even when stdout is a terminal
 
       --delivery <MODE>
-          Template delivery mode. Defaults to pull_request for software-change, comment for issue-review, pr-review and code-review, otherwise none
+          Template delivery mode. Defaults to pull_request for software-change, comment for issue-review, pr-review and code-review, otherwise none.
+
+          For software-change, pull_request_unsynced opens the pull request and still repairs CI failures and review feedback, but leaves a moved or conflicting target branch alone: it never merges the target or sends conflicts to repair. A head that is behind or conflicting reports `opened` once required CI has passed. Required checks that started are always awaited and a failure still goes to repair; if none starts for a conflicting head within two minutes, it reports `opened` without CI. Stacks reject it.
 
       --push
           Commit and push the run's working branch without opening a pull request: the checked-out branch locally, or the managed run branch with --worktree or on a target
@@ -1469,7 +1473,9 @@ Options:
           Without this flag the target uses its own stored GitHub connection, and a GH_TOKEN in this shell is not sent. Fails when GH_TOKEN is unset.
 
       --delivery <MODE>
-          Template delivery mode. Defaults to pull_request for software-change, comment for issue-review, pr-review and code-review, otherwise none
+          Template delivery mode. Defaults to pull_request for software-change, comment for issue-review, pr-review and code-review, otherwise none.
+
+          For software-change, pull_request_unsynced opens the pull request and still repairs CI failures and review feedback, but leaves a moved or conflicting target branch alone: it never merges the target or sends conflicts to repair. A head that is behind or conflicting reports `opened` once required CI has passed. Required checks that started are always awaited and a failure still goes to repair; if none starts for a conflicting head within two minutes, it reports `opened` without CI. Stacks reject it.
 
       --push
           Commit and push the run's working branch without opening a pull request: the checked-out branch locally, or the managed run branch with --worktree or on a target

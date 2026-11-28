@@ -279,7 +279,7 @@ impl NativeV2DeliveryAdapter {
                     ).map_err(DeliveryStop::Runner);
                 }
                 let drive = ReviewDrive {
-                    adapter: self, mode, response: &invocation.response, review, credentials: &mut credentials,
+                    adapter: self, mode, response: &invocation.response, review, started: std::time::Instant::now(), credentials: &mut credentials,
                     pull_request_feedback, manifest: &invocation.node.input, control: &mut control,
                 };
                 self.validate_review(&drive, DeliveryValidationStage::Published).await?;
@@ -405,6 +405,8 @@ struct ReviewDrive<'a, 'environment> {
     mode: DeliveryMode,
     response: &'a NodeResponseContract,
     review: SourceReviewReceipt,
+    /// When this invocation began observing the published review.
+    started: std::time::Instant,
     credentials: &'a mut DeliveryCredentials<'environment>,
     pull_request_feedback: PullRequestFeedback,
     manifest: &'a Value,
@@ -1056,7 +1058,7 @@ impl NativeV2DeliveryAdapter {
             | ReviewProgress::PullRequestReady
             | ReviewProgress::Mergeable
             | ReviewProgress::Pending
-            | ReviewProgress::Conflict => {
+            | ReviewProgress::Conflict(_) => {
                 review_completion(
                     drive,
                     DELIVERY_OPENED_LABEL,
@@ -1087,8 +1089,27 @@ impl NativeV2DeliveryAdapter {
                 )
                 .await
             }
+            ReviewProgress::Behind
+                if contract::target_drift(drive.mode, drive.response)
+                    == contract::TargetDrift::Accept =>
+            {
+                review_completion(
+                    drive,
+                    DELIVERY_OPENED_LABEL,
+                    "forge authoritatively confirmed the pull request is open; \
+                     its head is behind the target branch and stays unchanged",
+                    None,
+                )
+                .await
+            }
+            ReviewProgress::Conflict(checks)
+                if contract::target_drift(drive.mode, drive.response)
+                    == contract::TargetDrift::Accept =>
+            {
+                self.advance_accepted_conflict(drive, checks).await
+            }
             ReviewProgress::Behind => self.advance_review_head(drive).await,
-            ReviewProgress::Conflict => {
+            ReviewProgress::Conflict(_) => {
                 self.complete_conflict(drive, "forge authoritatively reported a merge conflict")
                     .await
             }
@@ -1110,6 +1131,63 @@ impl NativeV2DeliveryAdapter {
         }
     }
 
+    /// An accepted conflict keeps required CI as a gate wherever CI started for the head: a
+    /// failed check repairs, a running one is awaited without limit, and only a head for which
+    /// no required check starts within the grace period completes unverified.
+    async fn advance_accepted_conflict(
+        &self,
+        drive: &ReviewDrive<'_, '_>,
+        checks: Option<SourceChecks>,
+    ) -> Result<ReviewStep, DeliveryStop> {
+        const CONFLICT: &str = "forge authoritatively reported that the pull request cannot \
+                                merge into its target (conflict or required rebase); it stays \
+                                open with its head unchanged";
+        match checks {
+            Some(SourceChecks::Failed { diagnostic }) => {
+                review_completion(drive, DELIVERY_CI_FAILED_LABEL, &diagnostic, None).await
+            }
+            Some(SourceChecks::Pending) => {
+                emit(
+                    drive.control,
+                    "delivery: waiting for started CI on a conflicting pull request",
+                )
+                .await?;
+                Ok(ReviewStep::Continue)
+            }
+            Some(SourceChecks::Passed) => {
+                review_completion(
+                    drive,
+                    DELIVERY_OPENED_LABEL,
+                    &format!("{CONFLICT}; required CI passed"),
+                    None,
+                )
+                .await
+            }
+            Some(SourceChecks::NotRequired) | None
+                if drive.started.elapsed() < self.config.poll.ci_start_grace =>
+            {
+                emit(
+                    drive.control,
+                    "delivery: waiting for CI to start on a conflicting pull request",
+                )
+                .await?;
+                Ok(ReviewStep::Continue)
+            }
+            Some(SourceChecks::NotRequired) | None => {
+                review_completion(
+                    drive,
+                    DELIVERY_OPENED_LABEL,
+                    &format!(
+                        "{CONFLICT}; no required CI started within {} seconds",
+                        self.config.poll.ci_start_grace.as_secs()
+                    ),
+                    None,
+                )
+                .await
+            }
+        }
+    }
+
     async fn advance_merge(
         &self,
         drive: &mut ReviewDrive<'_, '_>,
@@ -1125,7 +1203,7 @@ impl NativeV2DeliveryAdapter {
                 )
                 .await
             }
-            ReviewProgress::Conflict => {
+            ReviewProgress::Conflict(_) => {
                 self.complete_conflict(drive, "forge authoritatively reported a merge conflict")
                     .await
             }

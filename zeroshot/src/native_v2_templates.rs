@@ -14,7 +14,7 @@ use crate::native_v2_contract::{
     GIT_DELIVERY_MERGE_V3_WORKER_REF, GIT_DELIVERY_PR_V2_WORKER_REF, GIT_DELIVERY_PUSH_WORKER_REF,
 };
 use crate::native_v2_delivery::contract::{
-    delivery_diagnostic_schema, delivery_result_schema, delivery_signal_labels,
+    TargetDrift, delivery_diagnostic_schema, delivery_result_schema_for, delivery_signal_labels_for,
 };
 use crate::native_v2_delivery::{
     DeliveryMode, DELIVERY_CI_FAILED_LABEL, DELIVERY_CONFLICT_LABEL,
@@ -395,7 +395,8 @@ fn accepted_change(
     match delivery {
         TemplateDelivery::None => succeed_null("done"),
         TemplateDelivery::Push => push_delivery(state),
-        TemplateDelivery::PullRequest => pull_request_delivery(state),
+        TemplateDelivery::PullRequest => pull_request_delivery(state, TargetDrift::Reconcile),
+        TemplateDelivery::PullRequestUnsynced => pull_request_delivery(state, TargetDrift::Accept),
         TemplateDelivery::Merge => merge_delivery(state),
         TemplateDelivery::Comment => Err(BuiltinTemplateError::UnsupportedDelivery {
             template: "software-change",
@@ -405,25 +406,48 @@ fn accepted_change(
 }
 
 fn push_delivery(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
-    delivery_with_repair(state, DeliveryMode::Push, "push_delivery")
+    delivery_with_repair(
+        state,
+        DeliveryMode::Push,
+        TargetDrift::Reconcile,
+        "push_delivery",
+    )
 }
 
-fn pull_request_delivery(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
-    delivery_with_repair(state, DeliveryMode::PullRequestV2, "pull_request_delivery")
+fn pull_request_delivery(
+    state: PayloadType,
+    drift: TargetDrift,
+) -> Result<GraphNode, BuiltinTemplateError> {
+    delivery_with_repair(
+        state,
+        DeliveryMode::PullRequestV2,
+        drift,
+        "pull_request_delivery",
+    )
 }
 
 fn merge_delivery(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
-    delivery_with_repair(state, DeliveryMode::MergeV3, "merge_delivery")
+    delivery_with_repair(
+        state,
+        DeliveryMode::MergeV3,
+        TargetDrift::Reconcile,
+        "merge_delivery",
+    )
 }
 
 fn delivery_with_repair(
     state: PayloadType,
     mode: DeliveryMode,
+    drift: TargetDrift,
     name: &str,
 ) -> Result<GraphNode, BuiltinTemplateError> {
     let labels = match mode {
         DeliveryMode::Push => vec![DELIVERY_REPAIR_REQUIRED_LABEL],
         DeliveryMode::PullRequest => vec![DELIVERY_REPAIR_REQUIRED_LABEL],
+        // A node that accepts target drift never reports `conflict`.
+        DeliveryMode::PullRequestV2 if drift == TargetDrift::Accept => {
+            vec![DELIVERY_CI_FAILED_LABEL, DELIVERY_REPAIR_REQUIRED_LABEL]
+        }
         DeliveryMode::PullRequestV2
         | DeliveryMode::MergeV1
         | DeliveryMode::Merge
@@ -446,12 +470,12 @@ fn delivery_with_repair(
                 node: next_iteration("delivery_retry", state.clone())?,
             },
         ],
-        Some(delivery_success("done", mode)?),
+        Some(delivery_success("done", mode, drift)?),
     )?;
     sequence(
         name,
         state,
-        vec![delivery_node(mode)?, route],
+        vec![delivery_node(mode, drift)?, route],
         vec![
             field_path(DELIVERY_FEEDBACK_FIELD)?,
             field_path(PHASE_FIELD)?,
@@ -459,8 +483,11 @@ fn delivery_with_repair(
     )
 }
 
-fn delivery_node(mode: DeliveryMode) -> Result<GraphNode, BuiltinTemplateError> {
-    let mut node = named_delivery_node(DELIVERY_NODE, mode)?;
+fn delivery_node(
+    mode: DeliveryMode,
+    drift: TargetDrift,
+) -> Result<GraphNode, BuiltinTemplateError> {
+    let mut node = named_delivery_node(DELIVERY_NODE, mode, drift)?;
     if let GraphNode::Verifier(verifier) = &mut node {
         verifier
             .write_bindings
@@ -478,10 +505,14 @@ fn phase_write(node: &str, signal: &str) -> Result<WriteBinding, BuiltinTemplate
     Ok(binding)
 }
 
-fn named_delivery_node(name: &str, mode: DeliveryMode) -> Result<GraphNode, BuiltinTemplateError> {
-    let output = static_value(delivery_result_schema(mode))?;
+fn named_delivery_node(
+    name: &str,
+    mode: DeliveryMode,
+    drift: TargetDrift,
+) -> Result<GraphNode, BuiltinTemplateError> {
+    let output = static_value(delivery_result_schema_for(mode, drift))?;
     let write_bindings = delivery_write_bindings(name, &output)?;
-    let signals = delivery_signals(mode)?;
+    let signals = delivery_signals(mode, drift)?;
     Ok(GraphNode::Verifier(VerifierNode {
         artifacts: Default::default(),
         name: node_name(name)?,
@@ -519,15 +550,20 @@ fn delivery_write_bindings(
 
 fn delivery_signals(
     mode: DeliveryMode,
+    drift: TargetDrift,
 ) -> Result<BTreeMap<FieldName, NonEmptyEnumSet>, BuiltinTemplateError> {
     Ok(BTreeMap::from([(
         field_name(DELIVERY_SIGNAL_FIELD)?,
-        static_value(delivery_signal_labels(mode))?,
+        static_value(delivery_signal_labels_for(mode, drift))?,
     )]))
 }
 
-fn delivery_success(name: &str, mode: DeliveryMode) -> Result<GraphNode, BuiltinTemplateError> {
-    let output = static_value(delivery_result_schema(mode))?;
+fn delivery_success(
+    name: &str,
+    mode: DeliveryMode,
+    drift: TargetDrift,
+) -> Result<GraphNode, BuiltinTemplateError> {
+    let output = static_value(delivery_result_schema_for(mode, drift))?;
     let bindings = output_fields(&output)?
         .into_iter()
         .map(|field| state_input(&field, &field))
@@ -651,8 +687,17 @@ fn delivery_mode(delivery: TemplateDelivery) -> Option<DeliveryMode> {
     match delivery {
         TemplateDelivery::None | TemplateDelivery::Comment => None,
         TemplateDelivery::Push => Some(DeliveryMode::Push),
-        TemplateDelivery::PullRequest => Some(DeliveryMode::PullRequestV2),
+        TemplateDelivery::PullRequest | TemplateDelivery::PullRequestUnsynced => {
+            Some(DeliveryMode::PullRequestV2)
+        }
         TemplateDelivery::Merge => Some(DeliveryMode::MergeV3),
+    }
+}
+
+fn delivery_drift(delivery: TemplateDelivery) -> TargetDrift {
+    match delivery {
+        TemplateDelivery::PullRequestUnsynced => TargetDrift::Accept,
+        _ => TargetDrift::Reconcile,
     }
 }
 

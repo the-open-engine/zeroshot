@@ -437,6 +437,32 @@ async fn changed_conflict_observation_retains_the_confirmed_review_baseline() {
 }
 
 #[tokio::test]
+async fn accepted_target_drift_publishes_the_admitted_candidate_unintegrated() {
+    let (fixture, authority, adapter) = UpdatedTarget::harness(Script::NoCi);
+
+    let delivered = target_drift::run_accepting_target_drift(
+        fixture.request(DeliveryMode::PullRequestV2),
+        adapter,
+    )
+    .await;
+
+    let receipt = assert_delivery_signal(&delivered.outcome, DELIVERY_READY_LABEL);
+    assert_eq!(authority.target_reconciliations.load(Ordering::SeqCst), 0);
+    assert!(authority.pushed.load(Ordering::SeqCst));
+    assert_eq!(authority.review_requests().len(), 1);
+    assert_eq!(receipt["headRevision"], fixture.head());
+    assert_eq!(
+        fs::read_to_string(fixture.repo.workspace.join(WORKFLOW)).assert_value(),
+        "name: original CI\n",
+        "the moved target must not be merged into the candidate"
+    );
+    assert_eq!(
+        fixture.repo.base,
+        git_output(&fixture.repo.workspace, &["rev-parse", "HEAD^"])
+    );
+}
+
+#[tokio::test]
 async fn forge_owned_target_drift_publishes_without_claiming_a_reviewed_baseline() {
     for mode in [DeliveryMode::PullRequestV2, DeliveryMode::MergeV3] {
         let (mut fixture, authority, adapter) = UpdatedTarget::harness(Script::TargetDeferred);

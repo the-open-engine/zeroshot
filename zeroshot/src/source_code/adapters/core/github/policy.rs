@@ -97,6 +97,8 @@ pub(super) struct PolicySnapshot {
     pub(super) head_update: Option<HeadUpdate>,
     pub(super) pull_request_ready: bool,
     pub(super) observed_required_checks: BTreeSet<(String, Option<u64>)>,
+    /// Started required checks on the head of a conflicting pull request.
+    pub(super) conflict_checks: Option<SourceChecks>,
 }
 
 #[derive(Deserialize)]
@@ -380,6 +382,11 @@ pub(super) fn classify_policy(
         Some(snapshot) => snapshot,
         None => classify_snapshot(&first_pull_request, &contexts),
     };
+    if snapshot.state == SourceReviewState::Conflict {
+        let (checks, failed_job_ids) = conflict_checks(&first_pull_request, &contexts);
+        snapshot.conflict_checks = Some(checks);
+        snapshot.failed_job_ids = failed_job_ids;
+    }
     snapshot.queue_recovery = queue_recovery;
     Ok(snapshot)
 }
@@ -450,11 +457,15 @@ pub(super) fn queue_check_failures(
 }
 
 pub(super) fn include_check_logs(snapshot: &mut PolicySnapshot, logs: &[(u64, JobLog)]) {
-    let SourceReviewState::Open {
-        checks: SourceChecks::Failed { diagnostic },
-    } = &mut snapshot.state
-    else {
-        return;
+    let diagnostic = match (&mut snapshot.state, &mut snapshot.conflict_checks) {
+        (
+            SourceReviewState::Open {
+                checks: SourceChecks::Failed { diagnostic },
+            },
+            _,
+        )
+        | (SourceReviewState::Conflict, Some(SourceChecks::Failed { diagnostic })) => diagnostic,
+        _ => return,
     };
     include_job_logs(diagnostic, "GitHub Actions", logs);
 }
@@ -533,6 +544,27 @@ fn check_contexts(
         .map(|rollup| &rollup.contexts))
 }
 
+/// GitHub runs no `pull_request` workflow for a conflicting pull request, so an expected
+/// required context that never reported counts as not started, never as pending.
+fn conflict_checks(
+    pull_request: &PullRequestPolicyWire,
+    contexts: &[CheckContextWire],
+) -> (SourceChecks, Vec<u64>) {
+    let evidence = classify_required_checks(contexts);
+    if !evidence.failures.is_empty() {
+        let diagnostic = failure_diagnostic(evidence.failures);
+        return (SourceChecks::Failed { diagnostic }, evidence.failed_job_ids);
+    }
+    let checks = match evidence.checks {
+        RequiredChecks::Pending => SourceChecks::Pending,
+        RequiredChecks::Passed if !required_context_is_missing(pull_request, contexts) => {
+            SourceChecks::Passed
+        }
+        RequiredChecks::Passed | RequiredChecks::Absent => SourceChecks::NotRequired,
+    };
+    (checks, Vec::new())
+}
+
 fn classify_snapshot(
     pull_request: &PullRequestPolicyWire,
     contexts: &[CheckContextWire],
@@ -557,6 +589,7 @@ fn classify_snapshot(
             head_update: head_update(pull_request),
             pull_request_ready: false,
             observed_required_checks: BTreeSet::new(),
+            conflict_checks: None,
         };
     }
     let policy_ready = merge_gate_ready(pull_request) || pull_request_ready(pull_request);
@@ -582,6 +615,7 @@ fn classify_snapshot(
             .filter(|context| context.is_required())
             .map(|context| (context.name().to_owned(), context.integration_id()))
             .collect(),
+        conflict_checks: None,
     }
 }
 
@@ -660,6 +694,7 @@ fn terminal_snapshot(
         head_update: None,
         pull_request_ready: false,
         observed_required_checks: BTreeSet::new(),
+        conflict_checks: None,
     }))
 }
 
@@ -684,6 +719,7 @@ fn merged_snapshot(
             head_update: None,
             pull_request_ready: false,
             observed_required_checks: BTreeSet::new(),
+            conflict_checks: None,
         })
         .ok_or(SourceDeliveryError::Rejected)
 }
@@ -725,5 +761,6 @@ fn waiting_snapshot() -> PolicySnapshot {
         head_update: None,
         pull_request_ready: false,
         observed_required_checks: BTreeSet::new(),
+        conflict_checks: None,
     }
 }
