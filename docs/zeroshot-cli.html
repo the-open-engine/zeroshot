@@ -1095,6 +1095,7 @@ The JSON manifest is strict and self-contained:
     &quot;source&quot;: {&quot;repository&quot;: &quot;owner/repo&quot;, &quot;branch&quot;: &quot;main&quot;},
     &quot;profile&quot;: &quot;org:software-change&quot;,
     &quot;expiresAt&quot;: &quot;&lt;RFC3339 timestamp within 7 days&gt;&quot;,
+    &quot;environment&quot;: {&quot;variables&quot;: {&quot;CI&quot;: &quot;true&quot;}},
     &quot;runs&quot;: {
       &quot;backend&quot;: {&quot;input&quot;: {&quot;task&quot;: &quot;Update the API.&quot;}},
       &quot;integrate&quot;: {&quot;needs&quot;: [&quot;backend&quot;], &quot;input&quot;: {&quot;task&quot;: &quot;Run release tests.&quot;}}
@@ -1103,6 +1104,15 @@ The JSON manifest is strict and self-contained:
 
 Every run uses the same source and profile. Agent bindings must not declare `GH_TOKEN`; only the Git
 delivery binding may declare it. `needs` gates readiness but does not pass output between runs.
+
+ENVIRONMENT
+The optional top-level `environment` defines a shared runtime environment for every run.
+Omit it to let the host select the repository&#39;s default environment. Use
+`&quot;environment&quot;: {}` to explicitly request an empty environment.
+
+The environment definition belongs at the stack level, not inside individual runs.
+Do not embed credentials in the manifest; use target connections for secrets.
+See docs/guides/runtime-environments.md for more information.
 
 DELIVERY
 `delivery` is required and selects how every run lands:

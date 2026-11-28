@@ -343,6 +343,18 @@ manifest's `delivery` is required; when it is still a placeholder, ask the user 
   merges; the stack is done when every pull request is open. The profile needs exactly one `pr@2`
   delivery node, the `software-change` default.
 
+A stack manifest may include a top-level `environment` definition
+shared by every run, for example:
+
+`"environment": {"variables": {"CI": "true"}}`
+
+Omitting `environment` lets the host select the repository's default
+environment. Using `"environment": {}` explicitly requests an empty
+environment. Do not place this field inside individual runs or embed
+credentials in manifests; use target connections for secrets.
+
+See `docs/guides/runtime-environments.md` for more information.
+
 Agent bindings in the profile must not declare `GH_TOKEN`. Validate, show the user the printed order
 for stacked pull requests, then submit with a stable key and follow it:
 
