@@ -464,3 +464,25 @@ fn prose_list(values: impl IntoIterator<Item = String>, conjunction: &str) -> St
         _ => format!("{}, {conjunction} {last}", values.join(", ")),
     }
 }
+#[test]
+fn stack_help_documents_shared_environment() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_zeroshot"))
+        .args(["stack", "--help"])
+        .output()
+        .expect("stack help should execute");
+
+    assert!(output.status.success(), "stack help command should succeed");
+
+    let help = String::from_utf8(output.stdout).expect("stack help should be valid UTF-8");
+
+    for expected in [
+        "ENVIRONMENT",
+        r#""environment": {"variables": {"CI": "true"}}"#,
+        "optional top-level `environment`",
+        "repository's default environment",
+        r#"`"environment": {}`"#,
+        "target connections for secrets",
+    ] {
+        assert!(help.contains(expected), "stack help is missing: {expected}");
+    }
+}

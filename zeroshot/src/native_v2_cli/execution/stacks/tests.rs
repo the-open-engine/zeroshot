@@ -423,3 +423,63 @@ fn cli_contract_manifest_validation_and_terminal_outcomes_are_closed() {
         );
     }
 }
+
+#[test]
+fn stack_manifest_environment_preserves_variants() {
+    let directory = tempfile::tempdir().assert_value();
+
+    let mut manifest = current_manifest("merge", json!({"build": {"input": {}}}));
+
+    // Omitting environment allows host-side default selection.
+    let path = write_manifest(directory.path(), &manifest);
+    let loaded = load_manifest(&path).assert_value();
+    assert!(loaded.environment.is_none());
+
+    // An empty object must remain an explicit environment.
+    manifest["environment"] = json!({});
+    write_manifest(directory.path(), &manifest);
+
+    let loaded = load_manifest(&path).assert_value();
+    assert!(loaded.environment.is_some());
+
+    // A populated environment must preserve its variables.
+    manifest["environment"] = json!({
+        "variables": {
+            "CI": "true"
+        }
+    });
+
+    write_manifest(directory.path(), &manifest);
+
+    let loaded = load_manifest(&path).assert_value();
+    let environment = loaded
+        .environment
+        .expect("explicit environment must be preserved");
+
+    let value = serde_json::to_value(environment).assert_value();
+
+    assert_eq!(value["variables"]["CI"], json!("true"));
+}
+
+#[test]
+fn stack_manifest_rejects_invalid_environment() {
+    let mut manifest = test_manifest_json();
+
+    // A string is not a valid environment definition.
+    manifest["environment"] = json!("invalid");
+
+    assert!(
+        serde_json::from_value::<StackManifest>(manifest.clone()).is_err(),
+        "invalid environment definition should be rejected"
+    );
+
+    // Environment definitions belong at the stack level,
+    // not inside individual runs.
+    manifest.as_object_mut().unwrap().remove("environment");
+    manifest["runs"]["build"]["environment"] = json!({});
+
+    assert!(
+        serde_json::from_value::<StackManifest>(manifest).is_err(),
+        "per-run environment should be rejected"
+    );
+}

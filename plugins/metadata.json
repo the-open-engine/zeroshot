@@ -1,6 +1,6 @@
 {
   "name": "zeroshot",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "marketplace": "the-open-engine",
   "displayName": "Zeroshot",
   "description": "Plan software changes, design workflows, and run verified work on Zeroshot Platform.",
