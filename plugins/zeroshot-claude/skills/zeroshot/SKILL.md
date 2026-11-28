@@ -353,7 +353,7 @@ environment. Using `"environment": {}` explicitly requests an empty
 environment. Do not place this field inside individual runs or embed
 credentials in manifests; use target connections for secrets.
 
-See `docs/guides/runtime-environments.md` for more information.
+See the [environment guide](https://zeroshot.sh/docs/current/guides/runtime-environments/) for more information.
 
 Agent bindings in the profile must not declare `GH_TOKEN`. Validate, show the user the printed order
 for stacked pull requests, then submit with a stable key and follow it:
